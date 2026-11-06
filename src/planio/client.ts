@@ -1,8 +1,7 @@
 /**
  * Client Planio (API REST Redmine) : PHASE 3, pas encore branché sur le pipeline.
  *
- * Le client de timelog (app/Planio/Client.php) ne couvre que l'export des temps passés ;
- * le support a besoin des tickets, de leur historique (journals) et de l'ajout de notes.
+ * Le support a besoin des tickets, de leur historique (journals) et de l'ajout de notes.
  * Auth : clé API perso (Mon compte > Clé d'accès API), header X-Redmine-API-Key.
  */
 

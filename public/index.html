@@ -924,6 +924,15 @@ function renderSettings() {
         <div class="preview" id="tpl-preview"></div>
       </section>
 
+      <section class="card-section">
+        <h2>Consignes des agents</h2>
+        <p class="desc">Ajoutées à la fin des prompts génériques, pour tous les projets : stacks utilisées, points à vérifier, ce qu'il ne faut pas remonter. Markdown accepté. Les consignes propres à un projet se règlent dans la section Projets, elles servent aussi à la review.</p>
+        <div class="grid2">
+          <label class="field"><span>Review des MR</span><textarea class="prose" style="min-height:280px" name="instructions.review">${esc(s.instructions.review)}</textarea></label>
+          <label class="field"><span>Agent dev</span><textarea class="prose" style="min-height:280px" name="instructions.dev">${esc(s.instructions.dev)}</textarea></label>
+        </div>
+      </section>
+
       <div class="save-bar"><button type="button" class="btn ghost" data-act="settings-reset">Valeurs par défaut</button><button type="submit" class="btn primary">Enregistrer les paramètres</button></div>
     </form>
 
@@ -972,6 +981,7 @@ function collectSettings() {
       techValidationLabels: lines(f["workflow.techValidationLabels"].value),
       labelOnStart: f["workflow.labelOnStart"].value.trim(),
     },
+    instructions: { review: f["instructions.review"].value, dev: f["instructions.dev"].value },
     templates: {
       branch: f["templates.branch"].value.trim(),
       commit: f["templates.commit"].value.trim(),
@@ -1037,7 +1047,7 @@ async function renderProjectForm() {
       <label class="field"><span>Branche de départ</span><input name="baseBranch" list="branch-list" value="${esc(p.baseBranch)}" placeholder="ex. develop"><small>La branche du ticket est créée depuis celle-ci.</small></label>
       <label class="field"><span>Branche cible de la MR</span><input name="targetBranch" list="branch-list" value="${esc(p.targetBranch)}" placeholder="ex. global"><small>Global, intermédiaire, master... selon le projet.</small></label>
       <label class="field"><span>Commandes autorisées</span><textarea name="allowedCommands" placeholder="docker compose exec -T app php artisan test">${esc(p.allowedCommands.join("\n"))}</textarea><small>Une commande par ligne (tests, lint). L'agent pourra y ajouter des arguments. Rien d'autre ne lui est permis.</small></label>
-      <label class="field"><span>Consignes propres au projet</span><textarea class="prose" name="instructions" placeholder="Stack, conventions, pièges connus...">${esc(p.instructions)}</textarea></label>
+      <label class="field"><span>Consignes propres au projet</span><textarea class="prose" name="instructions" placeholder="Stack et version, conventions, pièges connus...">${esc(p.instructions)}</textarea><small>Utilisées par l'agent dev et par la review des MR de ce projet.</small></label>
     </div>
     <datalist id="branch-list"></datalist>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">

@@ -10,14 +10,14 @@ Un dashboard local qui pilote Claude Code sur le travail GitLab quotidien :
 3. **Reviews** : faire la première passe de review des MR de mes collègues où je suis reviewer, et ne me remonter que ce qui mérite mon analyse.
 4. Plus tard : le support Planio (diagnostic, brouillon de réponse, brouillon d'issue).
 
-Outil **local** : il tourne dans la WSL de chaque utilisateur, avec son token GitLab et son abonnement Claude. Il n'est pas déployé et ne modifie pas timelog.
+Outil **local** : il tourne dans la WSL de chaque utilisateur, avec son token GitLab et son abonnement Claude. Il n'est pas déployé.
 
 ## Vue d'ensemble
 
 ```
                      ┌──────────────────────── review-agent (WSL, Node 24) ─────────────────────────┐
  GitLab API ◄─poll── │ triggers/gitlabPoller ─► reviews ─► file review ─► review/pipeline  (lecture) │
- (speedmedia)        │                                                                              │
+ (self-managed)     │                                                                              │
             ◄─────── │ onglet Tickets ─► « Traiter » ─► dev_tasks ─► file dev ─► dev/pipeline        │
                      │                                                                              │
                      │  review : worktree au sha de la MR ─► claude -p (Read/Grep/Glob) ─► décision │
@@ -63,14 +63,14 @@ Un collègue qui veut l'outil : `git clone`, `npm install`, `.env` avec son toke
 8. **Push** : `git push origin HEAD:refs/heads/<branche>`, sans `--force`, après une seconde vérification de la branche.
 9. **MR** : toujours en **Draft** (`ensureDraftTitle`, quel que soit le template), vers la branche cible du projet, assignée à l'utilisateur. La description reprend le template et le rapport de l'agent, et signale les fichiers sensibles modifiés (CI, Docker, dépendances).
 
-Le passage en Ready reste manuel. timelog bascule alors le ticket en « Validation technique ».
+Le passage en Ready reste manuel (selon le workflow de l'équipe, il peut faire passer le ticket en validation technique).
 
 Le worktree est **conservé** après la tâche : on peut reprendre la conversation avec `claude --resume <session>` depuis son dossier (commande affichée dans le dashboard), puis le nettoyer d'un clic.
 
 ## Review : déroulé
 
 1. **Détection** (`src/triggers/gitlabPoller.ts`) : toutes les `POLL_INTERVAL_SEC` secondes, le poller liste les MR ouvertes, hors draft, où l'utilisateur est reviewer, et dont il n'est pas l'auteur. Chaque couple (MR, sha de tête) n'est traité qu'une fois : un nouveau push crée une nouvelle review.
-2. **Contexte** (`src/review/context.ts`) : diffs filtrés (mêmes motifs que timelog), tickets liés, commits et statuts CI. Les textes rédigés par des humains sont balisés `<contenu_externe>`.
+2. **Contexte** (`src/review/context.ts`) : diffs filtrés (lockfiles, assets compilés, images, `.env`), tickets liés, commits et statuts CI. Les textes rédigés par des humains sont balisés `<contenu_externe>`.
 3. **Checkout** (`src/review/workspace.ts`) : `refs/merge-requests/<iid>/head`, puis un worktree jetable au sha exact.
 4. **Agent** (`src/review/engine.ts`) : `claude -p` en lecture seule, sortie contrainte par `--json-schema`.
 5. **Décision** (`src/review/decision.ts`) : c'est le **code** qui décide, pas le modèle. Une review n'est `auto_ok` qu'avec des suggestions uniquement et aucun garde-fou déclenché.
@@ -90,7 +90,7 @@ Le worktree est **conservé** après la tâche : on peut reprendre la conversati
 | `src/dev/*` | Agent dev : garde-fous, templates, contexte, moteur, orchestration |
 | `src/server/app.ts` | API JSON et service du dashboard |
 | `src/cli/` | `reviewOnce` (review manuelle par URL de MR) |
-| `prompts/` | Prompts système (review, dev) et consignes perso, relus à chaque exécution |
+| `prompts/` | Prompts système génériques (review, dev), relus à chaque exécution. Les consignes perso sont en base (réglages) |
 | `scripts/` | Tests réels de la CLI : `smoke-claude.sh` (review et isolation), `smoke-dev.ts` (agent dev) |
 
 ## Données
@@ -105,15 +105,11 @@ Tout se trouve dans `DATA_DIR` (par défaut `./data`, ignoré par git) :
 
 ## Choix structurants
 
-**Projet séparé de timelog.** Je ne peux pas pousser sur timelog, et timelog agit avec le compte bot « cloclo » alors que cet outil agit au nom de son utilisateur. Ce qui a été repris de timelog :
-- la logique et le prompt de review ;
-- les conventions de tickets liés ;
-- la convention de nommage des branches ;
-- l'endpoint `/diffs`.
+**Outil générique, configuré par utilisateur.** Il agit au nom de son utilisateur (son token, son abonnement). Rien de propre à une entreprise n'est écrit dans le code : URL et token dans le `.env`, labels, projets, conventions et consignes des agents dans les réglages du dashboard.
 
 **Pas de serveur MCP GitLab.** Un serveur officiel existe (`/api/v4/mcp`), mais il est en beta, réservé aux instances récentes et conditionné à Duo. Surtout, il élargirait ce que l'agent peut faire sur GitLab. Ici, l'agent ne parle jamais à GitLab : c'est l'outil qui lit les tickets, pousse et ouvre la MR, avec ses propres contrôles.
 
-**Polling plutôt que webhook.** La WSL n'est pas joignable depuis GitLab, et le webhook est déjà consommé par timelog.
+**Polling plutôt que webhook.** La WSL n'est pas joignable depuis GitLab, et le webhook projet peut déjà être utilisé par un autre outil.
 
 **CLI Claude Code + abonnement plutôt que SDK + clé API.** Usage perso : `claude -p` est l'usage headless documenté avec un abonnement. Le Claude Agent SDK exige une clé API pour un produit tiers. Le plafond de modèle est imposé dans le code. Un déploiement à l'équipe sur serveur passerait par le SDK et une clé entreprise (roadmap, item 25).
 

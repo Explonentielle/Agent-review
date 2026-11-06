@@ -32,12 +32,9 @@ export function cancelDevTask(taskId: number): boolean {
   return true;
 }
 
-async function loadDevSystemPrompt(project: ProjectSettings): Promise<string> {
-  const [base, perso] = await Promise.all([
-    readFile(path.join(PROJECT_ROOT, "prompts", "dev-system.md"), "utf8"),
-    readFile(path.join(PROJECT_ROOT, "prompts", "dev-instructions-perso.md"), "utf8").catch(() => ""),
-  ]);
-  const parts = [base];
+/** Prompt système = règles génériques (prompts/dev-system.md) + consignes réglées dans le dashboard. */
+async function loadDevSystemPrompt(perso: string, project: ProjectSettings): Promise<string> {
+  const parts = [await readFile(path.join(PROJECT_ROOT, "prompts", "dev-system.md"), "utf8")];
   if (perso.trim()) parts.push(`# Consignes générales du développeur\n\n${perso}`);
   if (project.instructions.trim()) parts.push(`# Consignes propres au projet ${project.path}\n\n${project.instructions}`);
   parts.push(
@@ -51,7 +48,7 @@ async function loadDevSystemPrompt(project: ProjectSettings): Promise<string> {
 /**
  * Traite un ticket de bout en bout :
  * branche depuis la base → agent → contrôles → commit → push de CETTE branche uniquement → MR Draft.
- * Le passage en Ready (et donc en « Validation technique » côté timelog) reste manuel.
+ * Le passage en Ready reste manuel.
  */
 export async function runDevTask(taskId: number, deps: DevDeps): Promise<void> {
   const { gitlab, tasks, workspace } = deps;
@@ -102,7 +99,7 @@ export async function runDevTask(taskId: number, deps: DevDeps): Promise<void> {
     step("Agent lancé");
     const out = await runDevAgent({
       cwd: worktree,
-      systemPrompt: await loadDevSystemPrompt(project),
+      systemPrompt: await loadDevSystemPrompt(settings.instructions.dev, project),
       prompt: buildDevPrompt({
         project: gproject,
         issue,

@@ -1,6 +1,6 @@
 import type { Finding, ReviewResult } from "./schema.js";
 
-/** Marqueur propre à cet outil : distinct de celui de "cloclo" (timelog) pour ne pas se mélanger. */
+/** Marqueur propre à cet outil, pour reconnaître ses propres commentaires parmi ceux d'autres bots. */
 export const REVIEW_MARKER = "<!-- review-agent -->";
 
 const SEVERITY_LABEL: Record<Finding["severity"], string> = {
@@ -17,7 +17,7 @@ const VERDICT_LABEL: Record<ReviewResult["verdict"], string> = {
 
 const SEVERITY_ORDER: Finding["severity"][] = ["blocking", "important", "suggestion"];
 
-/** Commentaire Markdown posté sur la MR (même structure que les reviews de timelog). */
+/** Commentaire Markdown posté sur la MR (résumé, questions, points relevés, points positifs, verdict). */
 export function formatReviewComment(result: ReviewResult, meta: { model: string; sha: string }): string {
   const lines: string[] = [REVIEW_MARKER, `> 🤖 Review assistée par IA (\`${meta.model}\`), commit \`${meta.sha.slice(0, 8)}\``, ""];
 

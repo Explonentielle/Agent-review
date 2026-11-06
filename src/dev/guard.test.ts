@@ -58,7 +58,7 @@ describe("isSecretFile / isSensitiveFile", () => {
 });
 
 describe("templates", () => {
-  it("slugifie comme les branches timelog", () => {
+  it("slugifie les titres pour les noms de branche", () => {
     expect(slugify("Amélioration de la review IA (3)")).toBe("amelioration-de-la-review-ia-3");
     expect(slugify("  --Été 2026 : ça marche !-- ")).toBe("ete-2026-ca-marche");
     expect(slugify("a".repeat(150)).length).toBe(100);

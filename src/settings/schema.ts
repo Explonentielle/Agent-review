@@ -38,6 +38,14 @@ export const SettingsSchema = z.object({
     /** Label posé sur le ticket quand l'agent démarre (vide = ne rien changer). */
     labelOnStart: z.string().trim(),
   }),
+  /**
+   * Consignes perso ajoutées à la fin des prompts système (prompts/*-system.md, génériques) :
+   * stack, points d'attention, ce qu'il ne faut pas remonter. Propres à chaque utilisateur.
+   */
+  instructions: z.object({
+    review: z.string(),
+    dev: z.string(),
+  }),
   /** Variables : {iid} {slug} {title} {summary} */
   templates: z.object({
     branch: z.string().trim().min(1),
@@ -61,8 +69,34 @@ export const DEFAULT_SETTINGS: Settings = {
   workflow: {
     todoLabels: [],
     inProgressLabels: [],
-    techValidationLabels: ["Statut::Validation technique"],
+    techValidationLabels: [],
     labelOnStart: "",
+  },
+  instructions: {
+    review: [
+      "## Stack et conventions",
+      "",
+      "- Identifie la stack et sa version (fichiers de dépendances, structure du dépôt) avant de juger. Respecte les conventions déjà en place dans le dépôt plutôt que des « bonnes pratiques » génériques.",
+      "",
+      "## Points d'attention systématiques",
+      "",
+      "- **Performance** : requêtes BDD dans des boucles (N+1), index manquants sur une colonne filtrée, gros volumes chargés en mémoire.",
+      "- **Migrations** : réversibilité, impact sur les tables volumineuses, valeur par défaut des colonnes NOT NULL ajoutées.",
+      "- **Sécurité** : secrets en dur, SQL construit par concaténation, validation des entrées, contrôle d'accès sur les nouvelles routes.",
+      "",
+      "## Ce que je ne veux PAS voir remonter",
+      "",
+      "- Remarques de formatage déjà couvertes par le linter de la CI.",
+      "- Demandes de documentation sur du code auto-explicatif.",
+      "- Refactoring ou modernisation hors du périmètre du ticket.",
+    ].join("\n"),
+    dev: [
+      "- Identifie la stack et sa version avant de coder, et n'utilise que ce que cette version supporte.",
+      "- Imite le style du code voisin (nommage, structure, façon d'écrire les requêtes) et respecte la config du linter du dépôt.",
+      "- Pas de refactoring ni de modernisation hors du ticket.",
+      "- Requêtes BDD : pas de requête dans une boucle, paramètres liés plutôt que concaténation.",
+      "- Migrations : réversibles quand le projet en a.",
+    ].join("\n"),
   },
   templates: {
     branch: "feature/{iid}-{slug}",
@@ -83,7 +117,7 @@ export const ProjectSettingsSchema = z.object({
   targetBranch: z.string().trim(),
   /** Commandes que l'agent a le droit de lancer (tests, lint). Une par entrée. */
   allowedCommands: z.array(z.string().trim().min(1)),
-  /** Consignes de dev propres au projet. */
+  /** Consignes propres au projet (stack, conventions, pièges), ajoutées aux prompts de dev et de review. */
   instructions: z.string(),
 });
 

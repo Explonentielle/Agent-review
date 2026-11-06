@@ -13,9 +13,9 @@ export interface PollerDeps {
 /**
  * Détecte les MR à reviewer par polling de l'API GitLab.
  *
- * Pourquoi pas un webhook : ton PC/WSL n'est pas joignable depuis gitlab.speedmedia.fr, et le
- * webhook projet est déjà consommé par timelog. Le passage Draft → Ready (qui met le ticket en
- * "Statut::Validation technique" côté timelog) fait apparaître la MR ici au cycle suivant.
+ * Pourquoi pas un webhook : ton PC/WSL n'est pas joignable depuis l'instance GitLab, et le
+ * webhook projet peut déjà être utilisé par un autre outil. Le passage Draft → Ready fait
+ * apparaître la MR ici au cycle suivant.
  *
  * Chaque couple (MR, commit de tête) n'est reviewé qu'une fois : un nouveau push = nouvelle review.
  */

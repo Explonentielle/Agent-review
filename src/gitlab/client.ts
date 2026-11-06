@@ -25,7 +25,7 @@ export class GitlabError extends Error {
 
 /**
  * Client minimal de l'API GitLab v4 (fetch natif, pas de dépendance).
- * Méthodes portées depuis timelog (app/Gitlab/Client.php) au fil des besoins.
+ * Méthodes ajoutées au fil des besoins.
  */
 export class GitlabClient {
   constructor(
@@ -45,7 +45,7 @@ export class GitlabClient {
     return this.request("GET", `/projects/${projectId}`);
   }
 
-  /** ex. "all/speedmedia/timelog" */
+  /** ex. "groupe/sous-groupe/projet" */
   getProjectByPath(projectPath: string): Promise<GitlabProject> {
     return this.request("GET", `/projects/${encodeURIComponent(projectPath)}`);
   }
@@ -54,7 +54,7 @@ export class GitlabClient {
     return this.request("GET", `/projects/${projectId}/merge_requests/${mrIid}`);
   }
 
-  /** Remplace l'endpoint /changes déprécié (cf. timelog #160). */
+  /** Remplace l'endpoint /changes déprécié (dépréciation GitLab). */
   getMergeRequestDiffs(projectId: number, mrIid: number): Promise<GitlabDiff[]> {
     return this.getAll(`/projects/${projectId}/merge_requests/${mrIid}/diffs`);
   }

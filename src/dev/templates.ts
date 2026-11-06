@@ -1,4 +1,4 @@
-/** "Amélioration de la review IA (3)" → "amelioration-de-la-review-ia-3" (convention des branches timelog). */
+/** "Amélioration de la review IA (3)" → "amelioration-de-la-review-ia-3" (convention de nommage de branche). */
 export function slugify(text: string, maxLength = 100): string {
   return text
     .normalize("NFD")

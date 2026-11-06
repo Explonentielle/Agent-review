@@ -27,7 +27,7 @@ export interface GitlabMergeRequest {
   target_branch: string;
   sha: string;
   web_url: string;
-  /** ex. full = "all/speedmedia/timelog!42" */
+  /** ex. full = "groupe/projet!42" */
   references: { full: string };
   author: GitlabUser;
   reviewers?: GitlabUser[];
@@ -65,7 +65,7 @@ export interface GitlabIssue {
   web_url: string;
   state?: "opened" | "closed";
   updated_at?: string;
-  /** ex. full = "all/speedmedia/timelog#163" */
+  /** ex. full = "groupe/projet#163" */
   references?: { full: string };
   author?: GitlabUser;
   milestone?: { title: string } | null;

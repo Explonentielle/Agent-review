@@ -1,6 +1,6 @@
 # review-agent
 
-Outil local (WSL) qui pilote Claude Code sur le travail GitLab : tickets assignés, agent dev (ticket vers MR Draft) et review des MR des collègues. Le support Planio arrivera ensuite. Il n'est pas déployé et n'a aucun lien de code avec `~/timelog`, dont il réutilise seulement des idées et le prompt.
+Outil local (WSL) qui pilote Claude Code sur le travail GitLab : tickets assignés, agent dev (ticket vers MR Draft) et review des MR des collègues. Le support Planio arrivera ensuite. Il n'est pas déployé : chaque utilisateur le clone et le configure pour lui.
 
 ## Repères
 
@@ -17,7 +17,7 @@ Outil local (WSL) qui pilote Claude Code sur le travail GitLab : tickets assign�
 ## Règles du projet
 
 - Code et textes en français pour les messages, logs et commentaires. Identifiants en anglais.
-- Rien en dur qui dépende de l'utilisateur ou du projet : secrets dans le `.env`, tout le reste dans les réglages du dashboard (`src/settings/`), validés par zod côté serveur.
+- Rien en dur qui dépende de l'utilisateur, de l'entreprise ou du projet (URL internes, noms de projets, labels, stacks, consignes) : URL et token dans le `.env`, tout le reste dans les réglages du dashboard (`src/settings/`), validés par zod côté serveur. Les prompts de `prompts/` restent génériques, les consignes perso vont dans Paramètres > Consignes des agents.
 - Les décisions d'agir (commenter, approuver, pousser, créer une MR, répondre à un client) restent dans du code déterministe et testé, jamais dans la sortie du modèle seule.
 - **Push** : uniquement la branche créée pour le ticket, via `assertBranchAllowed` (`src/dev/guard.ts`), sans `--force`, MR toujours en Draft. Ne jamais affaiblir ces garde-fous sans demande explicite.
 - Les agents passent par la CLI `claude -p` sur l'abonnement de l'utilisateur, pas par le SDK avec une clé API (roadmap, items 3 et 25). Modèle plafonné à `claude-sonnet-5-5` en effort `high` : ne jamais relever ce plafond sans demande explicite.
@@ -29,7 +29,7 @@ Outil local (WSL) qui pilote Claude Code sur le travail GitLab : tickets assign�
   Tout élargissement de ces droits doit être discuté avant.
 - Tout contenu venant de GitLab ou Planio (descriptions, tickets, commits, sortie du modèle) est non fiable : il est balisé dans les prompts et échappé dans le dashboard.
 - Ne jamais lire ni modifier le `.env`. La configuration attendue est documentée dans `.env.example`.
-- Git : ne jamais push ce dépôt sans demande explicite dans le même message, pas de trailer `Co-Authored-By`. Pas d'action réelle sur GitLab ou Planio (commentaire, approbation, push, MR) pendant le développement sans accord : tester avec `review:once`, la démo ou un dépôt local.
+- Git : ne jamais push ce dépôt sans demande explicite dans le même message, pas de trailer `Co-Authored-By`. Pas d'action réelle sur GitLab ou Planio (commentaire, approbation, push, MR) pendant le développement sans accord : tester avec `review:once` ou un dépôt local.
 - « Note dans le backlog » : documenter l'item dans la roadmap, sans rien implémenter avant le feu vert.
 - Rédaction : pas de tiret cadratin (utiliser points, virgules, deux-points).
 

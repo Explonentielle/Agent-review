@@ -1,6 +1,6 @@
 import type { GitlabCommit, GitlabCommitStatus, GitlabDiff, GitlabIssue, GitlabMergeRequest, GitlabProject } from "../gitlab/types.js";
 
-/** Fichiers jamais envoyés en review (repris de timelog ReviewService::IGNORED_PATTERNS). */
+/** Fichiers jamais envoyés en review (lockfiles, assets compilés, binaires, secrets). */
 export const IGNORED_PATTERNS: RegExp[] = [
   /composer\.lock$/,
   /package-lock\.json$/,
@@ -40,7 +40,7 @@ export function countChangedLines(diffs: GitlabDiff[]): number {
 
 /**
  * Tickets liés à une MR : `#123` dans le titre, ou dans la description
- * (conventions de timelog : titre "#163 - ...", description "Related to #123" / " #123").
+ * (conventions courantes : titre "#163 - ...", description "Related to #123" / " #123").
  */
 export function findLinkedIssueIids(mr: Pick<GitlabMergeRequest, "title" | "description">): number[] {
   const ids = new Set<number>();
