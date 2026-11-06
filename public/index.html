@@ -1,0 +1,1168 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review Agent</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f46e5'/><path d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #f4f5f8; --surface: #ffffff; --surface-2: #f7f8fa; --hover: #f0f2f6;
+    --text: #151922; --text-2: #4b5363; --muted: #7a8293; --border: #e4e7ec; --border-strong: #d3d8e0;
+    --accent: #4f46e5; --accent-hover: #4338ca; --accent-soft: #eef0ff; --accent-text: #3730a3;
+    --red: #d92d20; --red-soft: #fef1f0; --red-border: #f8c9c4;
+    --orange: #dc6803; --orange-soft: #fff5e8; --orange-border: #f9d9b0;
+    --yellow: #a37b00; --yellow-soft: #fdf8e3; --yellow-border: #efe0a4;
+    --green: #079455; --green-soft: #ecfbf3; --green-border: #b5e8cc;
+    --gray-soft: #f1f3f6;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .05);
+    --shadow-lg: 0 12px 32px rgba(16, 24, 40, .14);
+    --radius: 10px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a21; --surface-2: #1c2029; --hover: #222733;
+      --text: #e8eaf0; --text-2: #b4bac7; --muted: #868d9c; --border: #272c37; --border-strong: #353b48;
+      --accent: #7c74ff; --accent-hover: #918aff; --accent-soft: #23233f; --accent-text: #c4c0ff;
+      --red: #ff6b5e; --red-soft: #2c1717; --red-border: #5a2a25;
+      --orange: #ff9f45; --orange-soft: #2c2014; --orange-border: #5a3d1e;
+      --yellow: #e8c547; --yellow-soft: #29250f; --yellow-border: #554a1c;
+      --green: #3ccf8e; --green-soft: #12261d; --green-border: #1f4d37;
+      --gray-soft: #222733;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+      --shadow-lg: 0 12px 32px rgba(0, 0, 0, .5);
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+  code, .mono { font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace; font-size: 12.5px; }
+  :not(pre) > code { background: var(--gray-soft); padding: 1px 5px; border-radius: 4px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  /* ---------- En-tête ---------- */
+  header { height: 56px; display: flex; align-items: center; gap: 20px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; white-space: nowrap; }
+  .tabs { display: flex; gap: 2px; height: 100%; overflow-x: auto; }
+  .tab { display: flex; align-items: center; gap: 7px; padding: 0 12px; border: 0; background: none; color: var(--text-2); font-weight: 500; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
+  .badge { min-width: 18px; height: 18px; padding: 0 6px; border-radius: 999px; font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; background: var(--gray-soft); color: var(--text-2); }
+  .badge.hot { background: var(--red); color: #fff; }
+  .badge.live { background: var(--accent); color: #fff; }
+  .header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+  .chip b { color: var(--text); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
+  .mode-comment .dot { background: var(--orange); }
+  .mode-auto .dot { background: var(--green); }
+
+  /* ---------- Vues ---------- */
+  .view { height: calc(100vh - 56px); overflow: hidden; }
+  .split { display: grid; grid-template-columns: 400px minmax(0, 1fr); height: 100%; }
+  .pane { overflow-y: auto; }
+  .list-pane { border-right: 1px solid var(--border); background: var(--surface); }
+  .list-head { padding: 14px 16px 10px; position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 1; }
+  .list-head .row { display: flex; align-items: baseline; justify-content: space-between; }
+  .list-head h2 { margin: 0; font-size: 15px; }
+  .list-head .sub { color: var(--muted); font-size: 12px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .fchip { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; display: inline-flex; gap: 6px; align-items: center; }
+  .fchip:hover { background: var(--hover); }
+  .fchip.active { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); font-weight: 600; }
+  .fchip .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .fchip .n.hot { background: var(--red); color: #fff; border-radius: 999px; padding: 0 6px; font-weight: 700; }
+
+  .card { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; }
+  .card:hover { background: var(--hover); }
+  .card.selected { background: var(--accent-soft); border-left-color: var(--accent); }
+  .card-top { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
+  .card-top .proj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card-top .time { margin-left: auto; white-space: nowrap; }
+  .card-title { font-weight: 600; margin: 3px 0 7px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-bottom { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
+  .card-bottom .grow { margin-right: auto; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+  .pill { display: inline-flex; align-items: center; gap: 4px; height: 21px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
+  .pill.red { background: var(--red-soft); color: var(--red); border-color: var(--red-border); }
+  .pill.orange { background: var(--orange-soft); color: var(--orange); border-color: var(--orange-border); }
+  .pill.yellow { background: var(--yellow-soft); color: var(--yellow); border-color: var(--yellow-border); }
+  .pill.green { background: var(--green-soft); color: var(--green); border-color: var(--green-border); }
+  .pill.gray { background: var(--gray-soft); color: var(--text-2); border-color: var(--border); }
+  .pill.accent { background: var(--accent-soft); color: var(--accent-text); }
+  .pill.label { background: var(--surface-2); color: var(--text-2); border-color: var(--border); font-weight: 500; }
+  .sev-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+
+  /* ---------- Détail ---------- */
+  .detail-pane { display: flex; flex-direction: column; }
+  .detail { padding: 24px 32px 32px; max-width: 940px; width: 100%; flex: 1; }
+  .empty { height: 100%; min-height: 200px; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 40px; }
+  .empty svg { opacity: .5; margin-bottom: 10px; }
+  .crumbs { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+  .detail h1 { font-size: 21px; line-height: 1.3; margin: 6px 0 10px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 13px; }
+  .meta span { white-space: nowrap; }
+  .btn-link { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface); font-weight: 500; white-space: nowrap; }
+  .btn-link:hover { background: var(--hover); text-decoration: none; }
+  .crumbs .btn-link { margin-left: auto; }
+
+  .callout { margin: 20px 0; border-radius: var(--radius); padding: 14px 16px; border: 1px solid; display: grid; grid-template-columns: 22px 1fr; gap: 4px 10px; align-items: start; }
+  .callout h3 { margin: 0; font-size: 14.5px; }
+  .callout > :not(svg):not(h3):not(.pulse) { grid-column: 2; }
+  .callout p, .callout ul { margin: 2px 0 0; color: var(--text-2); }
+  .callout ul { padding-left: 18px; }
+  .callout pre { margin: 6px 0 0; white-space: pre-wrap; font-size: 12.5px; color: var(--text-2); }
+  .callout .actions-inline { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .callout.warn { background: var(--orange-soft); border-color: var(--orange-border); }
+  .callout.warn h3, .callout.warn > svg { color: var(--orange); }
+  .callout.ok { background: var(--green-soft); border-color: var(--green-border); }
+  .callout.ok h3, .callout.ok > svg { color: var(--green); }
+  .callout.err { background: var(--red-soft); border-color: var(--red-border); }
+  .callout.err h3, .callout.err > svg { color: var(--red); }
+  .callout.info { background: var(--surface-2); border-color: var(--border); }
+  .callout.live { background: var(--accent-soft); border-color: transparent; }
+  .callout.live h3 { color: var(--accent-text); }
+  .callout.live .pulse { color: var(--accent); margin: 6px 0 0 6px; }
+
+  section.block { margin-top: 24px; }
+  section.block > h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+  .panel p { margin: 0; }
+  .panel ul { margin: 0; padding-left: 18px; }
+  .panel li + li { margin-top: 4px; }
+
+  .finding { background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+  .finding + .finding { margin-top: 10px; }
+  .finding.blocking { border-left-color: var(--red); }
+  .finding.important { border-left-color: var(--orange); }
+  .finding.suggestion { border-left-color: var(--yellow); }
+  .finding-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .finding-head h3 { margin: 0; font-size: 14.5px; flex-basis: 100%; }
+  .loc { display: inline-block; margin: 8px 0 6px; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); word-break: break-all; }
+  .finding p { margin: 4px 0 0; color: var(--text-2); }
+  .fix { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--green-soft); border: 1px solid var(--green-border); }
+  .fix b { color: var(--green); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 2px; }
+  .positives li::marker { content: "✓  "; color: var(--green); font-weight: 700; }
+
+  .cmd { display: flex; gap: 8px; align-items: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+  .cmd code { flex: 1; background: none; padding: 0; word-break: break-all; }
+
+  .journal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); max-height: 420px; overflow-y: auto; padding: 6px 0; box-shadow: var(--shadow); }
+  .ev { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; padding: 5px 14px; align-items: baseline; }
+  .ev .ic { text-align: center; color: var(--muted); }
+  .ev .t { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .ev.step { font-weight: 600; }
+  .ev.step .ic { color: var(--accent); }
+  .ev.text .body { color: var(--text-2); white-space: pre-wrap; }
+  .ev.tool .body { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; color: var(--text-2); word-break: break-all; }
+  .ev.error { color: var(--red); }
+  .ev.error .ic { color: var(--red); }
+
+  /* ---------- Barre d'actions ---------- */
+  .actionbar { position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 12px 32px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .btn { height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .btn:hover { background: var(--hover); text-decoration: none; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-hover); }
+  .btn.danger { color: var(--red); border-color: var(--red-border); }
+  .btn.ghost { border-color: transparent; color: var(--text-2); }
+  .btn.sm { height: 28px; padding: 0 10px; font-size: 12.5px; }
+  .btn:disabled { opacity: .55; cursor: progress; }
+  .spacer { flex: 1; }
+  .feedback { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  .btn.vote.on-yes { background: var(--green-soft); border-color: var(--green-border); color: var(--green); }
+  .btn.vote.on-no { background: var(--red-soft); border-color: var(--red-border); color: var(--red); }
+
+  /* ---------- Tickets ---------- */
+  .page { height: 100%; overflow-y: auto; }
+  .page-inner { padding: 20px 24px 40px; }
+  .page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .page-head h1 { margin: 0; font-size: 20px; }
+  .page-head .sub { color: var(--muted); font-size: 13px; }
+  .search { height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); min-width: 220px; font: inherit; }
+  .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; align-items: start; }
+  .col { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px; }
+  .col-head { display: flex; align-items: center; gap: 8px; padding: 4px 6px 10px; font-weight: 600; }
+  .col-head .badge { margin-left: auto; }
+  .ticket { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); }
+  .ticket + .ticket { margin-top: 8px; }
+  .ticket .card-title a { color: var(--text); }
+  .ticket .labels { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+  .ticket-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 10px; }
+  .muted-link { font-size: 12.5px; color: var(--muted); background: none; border: 0; padding: 0; text-decoration: underline; }
+
+  /* ---------- Paramètres ---------- */
+  .settings { max-width: 880px; margin: 0 auto; }
+  .card-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 16px; }
+  .card-section > h2 { margin: 0 0 4px; font-size: 16px; }
+  .card-section > .desc { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field > span { font-weight: 600; font-size: 13px; }
+  .field small { color: var(--muted); font-size: 12px; }
+  .field input, .field select, .field textarea { height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; }
+  .field textarea { height: auto; min-height: 84px; padding: 8px 10px; resize: vertical; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
+  .field textarea.prose { font-family: inherit; font-size: 14px; }
+  .sub-title { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin: 4px 0 10px; }
+  .radios { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .radio { border: 1px solid var(--border-strong); border-radius: 10px; padding: 12px; cursor: pointer; display: flex; gap: 10px; align-items: flex-start; }
+  .radio:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .radio input { margin-top: 3px; accent-color: var(--accent); }
+  .radio b { display: block; }
+  .radio small { color: var(--text-2); }
+  .preview { background: var(--surface-2); border: 1px dashed var(--border-strong); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 14px; }
+  .preview div + div { margin-top: 4px; }
+  .preview .k { color: var(--muted); display: inline-block; min-width: 120px; }
+  .save-bar { position: sticky; bottom: 0; padding: 12px 0; background: linear-gradient(transparent, var(--bg) 30%); display: flex; justify-content: flex-end; gap: 8px; }
+  .project-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .project-row:first-of-type { border-top: 0; }
+  .project-row .grow { flex: 1; min-width: 200px; }
+  .project-row .grow div:last-child { color: var(--muted); font-size: 12.5px; }
+  .results { border: 1px solid var(--border); border-radius: 8px; max-height: 220px; overflow-y: auto; margin-top: 6px; }
+  .results button { display: block; width: 100%; text-align: left; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--border); background: var(--surface); color: var(--text); }
+  .results button:hover { background: var(--hover); }
+  .check { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+  .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .tags button { border: 1px dashed var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+  .tags button:hover { border-style: solid; color: var(--accent-text); }
+
+  /* ---------- Dialogue + toasts ---------- */
+  dialog { border: 1px solid var(--border); border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px)); background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
+  dialog::backdrop { background: rgba(10, 12, 18, .45); }
+  .dlg-body { padding: 20px 22px 8px; }
+  .dlg-body h3 { margin: 0 0 8px; font-size: 16px; }
+  .dlg-body .txt { color: var(--text-2); }
+  .dlg-body .txt p { margin: 0 0 8px; }
+  .dlg-body textarea { width: 100%; min-height: 90px; margin-top: 8px; padding: 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; resize: vertical; }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px 18px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  .note { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+  .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: calc(100vw - 40px); }
+  .toast { padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); box-shadow: var(--shadow-lg); max-width: 440px; animation: slide .18s ease-out; }
+  .toast.error { background: var(--red); color: #fff; }
+  @keyframes slide { from { transform: translateY(8px); opacity: 0; } }
+
+  .back { display: none; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 1100px) { .split { grid-template-columns: 330px minmax(0, 1fr); } .header-right .opt { display: none; } }
+  @media (max-width: 760px) {
+    header { padding: 0 12px; gap: 10px; }
+    .brand span { display: none; }
+    .header-right { display: none; }
+    .view { height: auto; overflow: visible; }
+    .split { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .pane { overflow: visible; }
+    .list-pane { border-right: 0; }
+    .split.has-selection .list-pane { display: none; }
+    .split:not(.has-selection) .detail-pane { display: none; }
+    .back { display: inline-flex; margin-bottom: 12px; }
+    .detail { padding: 16px; }
+    .actionbar { padding: 12px 16px; }
+    .page-inner { padding: 16px; }
+    .crumbs .btn-link { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M9 16.5l4.5 4.5L23 11.5" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>Review Agent</span>
+  </div>
+  <nav class="tabs" aria-label="Sections">
+    <button class="tab" data-tab="tickets">Tickets</button>
+    <button class="tab" data-tab="dev">Agent dev <span class="badge" id="badge-dev" hidden></span></button>
+    <button class="tab" data-tab="reviews">Reviews <span class="badge" id="badge-reviews" hidden></span></button>
+    <button class="tab" data-tab="settings">Paramètres</button>
+  </nav>
+  <div class="header-right">
+    <span class="chip" id="mode"><span class="dot"></span><span>…</span></span>
+    <span class="chip opt" id="user"></span>
+  </div>
+</header>
+
+<div class="view" id="view-tickets" hidden></div>
+<div class="view" id="view-dev" hidden>
+  <div class="split" id="dev-split">
+    <div class="pane list-pane">
+      <div class="list-head"><div class="row"><h2>Tâches de l'agent</h2><span class="sub" id="dev-count"></span></div></div>
+      <div id="dev-list"></div>
+    </div>
+    <main class="pane detail-pane" id="dev-detail"></main>
+  </div>
+</div>
+<div class="view" id="view-reviews" hidden>
+  <div class="split" id="rev-split">
+    <div class="pane list-pane">
+      <div class="list-head">
+        <div class="row"><h2 id="rev-title">Reviews</h2><span class="sub" id="rev-count"></span></div>
+        <div class="chips" id="rev-filters"></div>
+      </div>
+      <div id="rev-list"></div>
+    </div>
+    <main class="pane detail-pane" id="rev-detail"></main>
+  </div>
+</div>
+<div class="view" id="view-settings" hidden><div class="page"><div class="page-inner"><div class="settings" id="settings"></div></div></div></div>
+
+<dialog id="dialog">
+  <form method="dialog">
+    <div class="dlg-body">
+      <h3 id="dlg-title"></h3>
+      <div class="txt" id="dlg-text"></div>
+      <textarea id="dlg-input" hidden></textarea>
+    </div>
+    <div class="dlg-actions">
+      <button class="btn ghost" value="cancel">Annuler</button>
+      <button class="btn primary" value="ok" id="dlg-ok">Confirmer</button>
+    </div>
+  </form>
+</dialog>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+/* =====================================================================
+   Constantes
+   ===================================================================== */
+const REVIEW_STATUS = {
+  needs_human: { label: "À analyser", pill: "orange" },
+  auto_ok: { label: "Mineur / OK", pill: "green" },
+  queued: { label: "En file", pill: "gray" },
+  running: { label: "En cours", pill: "accent" },
+  error: { label: "Erreur", pill: "red" },
+  published: { label: "Commentée", pill: "gray" },
+  approved: { label: "Approuvée", pill: "green" },
+  dismissed: { label: "Ignorée", pill: "gray" },
+};
+const REVIEW_FILTERS = ["needs_human", "auto_ok", "running", "queued", "error", "published", "approved", "dismissed", ""];
+const TASK_STATUS = {
+  queued: { label: "En attente", pill: "gray" },
+  running: { label: "En cours", pill: "accent" },
+  mr_created: { label: "MR créée", pill: "green" },
+  blocked: { label: "Bloquée", pill: "orange" },
+  error: { label: "Erreur", pill: "red" },
+  cancelled: { label: "Arrêtée", pill: "gray" },
+};
+const COLUMNS = [
+  ["todo", "À traiter"],
+  ["inProgress", "En cours"],
+  ["techValidation", "Validation technique"],
+  ["other", "Autres"],
+];
+const SEV = { blocking: { label: "Bloquant", pill: "red" }, important: { label: "Important", pill: "orange" }, suggestion: { label: "Suggestion", pill: "yellow" } };
+const VERDICT = { approve: { label: "Approve", pill: "green" }, approve_with_reservations: { label: "Approve avec réserves", pill: "orange" }, request_changes: { label: "Request changes", pill: "red" } };
+const MODE = {
+  shadow: ["Mode ombre", "Rien n'est posté sur GitLab sans ton clic."],
+  comment: ["Mode commentaire", "Les reviews « mineur / OK » sont commentées automatiquement, jamais approuvées."],
+  auto: ["Mode auto", "Les reviews « mineur / OK » sont commentées ET approuvées automatiquement."],
+};
+const EFFORT_LABEL = { low: "Faible", medium: "Moyen", high: "Élevé (plafond)" };
+const ICON = {
+  warn: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  ok: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/></svg>',
+  err: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
+  info: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+  ext: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+  doc: '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6M9 16h6M10 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6h-4z"/><path d="M14 3v6h6"/></svg>',
+};
+
+/* =====================================================================
+   Utilitaires
+   ===================================================================== */
+// Tout ce qui vient de GitLab ou du modèle est échappé avant affichage
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Échappe puis rend le `code` inline (sûr : appliqué sur du texte déjà échappé)
+const rich = (s) => esc(s).replace(/`([^`\n]+)`/g, "<code>$1</code>");
+const pill = (cls, text) => `<span class="pill ${cls}">${text}</span>`;
+const slugify = (t, max = 50) => String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, max).replace(/-+$/g, "");
+const renderTpl = (tpl, v) => tpl.replace(/\{(\w+)\}/g, (m, k) => ({ iid: String(v.iid), title: v.title, slug: slugify(v.title), summary: v.summary ?? v.title })[k] ?? m);
+const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
+
+function ago(date) {
+  if (!date) return "";
+  const d = new Date(/Z|[+-]\d\d:?\d\d$/.test(date) ? date : String(date).replace(" ", "T") + "Z");
+  const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (s < 60) return "à l'instant";
+  if (s < 3600) return `il y a ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `il y a ${Math.floor(s / 3600)} h`;
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json", "x-review-agent": "1" }, body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function toast(message, isError = false) {
+  const el = document.createElement("div");
+  el.className = "toast" + (isError ? " error" : "");
+  el.textContent = message;
+  document.getElementById("toasts").append(el);
+  setTimeout(() => el.remove(), isError ? 8000 : 3500);
+}
+
+/** Dialogue de confirmation. `html` doit être construit avec esc() pour tout contenu externe. */
+function ask({ title, html = "", okLabel = "Confirmer", input = false, placeholder = "" }) {
+  const dlg = document.getElementById("dialog");
+  document.getElementById("dlg-title").textContent = title;
+  document.getElementById("dlg-text").innerHTML = html;
+  document.getElementById("dlg-ok").textContent = okLabel;
+  const area = document.getElementById("dlg-input");
+  area.hidden = !input;
+  area.value = "";
+  area.placeholder = placeholder;
+  dlg.showModal();
+  if (input) area.focus();
+  return new Promise((resolve) => {
+    dlg.addEventListener("close", () => resolve(dlg.returnValue === "ok" ? { value: area.value.trim() } : null), { once: true });
+  });
+}
+
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); toast("Copié."); } catch { toast("Copie impossible : sélectionne le texte à la main.", true); }
+}
+
+/* =====================================================================
+   Navigation
+   ===================================================================== */
+const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewId: null, taskId: null, ticketSearch: "", issues: null, issuesAt: null };
+
+function route() {
+  const [tab = "tickets", id] = location.hash.replace(/^#/, "").split("/");
+  state.tab = ["tickets", "dev", "reviews", "settings"].includes(tab) ? tab : "tickets";
+  for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t.dataset.tab === state.tab);
+  for (const v of document.querySelectorAll(".view")) v.hidden = v.id !== `view-${state.tab}`;
+  if (state.tab === "tickets") loadTickets(false);
+  if (state.tab === "dev") { if (id) showTask(Number(id)); else { state.taskId = null; renderTaskEmpty(); refreshTasks(); } }
+  if (state.tab === "reviews") { if (id) showReview(Number(id)); else { state.reviewId = null; renderReviewEmpty(); refreshReviews(); } }
+  if (state.tab === "settings") loadSettings();
+}
+const go = (hash) => { if (location.hash === hash) route(); else location.hash = hash; };
+
+async function refreshHeader() {
+  try {
+    const [stats, tasks] = await Promise.all([api("/api/stats"), api("/api/tasks")]);
+    state.stats = stats;
+    const [label, help] = MODE[stats.actionMode] ?? [stats.actionMode, ""];
+    const mode = document.getElementById("mode");
+    mode.className = `chip mode-${stats.actionMode}`;
+    mode.title = help;
+    mode.lastElementChild.textContent = label;
+    document.getElementById("user").innerHTML = `@<b>${esc(stats.username)}</b>`;
+
+    const needs = stats.counts.needs_human || 0;
+    const br = document.getElementById("badge-reviews");
+    br.hidden = !needs; br.textContent = needs; br.className = "badge hot";
+    const live = tasks.filter((t) => t.status === "running" || t.status === "queued").length;
+    const bd = document.getElementById("badge-dev");
+    bd.hidden = !live; bd.textContent = live; bd.className = "badge live";
+  } catch { /* le serveur redémarre peut-être */ }
+}
+
+/* =====================================================================
+   Onglet Tickets
+   ===================================================================== */
+async function loadTickets(force) {
+  const root = document.getElementById("view-tickets");
+  if (!state.issues || force) {
+    if (!state.issues) root.innerHTML = `<div class="page"><div class="page-inner"><div class="empty">Chargement des tickets depuis GitLab…</div></div></div>`;
+    try {
+      state.issues = await api("/api/issues");
+      state.issuesAt = new Date();
+    } catch (err) {
+      root.innerHTML = `<div class="page"><div class="page-inner"><div class="callout err">${ICON.err}<h3>Impossible de lire tes tickets GitLab</h3><pre>${esc(err.message)}</pre><p>Vérifie le token GitLab dans le fichier .env.</p></div></div></div>`;
+      return;
+    }
+  }
+  renderTickets();
+}
+
+function renderTickets() {
+  const root = document.getElementById("view-tickets");
+  const q = state.ticketSearch.toLowerCase();
+  const issues = state.issues.filter((i) => !q || `${i.title} ${i.projectPath} #${i.iid}`.toLowerCase().includes(q));
+  const wf = state.settingsCache?.workflow;
+  const notConfigured = wf && !wf.todoLabels.length && !wf.inProgressLabels.length;
+
+  const card = (i) => {
+    const active = i.task && (i.task.status === "running" || i.task.status === "queued");
+    const taskBadge = i.task
+      ? `<a href="#dev/${i.task.id}" class="pill ${TASK_STATUS[i.task.status].pill}" title="Voir la tâche de l'agent">${i.task.status === "running" ? '<span class="pulse"></span>' : ""}Agent : ${TASK_STATUS[i.task.status].label}</a>`
+      : "";
+    const action = i.devReady
+      ? (active ? "" : `<button class="btn primary sm" data-launch="${i.projectId}:${i.iid}">${i.task ? "Relancer l'agent" : "Traiter avec l'agent"}</button>`)
+      : `<button class="muted-link" data-configure="${esc(i.projectPath)}">Configurer le projet</button>`;
+    return `<div class="ticket">
+      <div class="card-top"><span class="proj">${esc(i.projectPath)}</span><span>·</span><span>#${i.iid}</span><span class="time">${ago(i.updatedAt)}</span></div>
+      <div class="card-title"><a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a></div>
+      ${i.labels.length ? `<div class="labels">${i.labels.slice(0, 4).map((l) => `<span class="pill label">${esc(l)}</span>`).join("")}${i.labels.length > 4 ? `<span class="pill label">+${i.labels.length - 4}</span>` : ""}</div>` : ""}
+      <div class="ticket-foot">${taskBadge || `<span class="note" style="margin:0">${i.milestone ? esc(i.milestone) : ""}</span>`}${action}</div>
+    </div>`;
+  };
+
+  const cols = COLUMNS.map(([key, label]) => {
+    const items = issues.filter((i) => i.column === key);
+    if (key === "other" && !items.length) return "";
+    return `<div class="col"><div class="col-head">${label}<span class="badge">${items.length}</span></div>
+      ${items.length ? items.map(card).join("") : `<div class="note" style="padding:6px">Aucun ticket.</div>`}</div>`;
+  }).join("");
+
+  root.innerHTML = `<div class="page"><div class="page-inner">
+    <div class="page-head">
+      <div><h1>Mes tickets</h1><div class="sub">Tickets ouverts qui te sont assignés${state.issuesAt ? ` · mis à jour ${ago(state.issuesAt.toISOString())}` : ""}</div></div>
+      <span class="spacer"></span>
+      <input class="search" id="ticket-search" placeholder="Filtrer (titre, projet, #numéro)" value="${esc(state.ticketSearch)}">
+      <button class="btn" data-act="refresh-tickets">Actualiser</button>
+    </div>
+    ${notConfigured ? `<div class="callout info">${ICON.info}<h3>Range tes tickets par statut</h3><p>Indique les labels de ton workflow (« à traiter », « en cours ») dans <a href="#settings">Paramètres</a> : en attendant, ils sont tous dans « Autres ».</p></div>` : ""}
+    ${state.issues.length ? `<div class="board">${cols}</div>` : `<div class="empty">Aucun ticket ouvert ne t'est assigné.</div>`}
+  </div></div>`;
+}
+
+async function launchAgent(projectId, iid) {
+  const i = state.issues.find((x) => x.projectId === projectId && x.iid === iid);
+  if (!i) return;
+  const answer = await ask({
+    title: `Lancer l'agent sur #${i.iid}`,
+    okLabel: "Lancer l'agent",
+    input: true,
+    placeholder: "Consignes supplémentaires (optionnel) : piste à explorer, fichiers concernés, contraintes...",
+    html: `<p><b>${esc(i.title)}</b></p>
+      <dl class="kv">
+        <dt>Projet</dt><dd>${esc(i.projectPath)}</dd>
+        <dt>Branche créée</dt><dd><code>${esc(i.branchPreview)}</code></dd>
+        <dt>Depuis</dt><dd><code>${esc(i.baseBranch)}</code></dd>
+        <dt>MR Draft vers</dt><dd><code>${esc(i.targetBranch)}</code></dd>
+      </dl>
+      <p class="note">L'agent lit le ticket et sa discussion, code sur cette branche, puis l'outil la pousse et ouvre une MR <b>Draft</b>. Aucune autre branche n'est touchée. Tu passes la MR en Ready après contrôle.</p>`,
+  });
+  if (!answer) return;
+  try {
+    const { id } = await api("/api/tasks", { projectId, issueIid: iid, extraInstructions: answer.value });
+    toast("Agent lancé.");
+    state.issues = null;
+    go(`#dev/${id}`);
+  } catch (err) { toast(err.message, true); }
+}
+
+/* =====================================================================
+   Onglet Agent dev
+   ===================================================================== */
+let eventsAfter = 0;
+let taskTimer = null;
+
+async function refreshTasks() {
+  const tasks = await api("/api/tasks");
+  document.getElementById("dev-count").textContent = `${tasks.length} tâche(s)`;
+  document.getElementById("dev-list").innerHTML = tasks.length
+    ? tasks.map((t) => `
+      <div class="card ${t.id === state.taskId ? "selected" : ""}" data-task="${t.id}" tabindex="0">
+        <div class="card-top"><span class="proj">${esc(t.project_path)}</span><span>·</span><span>#${t.issue_iid}</span><span class="time">${ago(t.updated_at)}</span></div>
+        <div class="card-title">${esc(t.issue_title)}</div>
+        <div class="card-bottom"><span class="grow mono">${esc(t.branch || "")}</span>
+          <span class="pill ${TASK_STATUS[t.status].pill}">${t.status === "running" ? '<span class="pulse"></span>' : ""}${TASK_STATUS[t.status].label}</span></div>
+      </div>`).join("")
+    : `<div class="empty"><div>Aucune tâche pour l'instant.<br>Lance l'agent depuis l'onglet <a href="#tickets">Tickets</a>.</div></div>`;
+}
+
+function renderTaskEmpty() {
+  document.getElementById("dev-split").classList.remove("has-selection");
+  document.getElementById("dev-detail").innerHTML = `<div class="empty"><div>${ICON.doc}<div>Sélectionne une tâche pour suivre l'agent.</div></div></div>`;
+}
+
+function taskCallout(t) {
+  const res = t.result;
+  switch (t.status) {
+    case "running":
+      return `<div class="callout live"><span class="pulse"></span><h3>L'agent travaille sur le ticket</h3><p>Le journal ci-dessous se met à jour en direct.</p></div>`;
+    case "queued":
+      return `<div class="callout info">${ICON.info}<h3>En attente</h3><p>L'agent démarre dès que la tâche précédente est terminée.</p></div>`;
+    case "mr_created":
+      return `<div class="callout ok">${ICON.ok}<h3>MR Draft !${t.mr_iid} créée</h3><p>Contrôle-la, puis passe-la en Ready : le ticket passera en Validation technique.</p>
+        <div class="actions-inline"><a class="btn primary sm" href="${esc(t.mr_url)}" target="_blank" rel="noopener">Ouvrir la MR ${ICON.ext}</a></div></div>`;
+    case "blocked":
+      return `<div class="callout warn">${ICON.warn}<h3>L'agent a besoin d'informations</h3><p>Rien n'a été poussé. Complète le ticket (ou donne des consignes) puis relance.</p>
+        ${res?.questions?.length ? `<ul>${res.questions.map((q) => `<li>${rich(q)}</li>`).join("")}</ul>` : ""}</div>`;
+    case "error":
+      return `<div class="callout err">${ICON.err}<h3>La tâche a échoué</h3><pre>${esc(t.error)}</pre></div>`;
+    case "cancelled":
+      return `<div class="callout info">${ICON.info}<h3>Tâche arrêtée</h3><p>Rien n'a été poussé.</p></div>`;
+  }
+  return "";
+}
+
+const EV_ICON = { step: "●", text: "💬", tool: "›", error: "✕" };
+const eventHtml = (e) => `<div class="ev ${e.kind}"><span class="ic">${EV_ICON[e.kind] || "·"}</span><span class="body">${esc(e.text)}</span><span class="t">${esc(String(e.created_at).slice(11, 16))}</span></div>`;
+
+async function showTask(id) {
+  const changed = state.taskId !== id;
+  state.taskId = id;
+  clearTimeout(taskTimer);
+  const t = await api(`/api/tasks/${id}`).catch((err) => { toast(err.message, true); return null; });
+  if (!t) return;
+  const res = t.result;
+  const live = t.status === "running" || t.status === "queued";
+  document.getElementById("dev-split").classList.add("has-selection");
+
+  const resume = t.session_id && t.worktree_path ? `cd ${t.worktree_path} && claude --resume ${t.session_id}` : "";
+  document.getElementById("dev-detail").innerHTML = `
+    <div class="detail">
+      <button class="btn ghost back" data-act="dev-back">← Retour aux tâches</button>
+      <div class="crumbs">
+        <span>${esc(t.project_path)}</span><span>·</span><a href="${esc(t.issue_url)}" target="_blank" rel="noopener">Ticket #${t.issue_iid}</a>
+        ${pill(TASK_STATUS[t.status].pill, TASK_STATUS[t.status].label)}
+        ${t.mr_url ? `<a class="btn-link" href="${esc(t.mr_url)}" target="_blank" rel="noopener">MR !${t.mr_iid} ${ICON.ext}</a>` : ""}
+      </div>
+      <h1>${esc(t.issue_title)}</h1>
+      <div class="meta">
+        ${t.branch ? `<span>branche <code>${esc(t.branch)}</code></span>` : ""}
+        ${t.base_branch ? `<span><code>${esc(t.base_branch)}</code> → <code>${esc(t.target_branch)}</code></span>` : ""}
+        ${t.files_changed != null ? `<span>${t.files_changed} fichier(s)</span>` : ""}
+        ${t.num_turns != null ? `<span>${t.num_turns} tours</span>` : ""}
+        ${t.cost_usd != null ? `<span title="Estimation équivalent API : sur l'abonnement, c'est un indicateur de consommation, pas une facture">≈ ${t.cost_usd.toFixed(2)} $</span>` : ""}
+        <span>${ago(t.updated_at)}</span>
+      </div>
+
+      ${taskCallout(t)}
+
+      ${t.extra_instructions ? `<section class="block"><h2>Tes consignes</h2><div class="panel"><p>${rich(t.extra_instructions)}</p></div></section>` : ""}
+
+      ${res && res.status === "done" ? `
+        <section class="block"><h2>Ce que l'agent a fait</h2><div class="panel"><p>${rich(res.summary)}</p></div></section>
+        <section class="block"><h2>Tests</h2><div class="panel"><p>${rich(res.tests)}</p></div></section>
+        ${res.notes_for_reviewer.length ? `<section class="block"><h2>Points à vérifier en priorité</h2><div class="panel"><ul>${res.notes_for_reviewer.map((n) => `<li>${rich(n)}</li>`).join("")}</ul></div></section>` : ""}
+        ${res.questions.length ? `<section class="block"><h2>Questions ouvertes</h2><div class="panel"><ul>${res.questions.map((q) => `<li>${rich(q)}</li>`).join("")}</ul></div></section>` : ""}
+      ` : ""}
+      ${res && res.status === "blocked" ? `<section class="block"><h2>Ce que l'agent a compris</h2><div class="panel"><p>${rich(res.summary)}</p></div></section>` : ""}
+
+      ${resume && !live ? `<section class="block"><h2>Reprendre la main</h2><div class="panel">
+        <p>Dans un terminal WSL, pour continuer la conversation avec l'agent dans son dossier de travail :</p>
+        <div class="cmd"><code>${esc(resume)}</code><button class="btn sm" data-copy="${esc(resume)}">Copier</button></div></div></section>` : ""}
+
+      <section class="block"><h2>Journal ${live ? '<span class="pill accent"><span class="pulse"></span>en direct</span>' : ""}</h2>
+        <div class="journal" id="journal"><div class="note" style="padding:6px 14px">Chargement…</div></div></section>
+    </div>
+    <div class="actionbar">
+      <a class="btn" href="${esc(t.issue_url)}" target="_blank" rel="noopener">Ouvrir le ticket ${ICON.ext}</a>
+      ${live ? `<button class="btn danger" data-act="task-cancel">Arrêter l'agent</button>` : ""}
+      <span class="spacer"></span>
+      ${t.worktree_path && !live ? `<button class="btn ghost" data-act="task-cleanup" title="Supprime le dossier de travail local. La branche poussée sur GitLab n'est pas touchée.">Nettoyer le dossier local</button>` : ""}
+    </div>`;
+
+  if (changed) document.getElementById("dev-detail").scrollTop = 0;
+  eventsAfter = 0;
+  await pollEvents(true);
+  refreshTasks();
+  if (live) taskTimer = setTimeout(() => tickTask(id), 2500);
+}
+
+async function pollEvents(reset) {
+  const box = document.getElementById("journal");
+  if (!box || state.taskId == null) return;
+  const events = await api(`/api/tasks/${state.taskId}/events?after=${eventsAfter}`).catch(() => []);
+  if (reset) box.innerHTML = events.length ? "" : `<div class="note" style="padding:6px 14px">Aucun événement.</div>`;
+  if (!events.length) return;
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.insertAdjacentHTML("beforeend", events.map(eventHtml).join(""));
+  eventsAfter = events[events.length - 1].id;
+  if (atBottom || reset) box.scrollTop = box.scrollHeight;
+}
+
+async function tickTask(id) {
+  if (state.tab !== "dev" || state.taskId !== id) return;
+  const t = await api(`/api/tasks/${id}`).catch(() => null);
+  if (!t) return;
+  if (t.status !== "running" && t.status !== "queued") return showTask(id);
+  await pollEvents(false);
+  taskTimer = setTimeout(() => tickTask(id), 2500);
+}
+
+/* =====================================================================
+   Onglet Reviews
+   ===================================================================== */
+function cardBadges(r) {
+  if (r.status === "running") return pill("accent", '<span class="pulse"></span>Analyse en cours');
+  if (r.status === "queued") return pill("gray", "En attente");
+  if (r.status === "error") return pill("red", "Échec de la review");
+  const s = r.summary;
+  if (!s) return "";
+  const out = [];
+  if (s.injection) out.push(pill("red", "⚠ Manipulation"));
+  for (const k of ["blocking", "important", "suggestion"]) {
+    if (s[k]) out.push(`<span class="pill ${SEV[k].pill}" title="${SEV[k].label}"><span class="sev-dot"></span>${s[k]}</span>`);
+  }
+  if (!out.length) out.push(pill("green", "Aucun point"));
+  if (!["needs_human", "auto_ok"].includes(r.status)) out.push(pill(REVIEW_STATUS[r.status].pill, REVIEW_STATUS[r.status].label));
+  return out.join("");
+}
+
+async function refreshReviews() {
+  const f = state.reviewFilter;
+  const [rows, stats] = await Promise.all([api(`/api/reviews${f ? `?status=${f}` : ""}`), api("/api/stats")]);
+  const counts = stats.counts || {};
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  document.getElementById("rev-filters").innerHTML = REVIEW_FILTERS.map((k) => {
+    const n = k ? counts[k] || 0 : total;
+    if (k && !n && k !== "needs_human" && k !== f) return "";
+    return `<button class="fchip ${k === f ? "active" : ""}" data-rfilter="${k}">${k ? REVIEW_STATUS[k].label : "Toutes"}<span class="n ${k === "needs_human" && n ? "hot" : ""}">${n}</span></button>`;
+  }).join("");
+  document.getElementById("rev-title").textContent = f ? REVIEW_STATUS[f].label : "Toutes les reviews";
+  document.getElementById("rev-count").textContent = `${rows.length} MR`;
+  document.getElementById("rev-list").innerHTML = rows.length
+    ? rows.map((r) => `
+      <div class="card ${r.id === state.reviewId ? "selected" : ""}" data-review="${r.id}" tabindex="0">
+        <div class="card-top"><span class="proj">${esc(r.project_path)}</span><span>·</span><span>!${r.mr_iid}</span><span class="time">${ago(r.updated_at)}</span></div>
+        <div class="card-title">${esc(r.mr_title)}</div>
+        <div class="card-bottom"><span class="grow">${esc(r.author)}</span>${cardBadges(r)}</div>
+      </div>`).join("")
+    : `<div class="empty"><div>${f === "needs_human" ? "Rien ne t'attend. 🎉<br><span class='note'>Les MR où tu es reviewer sont analysées automatiquement dès qu'elles passent en Ready.</span>" : "Aucune review ici."}</div></div>`;
+}
+
+function renderReviewEmpty() {
+  document.getElementById("rev-split").classList.remove("has-selection");
+  document.getElementById("rev-detail").innerHTML = `<div class="empty"><div>${ICON.doc}<div>Sélectionne une merge request pour voir sa review.</div></div></div>`;
+}
+
+function reviewCallout(r, reasons) {
+  if (r.status === "error") return `<div class="callout err">${ICON.err}<h3>La review a échoué</h3><pre>${esc(r.error)}</pre><p>Tu peux la relancer. Si l'erreur parle d'une limite d'usage, attends que ton quota se libère.</p></div>`;
+  if (r.status === "running" || r.status === "queued") return `<div class="callout live"><span class="pulse"></span><h3>${r.status === "running" ? "Analyse en cours" : "En attente d'analyse"}</h3><p>Le résultat apparaîtra ici.</p></div>`;
+  if (!r.result) return "";
+  if (reasons.length) return `<div class="callout warn">${ICON.warn}<h3>Demande ton analyse</h3><ul>${reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
+  return `<div class="callout ok">${ICON.ok}<h3>Points mineurs uniquement</h3><p>Cette MR peut partir sans toi${state.stats?.actionMode === "shadow" ? " (mode ombre : rien n'est posté tant que tu ne cliques pas)" : ""}.</p></div>`;
+}
+
+function findingHtml(f) {
+  return `<article class="finding ${f.severity}">
+    <div class="finding-head">${pill(SEV[f.severity].pill, SEV[f.severity].label)}${f.confirmed ? "" : pill("gray", "À vérifier")}<h3>${rich(f.title)}</h3></div>
+    <code class="loc">${esc(f.location)}</code>
+    <p>${rich(f.explanation)}</p>
+    ${f.suggestion ? `<div class="fix"><b>Correction proposée</b>${rich(f.suggestion)}</div>` : ""}
+  </article>`;
+}
+
+async function showReview(id) {
+  state.reviewId = id;
+  const r = await api(`/api/reviews/${id}`).catch((err) => { toast(err.message, true); return null; });
+  if (!r) return;
+  document.getElementById("rev-split").classList.add("has-selection");
+  const res = r.result;
+  const reasons = r.decision_reasons ? JSON.parse(r.decision_reasons) : [];
+  const order = { blocking: 0, important: 1, suggestion: 2 };
+  const findings = res ? [...res.findings].sort((a, b) => order[a.severity] - order[b.severity]) : [];
+  const vote = r.feedback_agree == null ? "" : r.feedback_agree ? "yes" : "no";
+
+  document.getElementById("rev-detail").innerHTML = `
+    <div class="detail">
+      <button class="btn ghost back" data-act="rev-back">← Retour à la liste</button>
+      <div class="crumbs"><span>${esc(r.project_path)}</span><span>·</span><span>!${r.mr_iid}</span>${pill(REVIEW_STATUS[r.status].pill, REVIEW_STATUS[r.status].label)}
+        <a class="btn-link" href="${esc(r.mr_url)}" target="_blank" rel="noopener">Ouvrir dans GitLab ${ICON.ext}</a></div>
+      <h1>${esc(r.mr_title)}</h1>
+      <div class="meta">
+        <span>par <b>${esc(r.author)}</b></span><span>commit <code>${esc(r.head_sha.slice(0, 8))}</code></span>
+        ${r.changed_lines != null ? `<span>${r.changed_lines} lignes modifiées</span>` : ""}
+        ${r.num_turns != null ? `<span>${r.num_turns} tours</span>` : ""}
+        ${r.cost_usd != null ? `<span title="Estimation équivalent API : sur l'abonnement, c'est un indicateur de consommation, pas une facture">≈ ${r.cost_usd.toFixed(2)} $</span>` : ""}
+        <span>${ago(r.updated_at)}</span>
+      </div>
+      ${reviewCallout(r, reasons)}
+      ${res ? `
+        <section class="block"><h2>Résumé ${pill(VERDICT[res.verdict].pill, "Verdict agent : " + VERDICT[res.verdict].label)}</h2><div class="panel"><p>${rich(res.summary)}</p></div></section>
+        ${res.questions_for_author.length ? `<section class="block"><h2>Questions pour l'auteur</h2><div class="panel"><ul>${res.questions_for_author.map((q) => `<li>${rich(q)}</li>`).join("")}</ul></div></section>` : ""}
+        <section class="block"><h2>Points relevés (${findings.length})</h2>${findings.length ? findings.map(findingHtml).join("") : `<div class="panel"><p>Aucun point négatif relevé.</p></div>`}</section>
+        ${res.positives.length ? `<section class="block"><h2>Points positifs</h2><div class="panel"><ul class="positives">${res.positives.map((p) => `<li>${rich(p)}</li>`).join("")}</ul></div></section>` : ""}` : ""}
+    </div>
+    <div class="actionbar">
+      ${res && !["published", "approved"].includes(r.status) ? `<button class="btn primary" data-act="publish">Publier le commentaire</button>` : ""}
+      ${res && r.status !== "approved" ? `<button class="btn" data-act="approve">Publier + approuver</button>` : ""}
+      <button class="btn ghost" data-act="retry">Relancer</button>
+      ${r.status !== "dismissed" ? `<button class="btn ghost" data-act="dismiss">Ignorer</button>` : ""}
+      <span class="spacer"></span>
+      ${res ? `<span class="feedback">Décision juste ?
+        <button class="btn vote ${vote === "yes" ? "on-yes" : ""}" data-act="agree" title="L'agent a bien jugé">👍</button>
+        <button class="btn vote ${vote === "no" ? "on-no" : ""}" data-act="disagree" title="L'agent s'est trompé">👎</button></span>` : ""}
+    </div>`;
+  document.getElementById("rev-detail").scrollTop = 0;
+  refreshReviews();
+}
+
+async function reviewAction(action, button) {
+  const id = state.reviewId;
+  try {
+    if (action === "agree") {
+      await api(`/api/reviews/${id}/feedback`, { agree: true });
+      toast("Noté : décision correcte.");
+    } else if (action === "disagree") {
+      const a = await ask({ title: "Qu'est-ce que l'agent a mal jugé ?", html: "<p>Ta note sert à améliorer les instructions de review.</p>", okLabel: "Enregistrer", input: true, placeholder: "Ex. : le N+1 n'en est pas un, la relation est déjà chargée par le scope global." });
+      if (!a) return;
+      await api(`/api/reviews/${id}/feedback`, { agree: false, note: a.value });
+      toast("Noté : décision incorrecte.");
+    } else {
+      if (action === "approve" && !(await ask({ title: "Publier et approuver ?", html: "<p>La review sera postée sur la MR et la MR approuvée en ton nom, pour ce commit précis.</p>", okLabel: "Publier + approuver" }))) return;
+      if (button) button.disabled = true;
+      await api(`/api/reviews/${id}/${action}`, {});
+      toast({ publish: "Commentaire publié sur la MR.", approve: "Review publiée et MR approuvée.", retry: "Review relancée.", dismiss: "Review ignorée." }[action]);
+    }
+    await showReview(id);
+    refreshHeader();
+  } catch (err) {
+    if (button) button.disabled = false;
+    toast(err.message, true);
+  }
+}
+
+/* =====================================================================
+   Onglet Paramètres
+   ===================================================================== */
+let settingsData = null;
+let projectsData = [];
+let editingProject = null;
+
+async function loadSettings() {
+  const prefillSearch = state.prefillProject;
+  state.prefillProject = null;
+  try {
+    const [s, projects] = await Promise.all([api("/api/settings"), api("/api/projects")]);
+    settingsData = s;
+    state.settingsCache = s.settings;
+    projectsData = projects;
+    renderSettings();
+    if (prefillSearch) openProjectEditor(null, prefillSearch);
+  } catch (err) {
+    document.getElementById("settings").innerHTML = `<div class="callout err">${ICON.err}<h3>Impossible de charger les paramètres</h3><pre>${esc(err.message)}</pre></div>`;
+  }
+}
+
+function agentFields(prefix, a, title, hint) {
+  const opts = settingsData.options;
+  return `<div><div class="sub-title">${title}</div><div class="grid2">
+    <label class="field"><span>Modèle</span><select name="${prefix}.model">${opts.models.map((m) => `<option ${m === a.model ? "selected" : ""}>${m}</option>`).join("")}</select></label>
+    <label class="field"><span>Effort</span><select name="${prefix}.effort">${opts.efforts.map((e) => `<option value="${e}" ${e === a.effort ? "selected" : ""}>${EFFORT_LABEL[e]}</option>`).join("")}</select></label>
+    <label class="field"><span>Tours maximum</span><input type="number" min="5" max="300" name="${prefix}.maxTurns" value="${a.maxTurns}"></label>
+    <label class="field"><span>Délai maximum (min)</span><input type="number" min="1" max="240" name="${prefix}.timeoutMin" value="${a.timeoutMin}"></label>
+  </div><small class="note">${hint}</small></div>`;
+}
+
+function renderSettings() {
+  const s = settingsData.settings;
+  const st = state.stats || {};
+  const seenLabels = [...new Set((state.issues || []).flatMap((i) => i.labels))].sort();
+
+  document.getElementById("settings").innerHTML = `
+    <div class="page-head"><div><h1>Paramètres</h1><div class="sub">Enregistrés dans la base locale de l'outil. Seuls les secrets restent dans le fichier .env.</div></div></div>
+
+    <form id="settings-form" autocomplete="off">
+      <section class="card-section">
+        <h2>Connexion</h2>
+        <p class="desc">Lu dans le fichier <code>.env</code> (token GitLab, URL, utilisateur) : à modifier là-bas, puis redémarrer l'outil.</p>
+        <dl class="kv"><dt>GitLab</dt><dd>${esc(st.gitlabUrl || "")}</dd><dt>Utilisateur</dt><dd>@${esc(st.username || "")}</dd></dl>
+      </section>
+
+      <section class="card-section">
+        <h2>Mode d'action des reviews</h2>
+        <p class="desc">Ce que l'outil fait seul quand une review ne contient que des points mineurs. Les reviews « à analyser » ne partent jamais sans toi.</p>
+        <div class="radios">${Object.entries(MODE).map(([k, [label, help]]) => `
+          <label class="radio"><input type="radio" name="actionMode" value="${k}" ${s.actionMode === k ? "checked" : ""}><span><b>${label}</b><small>${help}</small></span></label>`).join("")}</div>
+      </section>
+
+      <section class="card-section">
+        <h2>Modèles</h2>
+        <p class="desc">Les agents passent par ton abonnement Claude. Le plafond (Sonnet 5.5, effort élevé) est imposé par le code.</p>
+        <div style="display:grid;gap:18px">
+          ${agentFields("review", s.review, "Review", "Une review lit le dépôt : 40 tours suffisent en général.")}
+          ${agentFields("dev", s.dev, "Agent dev", "Une tâche de dev consomme bien plus qu'une review : surveille ton quota.")}
+        </div>
+      </section>
+
+      <section class="card-section">
+        <h2>Règles de décision des reviews</h2>
+        <p class="desc">Une review passe en « à analyser » si elle dépasse ces seuils, en plus des points bloquants ou importants.</p>
+        <div class="grid2">
+          <label class="field"><span>Lignes modifiées maximum en auto</span><input type="number" min="1" name="rules.maxChangedLinesAuto" value="${s.rules.maxChangedLinesAuto}"></label>
+          <label class="field"><span>Chemins sensibles</span><textarea name="rules.sensitivePaths">${esc(s.rules.sensitivePaths.join("\n"))}</textarea><small>Une expression régulière par ligne.</small></label>
+        </div>
+      </section>
+
+      <section class="card-section">
+        <h2>Workflow GitLab</h2>
+        <p class="desc">Labels qui rangent tes tickets dans l'onglet Tickets. Un label par ligne, nom exact (ex. <code>Statut::A faire</code>).</p>
+        <div class="grid2">
+          <label class="field"><span>À traiter</span><textarea name="workflow.todoLabels" data-labels>${esc(s.workflow.todoLabels.join("\n"))}</textarea></label>
+          <label class="field"><span>En cours</span><textarea name="workflow.inProgressLabels" data-labels>${esc(s.workflow.inProgressLabels.join("\n"))}</textarea></label>
+          <label class="field"><span>Validation technique</span><textarea name="workflow.techValidationLabels" data-labels>${esc(s.workflow.techValidationLabels.join("\n"))}</textarea></label>
+          <label class="field"><span>Label posé au lancement de l'agent</span><input name="workflow.labelOnStart" value="${esc(s.workflow.labelOnStart)}" placeholder="vide = ne rien changer"><small>Ex. <code>Statut::En cours</code>.</small></label>
+        </div>
+        ${seenLabels.length ? `<div class="note">Labels vus sur tes tickets (clique pour l'ajouter au dernier champ sélectionné) :</div><div class="tags">${seenLabels.map((l) => `<button type="button" data-addlabel="${esc(l)}">${esc(l)}</button>`).join("")}</div>`
+          : `<div class="note">Ouvre l'onglet Tickets une fois pour voir ici les labels utilisés sur tes tickets.</div>`}
+      </section>
+
+      <section class="card-section">
+        <h2>Conventions de l'agent dev</h2>
+        <p class="desc">Variables : <code>{iid}</code> numéro du ticket, <code>{slug}</code> titre en minuscules-tirets, <code>{title}</code> titre, <code>{summary}</code> résumé de l'agent.</p>
+        <div class="grid2">
+          <label class="field"><span>Nom de branche</span><input name="templates.branch" value="${esc(s.templates.branch)}"><small>Doit contenir <code>{iid}</code>.</small></label>
+          <label class="field"><span>Message de commit</span><input name="templates.commit" value="${esc(s.templates.commit)}"></label>
+          <label class="field"><span>Titre de la MR</span><input name="templates.mrTitle" value="${esc(s.templates.mrTitle)}"><small>« Draft: » est toujours ajouté s'il manque.</small></label>
+          <label class="field"><span>Description de la MR</span><textarea class="prose" name="templates.mrDescription">${esc(s.templates.mrDescription)}</textarea><small>Le rapport de l'agent (tests, points à vérifier) est ajouté en dessous.</small></label>
+        </div>
+        <div class="preview" id="tpl-preview"></div>
+      </section>
+
+      <div class="save-bar"><button type="button" class="btn ghost" data-act="settings-reset">Valeurs par défaut</button><button type="submit" class="btn primary">Enregistrer les paramètres</button></div>
+    </form>
+
+    <section class="card-section" id="projects-section">
+      <h2>Projets de l'agent dev</h2>
+      <p class="desc">L'agent ne peut traiter que les tickets des projets configurés ici. Il crée sa branche depuis la branche de départ et ouvre une MR Draft vers la branche cible. Il ne pousse jamais ailleurs que sur sa branche : base, cible et branches protégées GitLab sont refusées par le code.</p>
+      <div id="projects-list">${projectsData.length ? projectsData.map((p) => `
+        <div class="project-row">
+          <div class="grow"><div><b>${esc(p.path)}</b> ${p.devEnabled ? pill("green", "Agent activé") : pill("gray", "Désactivé")}</div>
+            <div><code>${esc(p.baseBranch || "?")}</code> → MR vers <code>${esc(p.targetBranch || "?")}</code> · ${p.allowedCommands.length} commande(s) autorisée(s)</div></div>
+          <button class="btn sm" data-editproject="${p.projectId}">Modifier</button>
+          <button class="btn sm ghost" data-delproject="${p.projectId}">Supprimer</button>
+        </div>`).join("") : `<p class="note">Aucun projet configuré.</p>`}</div>
+      <div id="project-editor"></div>
+      <div style="margin-top:12px"><button class="btn" data-act="project-add">+ Ajouter un projet</button></div>
+    </section>`;
+  updatePreview();
+}
+
+function updatePreview() {
+  const form = document.getElementById("settings-form");
+  const box = document.getElementById("tpl-preview");
+  if (!form || !box) return;
+  const v = { iid: 163, title: "Interface de création epic / user story", summary: "Ajout de l'écran de création" };
+  const val = (n) => form.elements[n].value;
+  let mrTitle = renderTpl(val("templates.mrTitle"), v);
+  if (!/^\s*(draft:|\[draft\]|\(draft\))/i.test(mrTitle)) mrTitle = "Draft: " + mrTitle;
+  box.innerHTML = `<div><span class="k">Exemple, ticket</span>#163 · ${esc(v.title)}</div>
+    <div><span class="k">Branche</span><code>${esc(renderTpl(val("templates.branch"), v))}</code></div>
+    <div><span class="k">Commit</span><code>${esc(renderTpl(val("templates.commit"), v))}</code></div>
+    <div><span class="k">Titre de MR</span>${esc(mrTitle)}</div>`;
+}
+
+function collectSettings() {
+  const f = document.getElementById("settings-form").elements;
+  const num = (n) => Number(f[n].value);
+  const agent = (p) => ({ model: f[`${p}.model`].value, effort: f[`${p}.effort`].value, maxTurns: num(`${p}.maxTurns`), timeoutMin: num(`${p}.timeoutMin`) });
+  return {
+    actionMode: f.actionMode.value,
+    review: agent("review"),
+    dev: agent("dev"),
+    rules: { maxChangedLinesAuto: num("rules.maxChangedLinesAuto"), sensitivePaths: lines(f["rules.sensitivePaths"].value) },
+    workflow: {
+      todoLabels: lines(f["workflow.todoLabels"].value),
+      inProgressLabels: lines(f["workflow.inProgressLabels"].value),
+      techValidationLabels: lines(f["workflow.techValidationLabels"].value),
+      labelOnStart: f["workflow.labelOnStart"].value.trim(),
+    },
+    templates: {
+      branch: f["templates.branch"].value.trim(),
+      commit: f["templates.commit"].value.trim(),
+      mrTitle: f["templates.mrTitle"].value.trim(),
+      mrDescription: f["templates.mrDescription"].value,
+    },
+  };
+}
+
+async function saveSettings() {
+  const data = collectSettings();
+  if (data.actionMode !== settingsData.settings.actionMode && data.actionMode !== "shadow") {
+    const ok = await ask({ title: `Passer en ${MODE[data.actionMode][0].toLowerCase()} ?`, html: `<p>${esc(MODE[data.actionMode][1])} Les commentaires et approbations seront faits en ton nom.</p>`, okLabel: "Confirmer" });
+    if (!ok) return;
+  }
+  if (!data.templates.branch.includes("{iid}")) return toast("Le nom de branche doit contenir {iid}.", true);
+  try {
+    const res = await api("/api/settings", data);
+    settingsData.settings = res.settings;
+    state.settingsCache = res.settings;
+    state.issues = null;
+    toast("Paramètres enregistrés.");
+    refreshHeader();
+  } catch (err) { toast(err.message, true); }
+}
+
+function openProjectEditor(projectId, search = "") {
+  editingProject = projectId ? { ...projectsData.find((p) => p.projectId === projectId) } : null;
+  const box = document.getElementById("project-editor");
+  if (!editingProject) {
+    box.innerHTML = `<div class="panel" style="margin-top:12px">
+      <label class="field"><span>Rechercher un projet GitLab</span><input id="project-search" placeholder="Nom du projet" value="${esc(search)}"></label>
+      <div class="results" id="project-results" hidden></div></div>`;
+    const input = document.getElementById("project-search");
+    input.focus();
+    let timer;
+    const run = () => { clearTimeout(timer); timer = setTimeout(() => searchProjects(input.value), 300); };
+    input.addEventListener("input", run);
+    if (search) searchProjects(search.split("/").pop());
+    return;
+  }
+  renderProjectForm();
+}
+
+async function searchProjects(q) {
+  const box = document.getElementById("project-results");
+  if (!box) return;
+  if (!q.trim()) { box.hidden = true; return; }
+  try {
+    const results = await api(`/api/gitlab/projects?search=${encodeURIComponent(q.trim())}`);
+    box.hidden = false;
+    box.innerHTML = results.length ? results.map((p) => `<button type="button" data-pickproject='${esc(JSON.stringify({ id: p.id, path: p.path }))}'>${esc(p.path)}</button>`).join("") : `<div class="note" style="padding:8px 12px">Aucun projet trouvé.</div>`;
+  } catch (err) { toast(err.message, true); }
+}
+
+async function renderProjectForm() {
+  const p = editingProject;
+  const box = document.getElementById("project-editor");
+  box.innerHTML = `<form class="panel" id="project-form" style="margin-top:12px">
+    <div class="sub-title">${esc(p.path)}</div>
+    <label class="check"><input type="checkbox" name="devEnabled" ${p.devEnabled ? "checked" : ""}> Autoriser l'agent dev sur ce projet</label>
+    <div class="grid2" style="margin-top:14px">
+      <label class="field"><span>Branche de départ</span><input name="baseBranch" list="branch-list" value="${esc(p.baseBranch)}" placeholder="ex. develop"><small>La branche du ticket est créée depuis celle-ci.</small></label>
+      <label class="field"><span>Branche cible de la MR</span><input name="targetBranch" list="branch-list" value="${esc(p.targetBranch)}" placeholder="ex. global"><small>Global, intermédiaire, master... selon le projet.</small></label>
+      <label class="field"><span>Commandes autorisées</span><textarea name="allowedCommands" placeholder="docker compose exec -T app php artisan test">${esc(p.allowedCommands.join("\n"))}</textarea><small>Une commande par ligne (tests, lint). L'agent pourra y ajouter des arguments. Rien d'autre ne lui est permis.</small></label>
+      <label class="field"><span>Consignes propres au projet</span><textarea class="prose" name="instructions" placeholder="Stack, conventions, pièges connus...">${esc(p.instructions)}</textarea></label>
+    </div>
+    <datalist id="branch-list"></datalist>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button type="button" class="btn ghost" data-act="project-cancel">Annuler</button>
+      <button type="submit" class="btn primary">Enregistrer le projet</button>
+    </div>
+  </form>`;
+  try {
+    const branches = await api(`/api/gitlab/projects/${p.projectId}/branches`);
+    document.getElementById("branch-list").innerHTML = branches.map((b) => `<option value="${esc(b.name)}">${b.protected ? "protégée" : ""}</option>`).join("");
+  } catch { /* la saisie libre reste possible */ }
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function saveProject() {
+  const f = document.getElementById("project-form").elements;
+  const data = {
+    projectId: editingProject.projectId,
+    path: editingProject.path,
+    devEnabled: f.devEnabled.checked,
+    baseBranch: f.baseBranch.value.trim(),
+    targetBranch: f.targetBranch.value.trim(),
+    allowedCommands: lines(f.allowedCommands.value),
+    instructions: f.instructions.value,
+  };
+  try {
+    await api("/api/projects", data);
+    toast("Projet enregistré.");
+    editingProject = null;
+    state.issues = null;
+    await loadSettings();
+  } catch (err) { toast(err.message, true); }
+}
+
+/* =====================================================================
+   Événements
+   ===================================================================== */
+let lastLabelField = null;
+
+document.addEventListener("focusin", (e) => { if (e.target.matches?.("[data-labels]")) lastLabelField = e.target; });
+document.addEventListener("input", (e) => {
+  if (e.target.id === "ticket-search") { state.ticketSearch = e.target.value; const pos = e.target.selectionStart; renderTickets(); const el = document.getElementById("ticket-search"); el.focus(); el.setSelectionRange(pos, pos); }
+  if (e.target.name?.startsWith("templates.")) updatePreview();
+});
+document.addEventListener("submit", (e) => {
+  if (e.target.id === "settings-form") { e.preventDefault(); saveSettings(); }
+  if (e.target.id === "project-form") { e.preventDefault(); saveProject(); }
+});
+
+document.addEventListener("click", async (e) => {
+  const el = (sel) => e.target.closest(sel);
+  let t;
+  if ((t = el("[data-tab]"))) return go(`#${t.dataset.tab}`);
+  if ((t = el("[data-task]"))) return go(`#dev/${t.dataset.task}`);
+  if ((t = el("[data-review]"))) return go(`#reviews/${t.dataset.review}`);
+  if ((t = el("[data-rfilter]"))) { state.reviewFilter = t.dataset.rfilter; return refreshReviews(); }
+  if ((t = el("[data-launch]"))) { const [p, i] = t.dataset.launch.split(":").map(Number); return launchAgent(p, i); }
+  if ((t = el("[data-configure]"))) { state.prefillProject = t.dataset.configure; return go("#settings"); }
+  if ((t = el("[data-copy]"))) return copy(t.dataset.copy);
+  if ((t = el("[data-addlabel]"))) {
+    const field = lastLabelField || document.querySelector("[name='workflow.todoLabels']");
+    const current = lines(field.value);
+    if (!current.includes(t.dataset.addlabel)) field.value = [...current, t.dataset.addlabel].join("\n");
+    return;
+  }
+  if ((t = el("[data-editproject]"))) return openProjectEditor(Number(t.dataset.editproject));
+  if ((t = el("[data-delproject]"))) {
+    const p = projectsData.find((x) => x.projectId === Number(t.dataset.delproject));
+    if (!(await ask({ title: "Supprimer ce projet ?", html: `<p>${esc(p?.path)} ne sera plus traitable par l'agent. Rien n'est supprimé sur GitLab.</p>`, okLabel: "Supprimer" }))) return;
+    await api(`/api/projects/${t.dataset.delproject}/delete`, {}).catch((err) => toast(err.message, true));
+    return loadSettings();
+  }
+  if ((t = el("[data-pickproject]"))) {
+    const picked = JSON.parse(t.dataset.pickproject);
+    const existing = projectsData.find((p) => p.projectId === picked.id);
+    editingProject = existing ? { ...existing } : { projectId: picked.id, path: picked.path, devEnabled: true, baseBranch: "", targetBranch: "", allowedCommands: [], instructions: "" };
+    return renderProjectForm();
+  }
+
+  if (!(t = el("[data-act]"))) return;
+  const act = t.dataset.act;
+  if (act === "refresh-tickets") return loadTickets(true);
+  if (act === "dev-back") return go("#dev");
+  if (act === "rev-back") return go("#reviews");
+  if (act === "project-add") return openProjectEditor(null);
+  if (act === "project-cancel") { editingProject = null; document.getElementById("project-editor").innerHTML = ""; return; }
+  if (act === "settings-reset") {
+    if (!(await ask({ title: "Revenir aux valeurs par défaut ?", html: "<p>Le formulaire est réinitialisé. Rien n'est enregistré tant que tu ne cliques pas sur Enregistrer. Les projets ne sont pas touchés.</p>", okLabel: "Réinitialiser" }))) return;
+    settingsData.settings = settingsData.defaults;
+    return renderSettings();
+  }
+  if (act === "task-cancel") {
+    if (!(await ask({ title: "Arrêter l'agent ?", html: "<p>L'agent est interrompu. Rien n'est poussé, le dossier de travail reste en place.</p>", okLabel: "Arrêter" }))) return;
+    await api(`/api/tasks/${state.taskId}/cancel`, {}).catch((err) => toast(err.message, true));
+    toast("Arrêt demandé.");
+    return setTimeout(() => showTask(state.taskId), 1500);
+  }
+  if (act === "task-cleanup") {
+    if (!(await ask({ title: "Nettoyer le dossier local ?", html: "<p>Le dossier de travail de l'agent est supprimé de ta machine. La branche et la MR sur GitLab ne sont pas touchées, mais tu ne pourras plus reprendre la session de l'agent.</p>", okLabel: "Nettoyer" }))) return;
+    await api(`/api/tasks/${state.taskId}/cleanup`, {}).then(() => toast("Dossier supprimé.")).catch((err) => toast(err.message, true));
+    return showTask(state.taskId);
+  }
+  if (["publish", "approve", "retry", "dismiss", "agree", "disagree"].includes(act)) return reviewAction(act, t);
+});
+
+document.addEventListener("keydown", (e) => {
+  const card = e.target.closest?.(".card[data-task], .card[data-review]");
+  if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); card.click(); }
+});
+
+window.addEventListener("hashchange", route);
+
+/* =====================================================================
+   Démarrage
+   ===================================================================== */
+(async () => {
+  await refreshHeader();
+  api("/api/settings").then((s) => { state.settingsCache = s.settings; if (state.tab === "tickets" && state.issues) renderTickets(); }).catch(() => undefined);
+  route();
+  setInterval(() => {
+    refreshHeader();
+    if (state.tab === "reviews") refreshReviews().catch(() => undefined);
+    if (state.tab === "dev") refreshTasks().catch(() => undefined);
+  }, 10000);
+})();
+</script>
+</body>
+</html>
