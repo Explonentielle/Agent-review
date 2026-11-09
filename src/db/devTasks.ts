@@ -4,6 +4,7 @@ export type DevTaskStatus =
   | "queued" // en attente de l'agent
   | "running" // l'agent travaille
   | "mr_created" // branche poussée + MR Draft créée : à contrôler
+  | "mr_updated" // reprise : nouveau commit poussé sur la branche de la MR existante
   | "blocked" // l'agent a besoin d'infos (ticket ambigu), rien n'est poussé
   | "error"
   | "cancelled";
@@ -29,8 +30,22 @@ export interface DevTaskRow {
   cost_usd: number | null;
   num_turns: number | null;
   error: string | null;
+  /** new = ticket traité depuis zéro ; followup = reprise de la MR d'une tâche précédente. */
+  mode: "new" | "followup";
+  /** Tâche reprise (mode followup). */
+  parent_id: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Ce qu'une reprise hérite de la tâche qui a créé la MR. */
+export interface FollowupOrigin {
+  parentId: number;
+  branch: string;
+  baseBranch: string | null;
+  targetBranch: string | null;
+  mrIid: number;
+  mrUrl: string;
 }
 
 export interface DevTaskEvent {
@@ -62,13 +77,27 @@ const ACTIVE = "('queued', 'running')";
 
 export function createDevTaskRepo(db: Db) {
   return {
-    insert(t: { projectId: number; projectPath: string; issueIid: number; issueTitle: string; issueUrl: string; extraInstructions: string | null }): number {
+    insert(t: {
+      projectId: number;
+      projectPath: string;
+      issueIid: number;
+      issueTitle: string;
+      issueUrl: string;
+      extraInstructions: string | null;
+      followup?: FollowupOrigin;
+    }): number {
+      const f = t.followup;
       const res = db
         .prepare(
-          `INSERT INTO dev_tasks (project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO dev_tasks (project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
+                                  mode, parent_id, branch, base_branch, target_branch, mr_iid, mr_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions);
+        .run(
+          t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions,
+          f ? "followup" : "new", f?.parentId ?? null, f?.branch ?? null, f?.baseBranch ?? null,
+          f?.targetBranch ?? null, f?.mrIid ?? null, f?.mrUrl ?? null,
+        );
       return Number(res.lastInsertRowid);
     },
 

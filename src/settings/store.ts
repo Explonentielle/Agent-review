@@ -26,6 +26,7 @@ export function mergeWithDefaults(stored: unknown): Settings {
     rules: section("rules"),
     workflow: section("workflow"),
     instructions: section("instructions"),
+    systemPrompts: section("systemPrompts"),
     templates: section("templates"),
   };
   const parsed = SettingsSchema.safeParse(merged);

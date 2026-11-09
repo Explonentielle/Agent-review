@@ -6,12 +6,16 @@ import { claudeEnv, runProcess, type AgentRunConfig } from "../claude/process.js
 export const DevResultSchema = z.object({
   /** done = implémenté ; blocked = ticket trop ambigu ou demande hors périmètre, rien ne sera poussé. */
   status: z.enum(["done", "blocked"]),
-  /** Ce qui a été fait, en quelques phrases (repris dans la MR). */
-  summary: z.string(),
+  /** Ce qui a été fait (repris dans la MR). Format imposé : voir la description, envoyée au modèle dans le schéma JSON. */
+  summary: z
+    .string()
+    .describe("Markdown : une phrase d'introduction, une ligne vide, puis une puce par changement (- **Titre** : détail). Vrais retours à la ligne, jamais d'énumération (1) (2) dans un paragraphe."),
   /** Message de commit court, sans le numéro de ticket (ajouté par le template). */
-  commit_message: z.string(),
+  commit_message: z.string().describe("Une ligne courte, sans numéro de ticket."),
   /** Tests lancés et résultat, ou pourquoi ils ne l'ont pas été. */
-  tests: z.string(),
+  tests: z
+    .string()
+    .describe("Markdown : résultat des tests, ou une phrase expliquant pourquoi aucun n'a été lancé, une ligne vide, puis les étapes de recette manuelle en liste numérotée (1. ), une par ligne."),
   /** Points à vérifier en priorité par le relecteur. */
   notes_for_reviewer: z.array(z.string()),
   /** Questions ouvertes (obligatoires si status = blocked). */

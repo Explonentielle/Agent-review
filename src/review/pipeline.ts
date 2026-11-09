@@ -1,13 +1,10 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { agentRunConfig } from "../claude/process.js";
 import type { Config } from "../config.js";
 import type { ReviewRepo, ReviewRow } from "../db/reviews.js";
 import type { GitlabClient } from "../gitlab/client.js";
 import type { GitlabIssue } from "../gitlab/types.js";
 import { errorMessage, log } from "../logger.js";
-import { PROJECT_ROOT } from "../paths.js";
-import type { ProjectSettings } from "../settings/schema.js";
+import { loadSystemPrompt } from "../prompts.js";
 import { compileRules, type SettingsStore } from "../settings/store.js";
 import { buildReviewPrompt, countChangedLines, filterDiffs, findLinkedIssueIids } from "./context.js";
 import { decide } from "./decision.js";
@@ -24,17 +21,6 @@ export interface PipelineDeps {
   settings: SettingsStore;
   /** Force le mode ombre quel que soit le réglage (review manuelle en ligne de commande). */
   forceShadow?: boolean;
-}
-
-/**
- * Prompt système = règles de review génériques (prompts/review-system.md) + tes consignes
- * et celles du projet, réglées dans le dashboard. Relu à chaque review.
- */
-async function loadSystemPrompt(instructions: string, project: ProjectSettings | null): Promise<string> {
-  const parts = [await readFile(path.join(PROJECT_ROOT, "prompts", "review-system.md"), "utf8")];
-  if (instructions.trim()) parts.push(`# Instructions spécifiques du reviewer\n\n${instructions}`);
-  if (project?.instructions.trim()) parts.push(`# Consignes propres au projet ${project.path}\n\n${project.instructions}`);
-  return parts.join("\n\n");
 }
 
 export async function runReview(reviewId: number, deps: PipelineDeps): Promise<void> {
@@ -72,7 +58,11 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
 
     const { result, costUsd, numTurns } = await runReviewAgent({
       cwd: checkout.path,
-      systemPrompt: await loadSystemPrompt(settings.instructions.review, deps.settings.getProject(row.project_id)),
+      systemPrompt: await loadSystemPrompt("review", {
+        override: settings.systemPrompts.review,
+        instructions: settings.instructions.review,
+        project: deps.settings.getProject(row.project_id),
+      }),
       prompt: buildReviewPrompt({
         project,
         mr,

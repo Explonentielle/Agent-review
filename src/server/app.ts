@@ -8,6 +8,7 @@ import { cancelDevTask } from "../dev/pipeline.js";
 import { renderTemplate, slugify } from "../dev/templates.js";
 import { errorMessage } from "../logger.js";
 import { PROJECT_ROOT } from "../paths.js";
+import { readDefaultSystemPrompt } from "../prompts.js";
 import { approve, publishComment, type PipelineDeps } from "../review/pipeline.js";
 import type { Finding, ReviewResult } from "../review/schema.js";
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
@@ -77,6 +78,8 @@ export function buildServer(deps: ServerDeps) {
     settings: deps.settings.get(),
     defaults: DEFAULT_SETTINGS,
     options: { models: ALLOWED_MODELS, efforts: ALLOWED_EFFORTS },
+    /** Prompts de base livrés avec l'outil, pour "repartir du prompt par défaut" dans le dashboard. */
+    defaultSystemPrompts: { review: await readDefaultSystemPrompt("review"), dev: await readDefaultSystemPrompt("dev") },
   }));
 
   app.post<{ Body: unknown }>("/api/settings", async (req, reply) => {
@@ -146,7 +149,7 @@ export function buildServer(deps: ServerDeps) {
           branchPreview: project?.devEnabled ? renderTemplate(settings.templates.branch, { iid: i.iid, title: i.title, slug: slugify(i.title) }) : null,
           baseBranch: project?.baseBranch ?? null,
           targetBranch: project?.targetBranch ?? null,
-          task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url } : null,
+          task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, mrIid: task.mr_iid } : null,
         };
       });
     } catch (err) {
@@ -188,6 +191,46 @@ export function buildServer(deps: ServerDeps) {
         extraInstructions: req.body.extraInstructions?.trim() || null,
       });
       deps.tasks.addEvent(id, "step", "Tâche créée, en attente de l'agent");
+      deps.enqueueDev(id);
+      return { id };
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
+
+  /** Reprise : relance l'agent sur la branche de la MR créée par cette tâche, avec des consignes. */
+  app.post<IdParams & { Body: { instructions?: string } }>("/api/tasks/:id/followup", async (req, reply) => {
+    try {
+      const origin = deps.tasks.get(Number(req.params.id));
+      if (!origin) return reply.code(404).send({ error: "Tâche introuvable" });
+      const instructions = req.body?.instructions?.trim();
+      if (!instructions) return reply.code(400).send({ error: "Les consignes de reprise sont obligatoires" });
+      if (!origin.branch || !origin.mr_iid || !origin.mr_url || origin.status === "running" || origin.status === "queued") {
+        return reply.code(400).send({ error: "Seule une tâche terminée liée à une MR peut être reprise" });
+      }
+      const project = deps.settings.getProject(origin.project_id);
+      if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
+      if (deps.tasks.findActive(origin.project_id, origin.issue_iid)) {
+        return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
+      }
+
+      const id = deps.tasks.insert({
+        projectId: origin.project_id,
+        projectPath: origin.project_path,
+        issueIid: origin.issue_iid,
+        issueTitle: origin.issue_title,
+        issueUrl: origin.issue_url,
+        extraInstructions: instructions,
+        followup: {
+          parentId: origin.id,
+          branch: origin.branch,
+          baseBranch: origin.base_branch,
+          targetBranch: origin.target_branch,
+          mrIid: origin.mr_iid,
+          mrUrl: origin.mr_url,
+        },
+      });
+      deps.tasks.addEvent(id, "step", `Reprise de la MR !${origin.mr_iid} (tâche #${origin.id}), en attente de l'agent`);
       deps.enqueueDev(id);
       return { id };
     } catch (err) {

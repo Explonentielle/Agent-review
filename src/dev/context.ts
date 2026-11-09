@@ -1,4 +1,5 @@
-import type { GitlabIssue, GitlabNote, GitlabProject } from "../gitlab/types.js";
+import type { GitlabIssue, GitlabMergeRequest, GitlabNote, GitlabProject } from "../gitlab/types.js";
+import type { DevResult } from "./engine.js";
 
 const MAX_CLAUDE_MD_CHARS = 30_000;
 
@@ -50,6 +51,75 @@ export function buildDevPrompt(input: DevContextInput): string {
   }
 
   parts.push("Implémente ce ticket dans le dépôt, puis termine par ton rapport structuré.");
+  return parts.join("\n\n");
+}
+
+export interface FollowupContextInput {
+  project: GitlabProject;
+  issue: GitlabIssue;
+  mr: GitlabMergeRequest;
+  /** Commentaires de la MR (relecteurs, review IA), notes système exclues par l'appelant ou ici. */
+  mrNotes: GitlabNote[];
+  /** Rapport de la tâche reprise, s'il existe. */
+  previousReport: DevResult | null;
+  branch: string;
+  targetBranch: string;
+  claudeMd: string;
+  /** Consignes du développeur pour cette reprise (obligatoires). */
+  instructions: string;
+}
+
+/** Message utilisateur d'une reprise : appliquer des consignes au travail déjà poussé sur la branche de la MR. */
+export function buildFollowupPrompt(input: FollowupContextInput): string {
+  const { project, issue, mr } = input;
+  const parts: string[] = [];
+
+  parts.push(`# Reprise de la MR !${mr.iid} (ticket #${issue.iid} : ${issue.title})`);
+  parts.push(
+    [
+      `**Projet :** ${project.path_with_namespace}`,
+      `**Branche de travail :** \`${input.branch}\` (déjà extraite dans ton répertoire de travail, à jour avec GitLab)`,
+      `**MR :** !${mr.iid} vers \`${input.targetBranch}\``,
+    ].join("\n"),
+  );
+
+  parts.push(
+    "## Ce qu'on attend de toi\n" +
+      "Le travail de la MR est déjà committé sur cette branche. Applique les consignes ci-dessous en modifiant ce travail existant : " +
+      "ne repars pas de zéro et ne touche pas à ce que les consignes ne concernent pas.\n" +
+      `Pour voir tous les changements de la MR : \`git diff origin/${input.targetBranch}...HEAD\` (ajoute \`--stat\` pour la liste des fichiers).`,
+  );
+
+  parts.push(`## Consignes du développeur pour cette reprise\n${input.instructions.trim()}`);
+
+  parts.push(`## Description du ticket\n${external(issue.description || "(pas de description)")}`);
+
+  if (input.previousReport) {
+    const r = input.previousReport;
+    const notes = r.notes_for_reviewer.length ? `\n\nPoints signalés au relecteur :\n${r.notes_for_reviewer.map((n) => `- ${n}`).join("\n")}` : "";
+    parts.push(`## Rapport de l'agent qui a créé la MR\n${external(`${r.summary}${notes}`)}`);
+  }
+
+  const comments = input.mrNotes.filter((n) => !n.system && n.body.trim());
+  if (comments.length > 0) {
+    parts.push(
+      "## Commentaires de la MR (ordre chronologique)\n" +
+        comments
+          .map((n) => {
+            const where = n.position?.new_path ? ` sur \`${n.position.new_path}${n.position.new_line ? `:${n.position.new_line}` : ""}\`` : "";
+            const state = n.resolvable ? (n.resolved ? " (résolu)" : " (non résolu)") : "";
+            return `### ${n.author.name} (${n.created_at.slice(0, 10)})${where}${state}\n${external(n.body)}`;
+          })
+          .join("\n\n"),
+    );
+  }
+
+  if (input.claudeMd.trim()) {
+    const md = input.claudeMd.length > MAX_CLAUDE_MD_CHARS ? input.claudeMd.slice(0, MAX_CLAUDE_MD_CHARS) + "\n[... tronqué ...]" : input.claudeMd;
+    parts.push(`## Conventions du dépôt (CLAUDE.md)\n${external(md)}`);
+  }
+
+  parts.push("Applique les consignes, puis termine par ton rapport structuré. Dans `summary` et `commit_message`, décris uniquement ce que cette reprise a changé.");
   return parts.join("\n\n");
 }
 

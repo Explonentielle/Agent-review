@@ -63,7 +63,8 @@ npx tsx scripts/smoke-dev.ts      # agent dev réel sur un dépôt jetable (Haik
 
 ## Personnaliser les agents
 
-- `prompts/review-system.md` et `prompts/dev-system.md` : règles génériques des agents.
+- `prompts/review-system.md` et `prompts/dev-system.md` : prompts de base par défaut, remplaçables dans Paramètres > Prompts de base.
+- `prompts/review-guardrails.md` et `prompts/dev-guardrails.md` : règles de sécurité, toujours ajoutées à la fin, non modifiables depuis le dashboard.
 - Tes consignes (stacks, points d'attention, ce qu'il ne faut pas remonter) : dashboard, Paramètres > Consignes des agents. Celles d'un projet : Paramètres > Projets.
 - Consignes par projet : dans le dashboard (Paramètres > Projets).
 

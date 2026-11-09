@@ -47,17 +47,48 @@
   button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   [hidden] { display: none !important; }
 
-  /* ---------- En-tête ---------- */
-  header { height: 56px; display: flex; align-items: center; gap: 20px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; white-space: nowrap; }
-  .tabs { display: flex; gap: 2px; height: 100%; overflow-x: auto; }
-  .tab { display: flex; align-items: center; gap: 7px; padding: 0 12px; border: 0; background: none; color: var(--text-2); font-weight: 500; border-bottom: 2px solid transparent; white-space: nowrap; }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
+  /* ---------- Structure : sidebar + contenu ---------- */
+  body { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: 100vh; overflow: hidden; }
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 18px 12px 14px; min-height: 0; overflow-y: auto; z-index: 5; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15.5px; white-space: nowrap; padding: 0 8px 10px; letter-spacing: -.01em; }
+  .brand small { display: block; font-size: 11.5px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav-label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 650; padding: 16px 10px 6px; }
+  .tab { display: flex; align-items: center; gap: 11px; width: 100%; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--text-2); font-weight: 500; text-align: left; white-space: nowrap; position: relative; }
+  .tab svg { width: 18px; height: 18px; flex: none; opacity: .75; }
+  .tab:hover { background: var(--hover); color: var(--text); }
+  .tab.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+  .tab.active svg { opacity: 1; }
+  .tab .badge { margin-left: auto; }
   .badge { min-width: 18px; height: 18px; padding: 0 6px; border-radius: 999px; font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; background: var(--gray-soft); color: var(--text-2); }
   .badge.hot { background: var(--red); color: #fff; }
   .badge.live { background: var(--accent); color: #fff; }
-  .header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .collapse-btn { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: 0 8px 6px; padding: 3px 9px 3px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--muted); font-size: 12px; }
+  .collapse-btn svg { width: 14px; height: 14px; transition: transform .15s; }
+  .collapse-btn:hover { color: var(--text); background: var(--hover); }
+  .main { min-width: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+  .topbar { height: 52px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .crumb { font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .top-right { display: flex; align-items: center; gap: 8px; }
+  #mode { cursor: pointer; }
+  .userchip { padding: 0 10px 0 3px; }
+  .userchip small { color: var(--muted); }
+  .avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 11px; flex: none; }
+  .subnav { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 19px; padding-left: 10px; border-left: 1px solid var(--border); }
+  .subnav button { text-align: left; border: 0; background: none; color: var(--muted); font-size: 13px; padding: 5px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .subnav button:hover { background: var(--hover); color: var(--text); }
+  .subnav button.active { color: var(--accent-text); font-weight: 600; }
+
+  /* Sidebar repliée : icônes seules (choix mémorisé, forcé sur écran moyen) */
+  body.collapsed { grid-template-columns: 68px minmax(0, 1fr); }
+  body.collapsed .sidebar { padding: 16px 10px; }
+  body.collapsed .brand { justify-content: center; padding: 0 0 10px; }
+  body.collapsed :is(.brand > div, .nav-label, .lbl, .subnav) { display: none; }
+  body.collapsed .collapse-btn { align-self: center; margin: 0 0 6px; padding: 4px 6px; }
+  body.collapsed .nav { gap: 4px; }
+  body.collapsed .tab { justify-content: center; padding: 0; height: 42px; }
+  body.collapsed .tab .badge { position: absolute; top: 3px; right: 4px; margin: 0; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }
+  body.collapsed .collapse-btn svg { transform: rotate(180deg); }
   .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
   .chip b { color: var(--text); font-weight: 600; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
@@ -65,8 +96,8 @@
   .mode-auto .dot { background: var(--green); }
 
   /* ---------- Vues ---------- */
-  .view { height: calc(100vh - 56px); overflow: hidden; }
-  .split { display: grid; grid-template-columns: 400px minmax(0, 1fr); height: 100%; }
+  .view { flex: 1; min-height: 0; overflow: hidden; }
+  .split { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; }
   .pane { overflow-y: auto; }
   .list-pane { border-right: 1px solid var(--border); background: var(--surface); }
   .list-head { padding: 14px 16px 10px; position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 1; }
@@ -104,7 +135,7 @@
 
   /* ---------- Détail ---------- */
   .detail-pane { display: flex; flex-direction: column; }
-  .detail { padding: 24px 32px 32px; max-width: 940px; width: 100%; flex: 1; }
+  .detail { padding: 24px 32px 32px; max-width: 1400px; width: 100%; flex: 1; }
   .empty { height: 100%; min-height: 200px; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 40px; }
   .empty svg { opacity: .5; margin-bottom: 10px; }
   .crumbs { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
@@ -137,6 +168,12 @@
   section.block > h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
   .panel p { margin: 0; }
+  .panel.md p { margin: 0 0 10px; }
+  .panel.md ul, .panel.md ol { margin: 4px 0 10px; padding-left: 20px; }
+  .panel.md li + li { margin-top: 5px; }
+  .panel.md li > ul, .panel.md li > ol { margin: 5px 0 0; }
+  .panel.md > :last-child { margin-bottom: 0; }
+  .panel textarea.area { width: 100%; min-height: 110px; margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; resize: vertical; }
   .panel ul { margin: 0; padding-left: 18px; }
   .panel li + li { margin-top: 4px; }
 
@@ -184,9 +221,9 @@
 
   /* ---------- Tickets ---------- */
   .page { height: 100%; overflow-y: auto; }
-  .page-inner { padding: 20px 24px 40px; }
-  .page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-  .page-head h1 { margin: 0; font-size: 20px; }
+  .page-inner { padding: 24px 32px 48px; }
+  .page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .page-head h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
   .page-head .sub { color: var(--muted); font-size: 13px; }
   .search { height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); min-width: 220px; font: inherit; }
   .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; align-items: start; }
@@ -201,15 +238,15 @@
   .muted-link { font-size: 12.5px; color: var(--muted); background: none; border: 0; padding: 0; text-decoration: underline; }
 
   /* ---------- Paramètres ---------- */
-  .settings { max-width: 880px; margin: 0 auto; }
-  .card-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 16px; }
+  .settings { max-width: 1240px; margin: 0 auto; }
+  .card-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px 28px; box-shadow: var(--shadow); margin-bottom: 20px; scroll-margin-top: 24px; }
   .card-section > h2 { margin: 0 0 4px; font-size: 16px; }
-  .card-section > .desc { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card-section > .desc { margin: 0 0 20px; color: var(--muted); font-size: 13.5px; max-width: 110ch; line-height: 1.55; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 22px; }
   .field { display: flex; flex-direction: column; gap: 5px; }
   .field > span { font-weight: 600; font-size: 13px; }
   .field small { color: var(--muted); font-size: 12px; }
-  .field input, .field select, .field textarea { height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; }
+  .field input, .field select, .field textarea { height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; }
   .field textarea { height: auto; min-height: 84px; padding: 8px 10px; resize: vertical; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
   .field textarea.prose { font-family: inherit; font-size: 14px; }
   .sub-title { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin: 4px 0 10px; }
@@ -257,11 +294,24 @@
   .back { display: none; }
 
   /* ---------- Responsive ---------- */
-  @media (max-width: 1100px) { .split { grid-template-columns: 330px minmax(0, 1fr); } .header-right .opt { display: none; } }
+  @media (max-width: 1100px) {
+    .split { grid-template-columns: 280px minmax(0, 1fr); }
+    body { grid-template-columns: 68px minmax(0, 1fr); }
+    .sidebar { padding: 16px 10px; }
+    .brand { justify-content: center; padding: 0 0 10px; }
+    .brand > div, .nav-label, .lbl, .subnav, .collapse-btn, .userchip small { display: none; }
+    .nav { gap: 4px; }
+    .tab { justify-content: center; padding: 0; height: 42px; }
+    .tab .badge { position: absolute; top: 3px; right: 4px; margin: 0; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }
+  }
   @media (max-width: 760px) {
-    header { padding: 0 12px; gap: 10px; }
-    .brand span { display: none; }
-    .header-right { display: none; }
+    body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: auto; min-height: 100vh; overflow: visible; }
+    .sidebar { flex-direction: row; align-items: center; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--border); position: sticky; top: 0; overflow: visible; }
+    .brand { padding: 0 8px 0 0; }
+    .nav { flex-direction: row; gap: 2px; }
+    .tab { width: 44px; height: 40px; }
+    .topbar { display: none; }
+    .main { height: auto; overflow: visible; display: block; }
     .view { height: auto; overflow: visible; }
     .split { grid-template-columns: minmax(0, 1fr); height: auto; }
     .pane { overflow: visible; }
@@ -277,23 +327,46 @@
 </style>
 </head>
 <body>
-<header>
+<aside class="sidebar">
   <div class="brand">
-    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M9 16.5l4.5 4.5L23 11.5" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <span>Review Agent</span>
+    <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M9 16.5l4.5 4.5L23 11.5" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div>Review Agent<small>GitLab + Claude Code</small></div>
   </div>
-  <nav class="tabs" aria-label="Sections">
-    <button class="tab" data-tab="tickets">Tickets</button>
-    <button class="tab" data-tab="dev">Agent dev <span class="badge" id="badge-dev" hidden></span></button>
-    <button class="tab" data-tab="reviews">Reviews <span class="badge" id="badge-reviews" hidden></span></button>
-    <button class="tab" data-tab="settings">Paramètres</button>
+  <button class="collapse-btn" data-act="toggle-sidebar" title="Réduire le menu">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg>
+    <span class="lbl">Réduire</span>
+  </button>
+  <nav class="nav" aria-label="Sections">
+    <div class="nav-label">Travail</div>
+    <button class="tab" data-tab="tickets" title="Mes tickets">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg>
+      <span class="lbl">Mes tickets</span>
+    </button>
+    <button class="tab" data-tab="dev" title="Agent dev">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 9l-4 3 4 3M16 9l4 3-4 3M13.5 6l-3 12"/></svg>
+      <span class="lbl">Agent dev</span><span class="badge" id="badge-dev" hidden></span>
+    </button>
+    <button class="tab" data-tab="reviews" title="Reviews">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-4M13 4.5 10.5 7 13 9.5"/></svg>
+      <span class="lbl">Reviews</span><span class="badge" id="badge-reviews" hidden></span>
+    </button>
+    <div class="nav-label">Configuration</div>
+    <button class="tab" data-tab="settings" title="Paramètres">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+      <span class="lbl">Paramètres</span>
+    </button>
+    <div class="subnav" id="settings-toc" aria-label="Sections des paramètres" hidden></div>
   </nav>
-  <div class="header-right">
-    <span class="chip" id="mode"><span class="dot"></span><span>…</span></span>
-    <span class="chip opt" id="user"></span>
-  </div>
-</header>
+</aside>
 
+<div class="main">
+<div class="topbar">
+  <div class="crumb" id="crumb"></div>
+  <div class="top-right">
+    <span class="chip" id="mode" data-tab="settings"><span class="dot"></span><span>…</span></span>
+    <span class="chip userchip" title="Compte GitLab utilisé (fichier .env)"><span class="avatar" id="avatar">?</span><b id="user">…</b><small id="host"></small></span>
+  </div>
+</div>
 <div class="view" id="view-tickets" hidden></div>
 <div class="view" id="view-dev" hidden>
   <div class="split" id="dev-split">
@@ -316,7 +389,8 @@
     <main class="pane detail-pane" id="rev-detail"></main>
   </div>
 </div>
-<div class="view" id="view-settings" hidden><div class="page"><div class="page-inner"><div class="settings" id="settings"></div></div></div></div>
+<div class="view" id="view-settings" hidden><div class="page" id="settings-page"><div class="page-inner"><div class="settings" id="settings"></div></div></div></div>
+</div>
 
 <dialog id="dialog">
   <form method="dialog">
@@ -352,6 +426,7 @@ const TASK_STATUS = {
   queued: { label: "En attente", pill: "gray" },
   running: { label: "En cours", pill: "accent" },
   mr_created: { label: "MR créée", pill: "green" },
+  mr_updated: { label: "MR mise à jour", pill: "green" },
   blocked: { label: "Bloquée", pill: "orange" },
   error: { label: "Erreur", pill: "red" },
   cancelled: { label: "Arrêtée", pill: "gray" },
@@ -384,8 +459,41 @@ const ICON = {
    ===================================================================== */
 // Tout ce qui vient de GitLab ou du modèle est échappé avant affichage
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-// Échappe puis rend le `code` inline (sûr : appliqué sur du texte déjà échappé)
-const rich = (s) => esc(s).replace(/`([^`\n]+)`/g, "<code>$1</code>");
+// Échappe puis rend le `code` et le **gras** inline (sûr : appliqué sur du texte déjà échappé)
+const rich = (s) => esc(s).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+
+/** Markdown minimal des textes de l'agent : paragraphes, listes (imbriquées, numérotées), gras, code. */
+function md(s) {
+  const out = [];
+  const stack = [];
+  let para = [];
+  const flush = () => { if (para.length) { out.push(`<p>${para.map(rich).join("<br>")}</p>`); para = []; } };
+  const closeTo = (depth) => { while (stack.length > depth) out.push(`</li></${stack.pop().tag}>`); };
+  for (const line of String(s ?? "").split("\n")) {
+    const item = line.match(/^(\s*)([-*•]|\d+[.)])\s+(.*)$/);
+    if (item) {
+      flush();
+      const indent = item[1].length;
+      const tag = /\d/.test(item[2]) ? "ol" : "ul";
+      while (stack.length && stack[stack.length - 1].indent > indent) out.push(`</li></${stack.pop().tag}>`);
+      const top = stack[stack.length - 1];
+      if (!top || indent > top.indent) { out.push(`<${tag}><li>`); stack.push({ indent, tag }); }
+      else out.push("</li><li>");
+      out.push(rich(item[3]));
+    } else if (!line.trim()) {
+      flush();
+      closeTo(0);
+    } else if (stack.length && /^\s+\S/.test(line)) {
+      out.push(" " + rich(line.trim()));
+    } else {
+      closeTo(0);
+      para.push(line.trim());
+    }
+  }
+  flush();
+  closeTo(0);
+  return out.join("");
+}
 const pill = (cls, text) => `<span class="pill ${cls}">${text}</span>`;
 const slugify = (t, max = 50) => String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, max).replace(/-+$/g, "");
 const renderTpl = (tpl, v) => tpl.replace(/\{(\w+)\}/g, (m, k) => ({ iid: String(v.iid), title: v.title, slug: slugify(v.title), summary: v.summary ?? v.title })[k] ?? m);
@@ -449,6 +557,8 @@ function route() {
   state.tab = ["tickets", "dev", "reviews", "settings"].includes(tab) ? tab : "tickets";
   for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t.dataset.tab === state.tab);
   for (const v of document.querySelectorAll(".view")) v.hidden = v.id !== `view-${state.tab}`;
+  document.getElementById("settings-toc").hidden = state.tab !== "settings";
+  document.getElementById("crumb").textContent = { tickets: "Mes tickets", dev: "Agent dev", reviews: "Reviews", settings: "Paramètres" }[state.tab];
   if (state.tab === "tickets") loadTickets(false);
   if (state.tab === "dev") { if (id) showTask(Number(id)); else { state.taskId = null; renderTaskEmpty(); refreshTasks(); } }
   if (state.tab === "reviews") { if (id) showReview(Number(id)); else { state.reviewId = null; renderReviewEmpty(); refreshReviews(); } }
@@ -465,7 +575,9 @@ async function refreshHeader() {
     mode.className = `chip mode-${stats.actionMode}`;
     mode.title = help;
     mode.lastElementChild.textContent = label;
-    document.getElementById("user").innerHTML = `@<b>${esc(stats.username)}</b>`;
+    document.getElementById("user").textContent = `@${stats.username}`;
+    document.getElementById("avatar").textContent = (stats.username || "?").slice(0, 1).toUpperCase();
+    try { document.getElementById("host").textContent = new URL(stats.gitlabUrl).host; } catch { /* URL absente */ }
 
     const needs = stats.counts.needs_human || 0;
     const br = document.getElementById("badge-reviews");
@@ -506,8 +618,11 @@ function renderTickets() {
     const taskBadge = i.task
       ? `<a href="#dev/${i.task.id}" class="pill ${TASK_STATUS[i.task.status].pill}" title="Voir la tâche de l'agent">${i.task.status === "running" ? '<span class="pulse"></span>' : ""}Agent : ${TASK_STATUS[i.task.status].label}</a>`
       : "";
+    const hasMr = Boolean(i.task?.mrIid);
     const action = i.devReady
-      ? (active ? "" : `<button class="btn primary sm" data-launch="${i.projectId}:${i.iid}">${i.task ? "Relancer l'agent" : "Traiter avec l'agent"}</button>`)
+      ? (active ? "" : hasMr
+        ? `<a class="btn sm" href="#dev/${i.task.id}" title="Ajouter un commit sur la MR existante, avec tes consignes">Reprendre la MR</a>`
+        : `<button class="btn primary sm" data-launch="${i.projectId}:${i.iid}">${i.task ? "Relancer l'agent" : "Traiter avec l'agent"}</button>`)
       : `<button class="muted-link" data-configure="${esc(i.projectPath)}">Configurer le projet</button>`;
     return `<div class="ticket">
       <div class="card-top"><span class="proj">${esc(i.projectPath)}</span><span>·</span><span>#${i.iid}</span><span class="time">${ago(i.updatedAt)}</span></div>
@@ -577,6 +692,7 @@ async function refreshTasks() {
         <div class="card-top"><span class="proj">${esc(t.project_path)}</span><span>·</span><span>#${t.issue_iid}</span><span class="time">${ago(t.updated_at)}</span></div>
         <div class="card-title">${esc(t.issue_title)}</div>
         <div class="card-bottom"><span class="grow mono">${esc(t.branch || "")}</span>
+          ${t.mode === "followup" ? `<span class="pill gray" title="Reprise de la tâche #${t.parent_id}">Reprise</span>` : ""}
           <span class="pill ${TASK_STATUS[t.status].pill}">${t.status === "running" ? '<span class="pulse"></span>' : ""}${TASK_STATUS[t.status].label}</span></div>
       </div>`).join("")
     : `<div class="empty"><div>Aucune tâche pour l'instant.<br>Lance l'agent depuis l'onglet <a href="#tickets">Tickets</a>.</div></div>`;
@@ -595,7 +711,10 @@ function taskCallout(t) {
     case "queued":
       return `<div class="callout info">${ICON.info}<h3>En attente</h3><p>L'agent démarre dès que la tâche précédente est terminée.</p></div>`;
     case "mr_created":
-      return `<div class="callout ok">${ICON.ok}<h3>MR Draft !${t.mr_iid} créée</h3><p>Contrôle-la, puis passe-la en Ready : le ticket passera en Validation technique.</p>
+      return `<div class="callout ok">${ICON.ok}<h3>MR Draft !${t.mr_iid} créée</h3><p>Contrôle-la, puis passe-la en Ready : le ticket passera en Validation technique. Des corrections à faire ? Utilise « Reprendre avec des consignes » plus bas.</p>
+        <div class="actions-inline"><a class="btn primary sm" href="${esc(t.mr_url)}" target="_blank" rel="noopener">Ouvrir la MR ${ICON.ext}</a></div></div>`;
+    case "mr_updated":
+      return `<div class="callout ok">${ICON.ok}<h3>Nouveau commit poussé sur la MR !${t.mr_iid}</h3><p>Le rapport de la reprise a été ajouté en commentaire sur la MR. Contrôle le nouveau commit avant de passer la MR en Ready.</p>
         <div class="actions-inline"><a class="btn primary sm" href="${esc(t.mr_url)}" target="_blank" rel="noopener">Ouvrir la MR ${ICON.ext}</a></div></div>`;
     case "blocked":
       return `<div class="callout warn">${ICON.warn}<h3>L'agent a besoin d'informations</h3><p>Rien n'a été poussé. Complète le ticket (ou donne des consignes) puis relance.</p>
@@ -632,6 +751,7 @@ async function showTask(id) {
       </div>
       <h1>${esc(t.issue_title)}</h1>
       <div class="meta">
+        ${t.mode === "followup" && t.parent_id ? `<span>reprise de la <a href="#dev/${t.parent_id}">tâche #${t.parent_id}</a></span>` : ""}
         ${t.branch ? `<span>branche <code>${esc(t.branch)}</code></span>` : ""}
         ${t.base_branch ? `<span><code>${esc(t.base_branch)}</code> → <code>${esc(t.target_branch)}</code></span>` : ""}
         ${t.files_changed != null ? `<span>${t.files_changed} fichier(s)</span>` : ""}
@@ -642,19 +762,20 @@ async function showTask(id) {
 
       ${taskCallout(t)}
 
-      ${t.extra_instructions ? `<section class="block"><h2>Tes consignes</h2><div class="panel"><p>${rich(t.extra_instructions)}</p></div></section>` : ""}
+      ${t.extra_instructions ? `<section class="block"><h2>${t.mode === "followup" ? "Consignes de la reprise" : "Tes consignes"}</h2><div class="panel md">${md(t.extra_instructions)}</div></section>` : ""}
 
       ${res && res.status === "done" ? `
-        <section class="block"><h2>Ce que l'agent a fait</h2><div class="panel"><p>${rich(res.summary)}</p></div></section>
-        <section class="block"><h2>Tests</h2><div class="panel"><p>${rich(res.tests)}</p></div></section>
+        <section class="block"><h2>Ce que l'agent a fait</h2><div class="panel md">${md(res.summary)}</div></section>
+        <section class="block"><h2>Tests</h2><div class="panel md">${md(res.tests)}</div></section>
         ${res.notes_for_reviewer.length ? `<section class="block"><h2>Points à vérifier en priorité</h2><div class="panel"><ul>${res.notes_for_reviewer.map((n) => `<li>${rich(n)}</li>`).join("")}</ul></div></section>` : ""}
         ${res.questions.length ? `<section class="block"><h2>Questions ouvertes</h2><div class="panel"><ul>${res.questions.map((q) => `<li>${rich(q)}</li>`).join("")}</ul></div></section>` : ""}
       ` : ""}
-      ${res && res.status === "blocked" ? `<section class="block"><h2>Ce que l'agent a compris</h2><div class="panel"><p>${rich(res.summary)}</p></div></section>` : ""}
+      ${res && res.status === "blocked" ? `<section class="block"><h2>Ce que l'agent a compris</h2><div class="panel md">${md(res.summary)}</div></section>` : ""}
 
-      ${resume && !live ? `<section class="block"><h2>Reprendre la main</h2><div class="panel">
-        <p>Dans un terminal WSL, pour continuer la conversation avec l'agent dans son dossier de travail :</p>
-        <div class="cmd"><code>${esc(resume)}</code><button class="btn sm" data-copy="${esc(resume)}">Copier</button></div></div></section>` : ""}
+      ${t.mr_iid && t.branch && !live ? `<section class="block"><h2>Reprendre avec des consignes</h2><div class="panel">
+        <p>L'agent repart de la branche <code>${esc(t.branch)}</code> telle qu'elle est sur GitLab (tes commits manuels compris), lit les commentaires de la MR, applique tes consignes, puis l'outil pousse <b>un nouveau commit</b> sur la même MR (jamais de --force) et y ajoute son rapport en commentaire. S'il se bloque, rien n'est poussé.</p>
+        <textarea class="area" id="followup-text" placeholder="Ex. : ajoute les docblocks complets sur toutes les méthodes créées, aligne le style des accolades sur Model_Price_Rule, et contrôle réellement les plages annoncées dans la feuille Aide (adultes 0-99, stock max ≥ stock min)."></textarea>
+        <div class="actions-inline" style="margin-top:10px"><button class="btn primary" data-act="task-followup">Lancer la reprise</button></div></div></section>` : ""}
 
       <section class="block"><h2>Journal ${live ? '<span class="pill accent"><span class="pulse"></span>en direct</span>' : ""}</h2>
         <div class="journal" id="journal"><div class="note" style="padding:6px 14px">Chargement…</div></div></section>
@@ -783,7 +904,7 @@ async function showReview(id) {
       </div>
       ${reviewCallout(r, reasons)}
       ${res ? `
-        <section class="block"><h2>Résumé ${pill(VERDICT[res.verdict].pill, "Verdict agent : " + VERDICT[res.verdict].label)}</h2><div class="panel"><p>${rich(res.summary)}</p></div></section>
+        <section class="block"><h2>Résumé ${pill(VERDICT[res.verdict].pill, "Verdict agent : " + VERDICT[res.verdict].label)}</h2><div class="panel md">${md(res.summary)}</div></section>
         ${res.questions_for_author.length ? `<section class="block"><h2>Questions pour l'auteur</h2><div class="panel"><ul>${res.questions_for_author.map((q) => `<li>${rich(q)}</li>`).join("")}</ul></div></section>` : ""}
         <section class="block"><h2>Points relevés (${findings.length})</h2>${findings.length ? findings.map(findingHtml).join("") : `<div class="panel"><p>Aucun point négatif relevé.</p></div>`}</section>
         ${res.positives.length ? `<section class="block"><h2>Points positifs</h2><div class="panel"><ul class="positives">${res.positives.map((p) => `<li>${rich(p)}</li>`).join("")}</ul></div></section>` : ""}` : ""}
@@ -933,6 +1054,18 @@ function renderSettings() {
         </div>
       </section>
 
+      <section class="card-section">
+        <h2>Prompts de base (avancé)</h2>
+        <p class="desc">Le prompt de base définit le rôle et la méthode de chaque agent. Par défaut, l'outil utilise son prompt d'origine (<code>prompts/review-system.md</code>, <code>prompts/dev-system.md</code>) : tu n'as rien à remplir ici. Tes consignes et celles du projet passent après et priment de toute façon. Les règles de sécurité (anti-injection, pas de commit ni de push par l'agent, format de réponse) sont toujours ajoutées à la fin et ne sont pas modifiables.</p>
+        <div class="grid2">
+          ${["review", "dev"].map((k) => `
+          <label class="field"><span>${k === "review" ? "Review des MR" : "Agent dev"} ${s.systemPrompts[k].trim() ? pill("accent", "prompt personnalisé") : pill("gray", "prompt d'origine")}</span>
+            <textarea class="prose" style="min-height:280px" name="systemPrompts.${k}" placeholder="Champ vide = l'agent utilise le prompt d'origine de l'outil.&#10;&#10;Pour le lire ou l'adapter, clique sur « Personnaliser ce prompt » : il s'affiche ici, tu le modifies, puis tu enregistres.">${esc(s.systemPrompts[k])}</textarea>
+            <span style="display:flex;gap:8px;margin-top:6px"><button type="button" class="btn sm" data-act="prompt-load-default" data-kind="${k}">Personnaliser ce prompt</button><button type="button" class="btn sm ghost" data-act="prompt-clear" data-kind="${k}">Remettre le prompt d'origine</button></span>
+          </label>`).join("")}
+        </div>
+      </section>
+
       <div class="save-bar"><button type="button" class="btn ghost" data-act="settings-reset">Valeurs par défaut</button><button type="submit" class="btn primary">Enregistrer les paramètres</button></div>
     </form>
 
@@ -950,6 +1083,31 @@ function renderSettings() {
       <div style="margin-top:12px"><button class="btn" data-act="project-add">+ Ajouter un projet</button></div>
     </section>`;
   updatePreview();
+  buildSettingsToc();
+}
+
+/** Sommaire des paramètres : un lien par section, celle visible est surlignée au défilement. */
+function buildSettingsToc() {
+  const toc = document.getElementById("settings-toc");
+  const page = document.getElementById("settings-page");
+  const sections = [...document.querySelectorAll("#settings .card-section")];
+  sections.forEach((sec, i) => { sec.id = `set-${i}`; });
+  const shortTitle = (sec) => (sec.querySelector("h2")?.textContent || "").replace(/ (des reviews|de l'agent dev|\(avancé\))$/, "");
+  toc.innerHTML = sections.map((sec, i) =>
+    `<button type="button" data-toc="${i}" title="${esc(sec.querySelector("h2")?.textContent || "")}">${esc(shortTitle(sec))}</button>`).join("");
+  toc.onclick = (e) => {
+    const b = e.target.closest("[data-toc]");
+    if (b) document.getElementById(`set-${b.dataset.toc}`).scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const highlight = () => {
+    const top = page.getBoundingClientRect().top + 120;
+    let current = 0;
+    sections.forEach((sec, i) => { if (sec.getBoundingClientRect().top <= top) current = i; });
+    if (page.scrollTop + page.clientHeight >= page.scrollHeight - 4) current = sections.length - 1;
+    toc.querySelectorAll("button").forEach((b, i) => b.classList.toggle("active", i === current));
+  };
+  page.onscroll = highlight;
+  highlight();
 }
 
 function updatePreview() {
@@ -982,6 +1140,7 @@ function collectSettings() {
       labelOnStart: f["workflow.labelOnStart"].value.trim(),
     },
     instructions: { review: f["instructions.review"].value, dev: f["instructions.dev"].value },
+    systemPrompts: { review: f["systemPrompts.review"].value, dev: f["systemPrompts.dev"].value },
     templates: {
       branch: f["templates.branch"].value.trim(),
       commit: f["templates.commit"].value.trim(),
@@ -1046,7 +1205,7 @@ async function renderProjectForm() {
     <div class="grid2" style="margin-top:14px">
       <label class="field"><span>Branche de départ</span><input name="baseBranch" list="branch-list" value="${esc(p.baseBranch)}" placeholder="ex. develop"><small>La branche du ticket est créée depuis celle-ci.</small></label>
       <label class="field"><span>Branche cible de la MR</span><input name="targetBranch" list="branch-list" value="${esc(p.targetBranch)}" placeholder="ex. global"><small>Global, intermédiaire, master... selon le projet.</small></label>
-      <label class="field"><span>Commandes autorisées</span><textarea name="allowedCommands" placeholder="docker compose exec -T app php artisan test">${esc(p.allowedCommands.join("\n"))}</textarea><small>Une commande par ligne (tests, lint). L'agent pourra y ajouter des arguments. Rien d'autre ne lui est permis.</small></label>
+      <label class="field"><span>Commandes autorisées</span><textarea name="allowedCommands" placeholder="docker run --rm -v {worktree}:/app -w /app php:7.3-cli vendor/bin/phpunit">${esc(p.allowedCommands.join("\n"))}</textarea><small>Une commande par ligne (tests, lint). L'agent pourra y ajouter des arguments. Rien d'autre ne lui est permis. <code>{worktree}</code> est remplacé par le dossier de travail de l'agent : c'est lui qu'il faut monter dans un conteneur, pas ton dossier local (un <code>docker compose exec</code> sur ton conteneur habituel testerait ton code, pas celui de l'agent). Les dépendances non versionnées (<code>vendor/</code>, <code>node_modules/</code>) ne sont pas dans ce dossier.</small></label>
       <label class="field"><span>Consignes propres au projet</span><textarea class="prose" name="instructions" placeholder="Stack et version, conventions, pièges connus...">${esc(p.instructions)}</textarea><small>Utilisées par l'agent dev et par la review des MR de ce projet.</small></label>
     </div>
     <datalist id="branch-list"></datalist>
@@ -1134,6 +1293,13 @@ document.addEventListener("click", async (e) => {
   if (act === "rev-back") return go("#reviews");
   if (act === "project-add") return openProjectEditor(null);
   if (act === "project-cancel") { editingProject = null; document.getElementById("project-editor").innerHTML = ""; return; }
+  if (act === "toggle-sidebar") return setSidebarCollapsed(!document.body.classList.contains("collapsed"));
+  if (act === "prompt-load-default" || act === "prompt-clear") {
+    const area = document.querySelector(`[name="systemPrompts.${t.dataset.kind}"]`);
+    if (act === "prompt-load-default" && area.value.trim() && !(await ask({ title: "Repartir du prompt d'origine ?", html: "<p>Ton prompt personnalisé est remplacé dans le champ par le prompt d'origine. Rien n'est enregistré tant que tu ne cliques pas sur Enregistrer.</p>", okLabel: "Remplacer" }))) return;
+    area.value = act === "prompt-load-default" ? settingsData.defaultSystemPrompts[t.dataset.kind] : "";
+    return toast(act === "prompt-load-default" ? "Prompt d'origine affiché : modifie-le puis enregistre." : "Champ vidé : le prompt d'origine sera utilisé après enregistrement.");
+  }
   if (act === "settings-reset") {
     if (!(await ask({ title: "Revenir aux valeurs par défaut ?", html: "<p>Le formulaire est réinitialisé. Rien n'est enregistré tant que tu ne cliques pas sur Enregistrer. Les projets ne sont pas touchés.</p>", okLabel: "Réinitialiser" }))) return;
     settingsData.settings = settingsData.defaults;
@@ -1144,6 +1310,16 @@ document.addEventListener("click", async (e) => {
     await api(`/api/tasks/${state.taskId}/cancel`, {}).catch((err) => toast(err.message, true));
     toast("Arrêt demandé.");
     return setTimeout(() => showTask(state.taskId), 1500);
+  }
+  if (act === "task-followup") {
+    const instructions = document.getElementById("followup-text").value.trim();
+    if (!instructions) return toast("Écris d'abord les consignes de la reprise.", true);
+    if (!(await ask({ title: "Lancer la reprise ?", html: "<p>L'agent repart de la branche telle qu'elle est sur GitLab. Si tout est bon, l'outil pousse un nouveau commit sur la MR et y ajoute un commentaire. S'il se bloque, rien n'est poussé.</p>", okLabel: "Lancer" }))) return;
+    const res = await api(`/api/tasks/${state.taskId}/followup`, { instructions }).catch((err) => { toast(err.message, true); return null; });
+    if (!res) return;
+    toast("Reprise lancée.");
+    refreshHeader();
+    return go(`#dev/${res.id}`);
   }
   if (act === "task-cleanup") {
     if (!(await ask({ title: "Nettoyer le dossier local ?", html: "<p>Le dossier de travail de l'agent est supprimé de ta machine. La branche et la MR sur GitLab ne sont pas touchées, mais tu ne pourras plus reprendre la session de l'agent.</p>", okLabel: "Nettoyer" }))) return;
@@ -1157,6 +1333,16 @@ document.addEventListener("keydown", (e) => {
   const card = e.target.closest?.(".card[data-task], .card[data-review]");
   if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); card.click(); }
 });
+
+/** Sidebar repliée ou non, mémorisé par navigateur (sans conséquence si le stockage est indisponible). */
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle("collapsed", collapsed);
+  const btn = document.querySelector(".collapse-btn");
+  btn.title = collapsed ? "Déplier le menu" : "Réduire le menu";
+  btn.querySelector(".lbl").textContent = collapsed ? "Déplier" : "Réduire";
+  try { localStorage.setItem("ra.sidebarCollapsed", collapsed ? "1" : "0"); } catch { /* stockage indisponible */ }
+}
+try { if (localStorage.getItem("ra.sidebarCollapsed") === "1") setSidebarCollapsed(true); } catch { /* stockage indisponible */ }
 
 window.addEventListener("hashchange", route);
 

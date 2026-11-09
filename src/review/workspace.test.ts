@@ -67,3 +67,71 @@ describe("RepoWorkspace (flux de l'agent dev)", () => {
     expect(await ws.changedFiles(wt)).toEqual(["app.js"]);
   });
 });
+
+describe("RepoWorkspace (reprise d'une MR)", () => {
+  let root = "";
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  const author = { name: "Alex", email: "alex@example.com" };
+
+  /** Premier passage de l'agent : branche créée et poussée. */
+  async function firstRun(ws: RepoWorkspace, url: string, branch: string): Promise<string> {
+    const wt = await ws.createBranchWorktree(1, url, "develop", branch);
+    writeFileSync(path.join(wt, "app.js"), "export const x = 2;\n");
+    await ws.commitAll(wt, "#163 - Premier passage", author);
+    await ws.pushBranch(wt, branch);
+    return wt;
+  }
+
+  it("repart de la branche telle que sur GitLab (commit manuel compris) et pousse en fast-forward", async () => {
+    root = mkdtempSync(path.join(tmpdir(), "ws-test-"));
+    const { url, developSha } = makeRemote(root);
+    const ws = new RepoWorkspace(path.join(root, "repos"), "token-factice");
+    const branch = "feature/163-test";
+    await firstRun(ws, url, branch);
+
+    // Correction manuelle poussée par le développeur entre-temps, depuis un autre clone
+    const manual = path.join(root, "manual");
+    execFileSync("git", ["clone", "-q", "-b", branch, url, manual]);
+    writeFileSync(path.join(manual, "manual.js"), "export const z = 1;\n");
+    execFileSync("git", ["add", "."], { cwd: manual });
+    execFileSync("git", ["-c", "user.name=dev", "-c", "user.email=d@d", "commit", "-qm", "ajout manuel"], { cwd: manual });
+    execFileSync("git", ["push", "-q", "origin", branch], { cwd: manual });
+    const manualSha = remoteSha(url, `refs/heads/${branch}`);
+
+    const wt = await ws.checkoutExistingBranch(1, url, branch);
+    expect(await ws.headSha(wt)).toBe(manualSha);
+    expect(existsSync(path.join(wt, "manual.js"))).toBe(true);
+
+    writeFileSync(path.join(wt, "app.js"), "/** Docblock ajouté */\nexport const x = 2;\n");
+    await ws.commitAll(wt, "#163 - Reprise", author);
+    await ws.pushBranch(wt, branch);
+
+    const pushed = remoteSha(url, `refs/heads/${branch}`);
+    const parent = execFileSync("git", ["rev-parse", `${pushed}^`], { cwd: wt }).toString().trim();
+    expect(parent).toBe(manualSha); // nouveau commit par-dessus, rien de réécrit
+    expect(remoteSha(url, "refs/heads/develop")).toBe(developSha);
+  });
+
+  it("refuse la reprise si l'ancien dossier contient des modifications non committées", async () => {
+    root = mkdtempSync(path.join(tmpdir(), "ws-test-"));
+    const { url } = makeRemote(root);
+    const ws = new RepoWorkspace(path.join(root, "repos"), "token-factice");
+    const wt = await firstRun(ws, url, "feature/163-test");
+    writeFileSync(path.join(wt, "app.js"), "travail local non poussé\n");
+
+    await expect(ws.checkoutExistingBranch(1, url, "feature/163-test")).rejects.toThrow(/non committées/);
+    expect(existsSync(path.join(wt, "app.js"))).toBe(true);
+  });
+
+  it("refuse la reprise si l'ancien dossier contient des commits non poussés", async () => {
+    root = mkdtempSync(path.join(tmpdir(), "ws-test-"));
+    const { url } = makeRemote(root);
+    const ws = new RepoWorkspace(path.join(root, "repos"), "token-factice");
+    const wt = await firstRun(ws, url, "feature/163-test");
+    writeFileSync(path.join(wt, "app.js"), "commit local\n");
+    await ws.commitAll(wt, "#163 - Local", author);
+
+    await expect(ws.checkoutExistingBranch(1, url, "feature/163-test")).rejects.toThrow(/non poussé/);
+  });
+});

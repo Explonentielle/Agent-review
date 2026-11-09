@@ -90,6 +90,11 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_dev_task_events_task ON dev_task_events(task_id, id);
   `,
+  // Reprise d'une MR existante avec des consignes (roadmap, item 30)
+  `
+  ALTER TABLE dev_tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'new';
+  ALTER TABLE dev_tasks ADD COLUMN parent_id INTEGER REFERENCES dev_tasks(id);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

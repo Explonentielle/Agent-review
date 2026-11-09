@@ -83,6 +83,10 @@ export interface GitlabNote {
   system: boolean;
   author: GitlabUser;
   created_at: string;
+  /** Commentaire de MR rattaché à une ligne du diff (DiffNote). */
+  position?: { new_path?: string | null; new_line?: number | null; old_path?: string | null; old_line?: number | null } | null;
+  resolvable?: boolean;
+  resolved?: boolean;
 }
 
 export interface GitlabBranch {

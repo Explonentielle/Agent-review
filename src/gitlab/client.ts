@@ -128,6 +128,15 @@ export class GitlabClient {
     return this.request("PUT", `/projects/${projectId}/issues/${issueIid}`, { add_labels: labels.join(",") });
   }
 
+  /** Commentaires de la MR (généraux et sur le diff), dans l'ordre chronologique. */
+  getMergeRequestNotes(projectId: number, mrIid: number): Promise<GitlabNote[]> {
+    return this.getAll(`/projects/${projectId}/merge_requests/${mrIid}/notes?sort=asc&order_by=created_at`);
+  }
+
+  createMergeRequestNote(projectId: number, mrIid: number, body: string): Promise<GitlabNote> {
+    return this.request("POST", `/projects/${projectId}/merge_requests/${mrIid}/notes`, { body });
+  }
+
   createMergeRequestDiscussion(projectId: number, mrIid: number, body: string): Promise<{ id: string }> {
     return this.request("POST", `/projects/${projectId}/merge_requests/${mrIid}/discussions`, { body });
   }

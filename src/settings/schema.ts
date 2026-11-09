@@ -46,6 +46,14 @@ export const SettingsSchema = z.object({
     review: z.string(),
     dev: z.string(),
   }),
+  /**
+   * Prompt de base personnalisé, qui remplace prompts/*-system.md. Vide = fichier par défaut.
+   * Les garde-fous (prompts/*-guardrails.md) restent toujours ajoutés, quoi qu'il contienne.
+   */
+  systemPrompts: z.object({
+    review: z.string(),
+    dev: z.string(),
+  }),
   /** Variables : {iid} {slug} {title} {summary} */
   templates: z.object({
     branch: z.string().trim().min(1),
@@ -98,6 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
       "- Migrations : réversibles quand le projet en a.",
     ].join("\n"),
   },
+  systemPrompts: { review: "", dev: "" },
   templates: {
     branch: "feature/{iid}-{slug}",
     commit: "#{iid} - {summary}",

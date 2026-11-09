@@ -60,8 +60,7 @@ export class RepoWorkspace {
 
   /** Crée la branche du ticket depuis la branche de base à jour, dans un worktree dédié. */
   async createBranchWorktree(projectId: number, cloneUrl: string, baseBranch: string, branch: string): Promise<string> {
-    const mirror = await this.ensureMirror(projectId, cloneUrl);
-    await this.git(["-C", mirror, "fetch", "--force", "origin", `refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`]);
+    const mirror = await this.fetchBranch(projectId, cloneUrl, baseBranch);
 
     const wt = this.devWorktreePath(projectId, branch);
     if (existsSync(wt)) {
@@ -71,6 +70,37 @@ export class RepoWorkspace {
     await this.git(["-C", mirror, "branch", "-D", branch]).catch(() => undefined);
     await this.git(["-C", mirror, "worktree", "add", "-b", branch, wt, `refs/remotes/origin/${baseBranch}`]);
     return wt;
+  }
+
+  /**
+   * Reprise d'une MR : worktree sur la branche du ticket telle qu'elle est sur GitLab (commits
+   * ajoutés à la main compris). Refuse si l'ancien worktree contient du travail non poussé.
+   */
+  async checkoutExistingBranch(projectId: number, cloneUrl: string, branch: string): Promise<string> {
+    const mirror = await this.fetchBranch(projectId, cloneUrl, branch);
+    const remote = `refs/remotes/origin/${branch}`;
+
+    const wt = this.devWorktreePath(projectId, branch);
+    if (existsSync(wt)) {
+      if ((await this.changedFiles(wt)).length > 0) {
+        throw new Error(`Le dossier de travail ${wt} contient des modifications non committées : pousse-les ou supprime le dossier avant la reprise`);
+      }
+      const ahead = Number((await this.git(["-C", wt, "rev-list", "--count", `${remote}..HEAD`])).trim());
+      if (ahead > 0) {
+        throw new Error(`Le dossier de travail ${wt} contient ${ahead} commit(s) non poussé(s) : pousse-les ou supprime le dossier avant la reprise`);
+      }
+      await this.git(["-C", mirror, "worktree", "remove", "--force", wt]);
+    }
+    await this.git(["-C", mirror, "branch", "-D", branch]).catch(() => undefined);
+    await this.git(["-C", mirror, "worktree", "add", "-b", branch, wt, remote]);
+    return wt;
+  }
+
+  /** Met à jour refs/remotes/origin/<branch> dans le miroir. Retourne le chemin du miroir. */
+  async fetchBranch(projectId: number, cloneUrl: string, branch: string): Promise<string> {
+    const mirror = await this.ensureMirror(projectId, cloneUrl);
+    await this.git(["-C", mirror, "fetch", "--force", "origin", `refs/heads/${branch}:refs/remotes/origin/${branch}`]);
+    return mirror;
   }
 
   devWorktreePath(projectId: number, branch: string): string {

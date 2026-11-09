@@ -67,6 +67,17 @@ Le passage en Ready reste manuel (selon le workflow de l'équipe, il peut faire 
 
 Le worktree est **conservé** après la tâche : on peut reprendre la conversation avec `claude --resume <session>` depuis son dossier (commande affichée dans le dashboard), puis le nettoyer d'un clic.
 
+### Reprise d'une MR existante
+
+Bouton « Reprendre avec des consignes » sur une tâche terminée liée à une MR. Une nouvelle tâche (`mode = followup`, `parent_id` = tâche d'origine) hérite de la branche et de la MR :
+
+1. **Vérifications** : consignes obligatoires, MR toujours ouverte et partant de la même branche, `assertBranchAllowed` comme au premier passage.
+2. **Branche** : récupérée **telle qu'elle est sur GitLab** (`checkoutExistingBranch`), commits poussés à la main compris. Refus si l'ancien worktree contient des modifications non committées ou des commits non poussés, pour ne jamais écraser du travail local.
+3. **Agent** : reçoit tes consignes, le ticket, le rapport de la tâche d'origine, les commentaires de la MR (fichier, ligne, résolu ou non) et la commande pour voir tout le diff de la MR.
+4. **Mêmes contrôles avant push** qu'au premier passage, puis **nouveau commit** poussé en fast-forward (jamais de `--force`) et commentaire sur la MR avec les consignes et le rapport. Statut `mr_updated`. Bloqué = rien n'est poussé.
+
+Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le dossier de travail de l'agent : c'est lui qu'il faut monter dans un conteneur pour tester son code.
+
 ## Review : déroulé
 
 1. **Détection** (`src/triggers/gitlabPoller.ts`) : toutes les `POLL_INTERVAL_SEC` secondes, le poller liste les MR ouvertes, hors draft, où l'utilisateur est reviewer, et dont il n'est pas l'auteur. Chaque couple (MR, sha de tête) n'est traité qu'une fois : un nouveau push crée une nouvelle review.
@@ -90,7 +101,7 @@ Le worktree est **conservé** après la tâche : on peut reprendre la conversati
 | `src/dev/*` | Agent dev : garde-fous, templates, contexte, moteur, orchestration |
 | `src/server/app.ts` | API JSON et service du dashboard |
 | `src/cli/` | `reviewOnce` (review manuelle par URL de MR) |
-| `prompts/` | Prompts système génériques (review, dev), relus à chaque exécution. Les consignes perso sont en base (réglages) |
+| `prompts/` | Prompts de base par défaut (`*-system.md`, remplaçables dans le dashboard) et garde-fous (`*-guardrails.md`, toujours ajoutés en dernier). Assemblage dans `src/prompts.ts` : base < consignes perso < consignes du projet < garde-fous |
 | `scripts/` | Tests réels de la CLI : `smoke-claude.sh` (review et isolation), `smoke-dev.ts` (agent dev) |
 
 ## Données

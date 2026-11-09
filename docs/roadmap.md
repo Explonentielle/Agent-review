@@ -37,10 +37,13 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 27 | Paramétrage | Réglages dans le dashboard (pas en dur), `.env` limité aux secrets | Moyen | ✅ Fait (2026-11-04) |
 | 28 | Tickets | Onglet « Mes tickets » rangé par labels du workflow | Faible | ✅ Fait (2026-11-04), à valider avec le vrai GitLab |
 | 29 | Agent dev | Ticket → branche → agent → commit → push de la branche seule → MR Draft | Élevé | ✅ Fait (2026-11-04) ; moteur vérifié en réel, bout en bout sur GitLab à faire |
-| 30 | Agent dev | Reprendre une MR existante (corriger suite à review, nouveau commit sur la même branche) | Moyen | Item 29 |
-| 31 | Agent dev | Tests sous Docker : commande autorisée par projet, à valider sur un vrai projet | Faible | Item 29 (mécanisme en place) |
+| 30 | Agent dev | Reprendre une MR existante (corriger suite à review, nouveau commit sur la même branche) | Moyen | ✅ Fait (2026-11-09) ; tests git locaux OK, bout en bout sur GitLab à faire |
+| 31 | Agent dev | Tests sous Docker : commande autorisée par projet, à valider sur un vrai projet | Faible | Variable `{worktree}` faite (2026-11-09) ; dépendances (`vendor/`) et validation sur un vrai projet à faire |
 | 32 | Outillage | Serveur MCP GitLab | Faible | Écarté (2026-11-04), voir section |
 | 33 | Paramétrage | Aucune info d'entreprise dans le code : consignes des agents dans le dashboard | Faible | ✅ Fait (2026-11-06) |
+| 34 | Paramétrage | Prompts de base remplaçables dans le dashboard, garde-fous verrouillés | Faible | ✅ Fait (2026-11-09) |
+| 35 | Agent dev | Dépôts en ISO-8859-1 (sra-moteur) : l'édition de l'agent corrompt les accents | Moyen | Noté, pas implémenté : ne pas activer l'agent dev sur ces dépôts |
+| 36 | Plateforme | Plateforme hébergée : conteneur par utilisateur, GitLab / GitHub / tickets internes, abonnement ou clé API | Très élevé | Spec et plan écrits (2026-11-09), voir `docs/vision-plateforme.md` ; questions ouvertes à trancher |
 
 ---
 
@@ -286,13 +289,27 @@ Ce test réel a révélé deux points, corrigés depuis :
 
 **Pas encore testé** : le bout en bout sur GitLab (création de branche distante, MR). Il faut le `.env` et un projet configuré.
 
-### 30. Reprendre une MR existante
+### 30. Reprendre une MR existante : ✅ Fait (2026-11-09)
 
-**Idée** : depuis une tâche `mr_created`, demander une correction (retours de review, commentaires de la MR) : l'agent repart du worktree conservé, et l'outil pousse un nouveau commit sur la même branche. Aujourd'hui, relancer un ticket dont la branche existe déjà est refusé volontairement. En attendant, `claude --resume` dans le worktree permet de continuer à la main.
+**Implémenté (2026-11-09)** :
+- Bouton « Reprendre avec des consignes » dans le détail de toute tâche terminée liée à une MR (et « Reprendre la MR » dans l'onglet Tickets). `POST /api/tasks/:id/followup` crée une tâche `mode = followup` liée à la tâche d'origine (`parent_id`, migration 3), qui hérite de la branche et de la MR. Consignes obligatoires.
+- Pipeline (`src/dev/pipeline.ts`, `runFollowup`) : contrôle que la MR est ouverte et part toujours de la branche, garde-fou de branche, récupération de la branche **telle qu'elle est sur GitLab** (`checkoutExistingBranch` : les commits poussés à la main entre-temps sont repris). Refus si l'ancien dossier de travail contient des modifications non committées ou des commits non poussés.
+- Prompt de reprise (`buildFollowupPrompt`) : consignes, ticket, rapport de la tâche d'origine, commentaires de la MR (avec fichier, ligne, résolu ou non), et la commande `git diff origin/<cible>...HEAD` pour voir toute la MR.
+- Mêmes contrôles qu'un premier passage (repli des commits de l'agent, fichiers secrets refusés), puis **nouveau commit** poussé en fast-forward (jamais de `--force`), commentaire sur la MR avec les consignes et le rapport, statut `mr_updated`. Bloqué = rien n'est poussé.
+- Étapes communes au premier passage et à la reprise factorisées (`runAgent`, `commitAgentWork`).
+- Tests : reprise git de bout en bout sur un dépôt local (commit manuel repris, parent du nouveau commit = tête distante, `develop` intact), refus en cas de travail local non poussé, prompt (consignes hors balise externe, commentaires localisés, notes système exclues), commentaire de MR.
+
+**Pas encore testé** : la reprise sur le vrai GitLab.
+
+**Idée d'origine** : depuis une tâche `mr_created`, demander une correction (retours de review, commentaires de la MR) : l'agent repart du worktree conservé, et l'outil pousse un nouveau commit sur la même branche. Aujourd'hui, relancer un ticket dont la branche existe déjà est refusé volontairement. En attendant, `claude --resume` dans le worktree permet de continuer à la main.
 
 ### 31. Tests sous Docker
 
-Le mécanisme existe : des commandes autorisées par projet, par exemple `docker compose exec -T app php artisan test`. À valider sur un vrai projet. Le worktree de l'agent n'est pas le dossier monté dans le conteneur : il faudra probablement une commande qui monte le worktree, ou lancer les tests directement dans la WSL si le projet le permet.
+**Fait (2026-11-09)** : dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le dossier de travail de l'agent (`resolveCommands`), dans le prompt comme dans les permissions. Exemple : `docker run --rm -v {worktree}:/app -w /app php:7.3-cli vendor/bin/phpunit`. L'aide du champ explique pourquoi un `docker compose exec` sur le conteneur habituel testerait le code local et non celui de l'agent.
+
+**Reste à faire** : les dépendances non versionnées (`vendor/`, `node_modules/`) ne sont pas dans le worktree. Pistes : monter en lecture seule celles du dossier local (`-v /home/.../projet/vendor:/app/vendor:ro`), ou une commande d'installation autorisée. À valider sur un vrai projet.
+
+**Constat d'origine** : le mécanisme existe : des commandes autorisées par projet, par exemple `docker compose exec -T app php artisan test`. À valider sur un vrai projet. Le worktree de l'agent n'est pas le dossier monté dans le conteneur : il faudra probablement une commande qui monte le worktree, ou lancer les tests directement dans la WSL si le projet le permet.
 
 ### 32. Serveur MCP GitLab : écarté (2026-11-04)
 
@@ -310,3 +327,42 @@ GitLab a un serveur MCP officiel (`/api/v4/mcp`), en beta depuis 18.6 en auto-h�
 - Migration : les consignes existantes de l'utilisateur ont été recopiées dans sa base locale avant la suppression des fichiers.
 
 **Limite** : le premier commit poussé sur GitHub contient encore ces infos dans l'historique (dépôt privé). Les effacer demanderait de réécrire l'historique (force push).
+
+### 34. Prompts de base remplaçables, garde-fous verrouillés : ✅ Fait (2026-11-09)
+
+**Demande** : pouvoir remplacer depuis le dashboard le prompt générique livré dans le projet, pour que tout soit vraiment configurable. Déclencheur : les consignes perso (PHPDoc obligatoire) entraient en conflit avec le prompt générique (« pas de remarques purement cosmétiques »).
+
+**Implémenté (2026-11-09)** :
+- Chaque prompt est découpé en deux fichiers : `prompts/*-system.md` (rôle, méthode, sévérités, rapport : valeur par défaut) et `prompts/*-guardrails.md` (anti-injection, ticket non autoritaire, périmètre de l'agent dev, format de réponse).
+- Nouveau réglage `systemPrompts` (`review`, `dev`) : vide = fichier par défaut, sinon il le remplace. Section « Prompts de base (avancé) » dans Paramètres, avec « Partir du prompt par défaut » et « Revenir au défaut ». L'API `GET /api/settings` renvoie les prompts par défaut.
+- Assemblage centralisé dans `src/prompts.ts`, par priorité croissante : prompt de base < consignes perso < consignes du projet < commandes autorisées < garde-fous. Les titres des consignes indiquent qu'elles priment sur les règles générales.
+- Tests : ordre des sections, sections vides omises, garde-fous toujours présents même avec un prompt personnalisé.
+
+**Choix** : les garde-fous ne sont volontairement pas modifiables depuis le dashboard. Un prompt personnalisé mal écrit ne peut donc pas rendre l'agent manipulable par le contenu d'un ticket ou d'une MR.
+
+### 35. Dépôts en ISO-8859-1 (sra-moteur) : noté, pas implémenté
+
+**Constat (2026-11-09)** : les fichiers de sra-moteur sont en ISO-8859-1. Les outils d'édition de l'agent (Edit, Write) lisent et écrivent en UTF-8 : sur un fichier Latin-1, chaque caractère accentué est remplacé par U+FFFD **dans tout le fichier**, et l'accent est perdu définitivement. L'agent n'a pas le droit de lancer `sed`, `iconv` ou Python, qui permettraient d'éditer sans réinterpréter l'encodage.
+
+**En attendant** : ne pas activer l'agent dev sur sra-moteur. Les consignes du projet peuvent demander à l'agent de terminer en `blocked` s'il doit modifier un fichier accentué, mais ce n'est qu'un filet de sécurité.
+
+**Pistes** :
+- un garde-fou dans le code avant le push : refuser si le diff ajoute le caractère U+FFFD, ou si un fichier dont l'encodage d'origine est ISO-8859-1 n'est plus valide dans cet encodage (contrôle déterministe, indépendant du modèle) ;
+- convertir les fichiers touchés en UTF-8 avant l'agent puis les reconvertir après (`iconv`), avec vérification que la conversion retour est sans perte ;
+- autoriser une commande d'édition Latin-1 dédiée et bornée au worktree.
+
+### 36. Plateforme hébergée : spec et plan (2026-11-09)
+
+**Demande** : passer d'un outil local à une plateforme de développement où chaque utilisateur a son conteneur (projets, langages, dépendances), branche GitLab, GitHub ou des tickets internes, et fait travailler l'agent avec son abonnement Claude Code ou sa clé API.
+
+**Décision de principe** : « ton environnement, ta session Claude ». La plateforme ne voit, ne stocke et n'utilise jamais les identifiants claude.ai : l'utilisateur se connecte lui-même (`/login`) dans le terminal de son propre conteneur. Clé API possible comme secret personnel injecté dans son seul conteneur. À faire valider par Anthropic avant une ouverture au-delà de l'équipe.
+
+**Plan** : six étapes livrables séparément, détaillées dans `docs/vision-plateforme.md` : cœur indépendant de la forge et du moteur, GitHub, multi-utilisateur sur serveur (clé API), conteneur par utilisateur, tickets internes avec Gitea, industrialisation.
+
+**Documents** : `docs/vision-plateforme.md` (architecture, concurrence, historique des décisions) et `docs/parcours-utilisateur.md` (parcours en neuf étapes, parcours transverses support / ticket interne / review, écosystèmes à brancher, écrans cibles, existant contre à construire).
+
+**Décisions de sécurité prises le 2026-11-09** :
+- **Accès au code** : le conteneur ne détient aucun identifiant de forge et n'a aucun accès réseau à la forge. Le plan de contrôle clone, pousse et crée la MR. Le conteneur travaille sur une copie autonome, et **seul un patch en sort**, appliqué après contrôles fixes. Le relais git à jeton court est écarté (un jeton dans le conteneur est lisible par un agent manipulé, et les forges ne limitent pas un jeton à une branche). Détail : `docs/vision-plateforme.md`, section 3.4.
+- **Support client** : caviardage des données personnelles avant tout prompt (repères stables, table de correspondance dans le plan de contrôle seul, mode strict au départ). Validation humaine obligatoire par défaut, assouplissement par catégorie après taux d'accord mesuré. Reste à valider : durées de conservation avec le DPO, AIPD, conditions du fournisseur. Détail : section 3.5.
+
+**Rien n'est implémenté.** Prochaine étape : trancher les questions ouvertes (section 9 du document), puis spec détaillée de l'étape 1.
