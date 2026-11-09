@@ -16,7 +16,7 @@ Outil **local** : il tourne dans la WSL de chaque utilisateur, avec son token Gi
 
 ```
                      ┌──────────────────────── review-agent (WSL, Node 24) ─────────────────────────┐
- GitLab API ◄─poll── │ triggers/gitlabPoller ─► reviews ─► file review ─► review/pipeline  (lecture) │
+ GitLab API ◄─poll── │ triggers/reviewPoller ─► reviews ─► file review ─► review/pipeline  (lecture) │
  (self-managed)     │                                                                              │
             ◄─────── │ onglet Tickets ─► « Traiter » ─► dev_tasks ─► file dev ─► dev/pipeline        │
                      │                                                                              │
@@ -24,7 +24,7 @@ Outil **local** : il tourne dans la WSL de chaque utilisateur, avec son token Gi
                      │  dev    : branche du ticket ─► claude -p (lecture/écriture + tests autorisés) │
                      │           ─► contrôles ─► commit ─► push de CETTE branche ─► MR Draft         │
                      │                                                                              │
-                     │  settings (SQLite) : workflow, conventions, projets, modèles, mode d'action  │
+                     │  settings (base) : workflow, conventions, projets, modèles, mode d'action  │
  Navigateur ◄─http── │ server/app (Fastify, 127.0.0.1:4321) + public/index.html (4 onglets)         │
                      └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -58,7 +58,8 @@ Un collègue qui veut l'outil : `git clone`, `npm install`, `.env` avec son toke
 6. **Contrôles avant push** :
    - si l'agent a committé lui-même malgré l'interdiction, ses commits sont repliés (`reset --soft`) dans le commit de l'outil ;
    - au moins un fichier doit être modifié ;
-   - aucun fichier de secrets (`.env`, clés) ne doit l'être, sinon le push est refusé.
+   - aucun fichier de secrets (`.env`, clés) ne doit l'être, sinon le push est refusé ;
+   - contrôle des fichiers (`src/dev/fileGuard.ts`) : pas de chemin absolu, avec `..` ou dans `.git`, pas de lien symbolique sortant du dépôt, taille limitée, et encodage préservé (un fichier ISO-8859-1 réécrit en UTF-8, ou contenant U+FFFD, est refusé).
 7. **Commit** au format configuré, avec l'identité GitLab de l'utilisateur. Le sujet proposé par l'agent est nettoyé : une ligne, sans trailer `Co-Authored-By`.
 8. **Push** : `git push origin HEAD:refs/heads/<branche>`, sans `--force`, après une seconde vérification de la branche.
 9. **MR** : toujours en **Draft** (`ensureDraftTitle`, quel que soit le template), vers la branche cible du projet, assignée à l'utilisateur. La description reprend le template et le rapport de l'agent, et signale les fichiers sensibles modifiés (CI, Docker, dépendances).
@@ -80,7 +81,7 @@ Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le do
 
 ## Review : déroulé
 
-1. **Détection** (`src/triggers/gitlabPoller.ts`) : toutes les `POLL_INTERVAL_SEC` secondes, le poller liste les MR ouvertes, hors draft, où l'utilisateur est reviewer, et dont il n'est pas l'auteur. Chaque couple (MR, sha de tête) n'est traité qu'une fois : un nouveau push crée une nouvelle review.
+1. **Détection** (`src/triggers/reviewPoller.ts`) : toutes les `POLL_INTERVAL_SEC` secondes, le poller liste les MR ouvertes, hors draft, où l'utilisateur est reviewer, et dont il n'est pas l'auteur. Chaque couple (MR, sha de tête) n'est traité qu'une fois : un nouveau push crée une nouvelle review.
 2. **Contexte** (`src/review/context.ts`) : diffs filtrés (lockfiles, assets compilés, images, `.env`), tickets liés, commits et statuts CI. Les textes rédigés par des humains sont balisés `<contenu_externe>`.
 3. **Checkout** (`src/review/workspace.ts`) : `refs/merge-requests/<iid>/head`, puis un worktree jetable au sha exact.
 4. **Agent** (`src/review/engine.ts`) : `claude -p` en lecture seule, sortie contrainte par `--json-schema`.
@@ -94,20 +95,25 @@ Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le do
 | `src/index.ts` | Point d'entrée : config, BDD, deux files (review, dev), poller, serveur |
 | `src/config.ts` | Lecture du `.env` (secrets et machine uniquement) |
 | `src/settings/` | Schéma, valeurs par défaut et stockage des réglages et projets |
-| `src/db/` | SQLite natif (`node:sqlite`), migrations par `PRAGMA user_version` ; dépôts `reviews` et `devTasks` |
-| `src/gitlab/client.ts` | Client API GitLab v4 (fetch natif, pagination) |
+| `src/db/` | Accès à la base indépendant du moteur : interface `Db` asynchrone, adaptateurs SQLite (`node:sqlite`, local) et PostgreSQL (`pg`, serveur), migrations communes ; dépôts `reviews`, `devTasks` et `costs` |
+| `src/connectors/` | Interface `ForgeConnector` et vocabulaire neutre (ticket, demande de fusion, commentaire...). `gitlab.ts` : connecteur GitLab, le seul qui connaisse l'API et les types GitLab. Les pipelines, le poller, le serveur et la CLI n'utilisent que l'interface |
+| `src/gitlab/client.ts` | Client API GitLab v4 (fetch natif, pagination), utilisé par le connecteur GitLab uniquement |
+| `src/testing/` | Faux connecteur et environnement de test (dépôt git local, base temporaire). Réservé aux tests |
+| `src/agent/` | Exécuteur d'agent : interface `AgentRunner`, `CliRunner` (CLI Claude Code sur l'abonnement), événements du journal. Les protections d'isolation (`--safe-mode`, aucun MCP, `dontAsk`) y sont écrites, hors de portée des appelants |
+| `src/budget.ts`, `src/db/costs.ts` | Consommation des agents par mois, projet et type de tâche. Budget mensuel appliqué en mode clé API : une review ou une tâche de dev n'est pas lancée une fois le budget atteint |
+| `src/redact/` | Caviardage des données personnelles avant tout envoi au modèle : détecteurs à validation, repères stables, mode strict. Pas encore branché (réservé au support client) |
 | `src/claude/process.ts` | Lancement de la CLI : stdin, streaming ligne par ligne, délai maximum, annulation, environnement sans clé API |
 | `src/review/*` | Review : contexte, worktree git (partagé avec l'agent dev), moteur, décision, mise en forme, orchestration |
 | `src/dev/*` | Agent dev : garde-fous, templates, contexte, moteur, orchestration |
 | `src/server/app.ts` | API JSON et service du dashboard |
 | `src/cli/` | `reviewOnce` (review manuelle par URL de MR) |
 | `prompts/` | Prompts de base par défaut (`*-system.md`, remplaçables dans le dashboard) et garde-fous (`*-guardrails.md`, toujours ajoutés en dernier). Assemblage dans `src/prompts.ts` : base < consignes perso < consignes du projet < garde-fous |
-| `scripts/` | Tests réels de la CLI : `smoke-claude.sh` (review et isolation), `smoke-dev.ts` (agent dev) |
+| `scripts/` | Tests réels de la CLI : `smoke-review.ts` (review et isolation), `smoke-dev.ts` (agent dev) |
 
 ## Données
 
 Tout se trouve dans `DATA_DIR` (par défaut `./data`, ignoré par git) :
-- **Base SQLite** :
+- **Base de données** : SQLite dans `DATA_DIR` par défaut (rien à installer), ou PostgreSQL si `DATABASE_URL` est défini dans le `.env` (mode serveur). Mêmes tables dans les deux cas :
   - `reviews` et `actions` : reviews et piste d'audit de ce que l'outil a fait en ton nom ;
   - `dev_tasks` et `dev_task_events` : tâches de l'agent et journal ;
   - `settings` et `projects` : réglages du dashboard.
@@ -122,14 +128,14 @@ Tout se trouve dans `DATA_DIR` (par défaut `./data`, ignoré par git) :
 
 **Polling plutôt que webhook.** La WSL n'est pas joignable depuis GitLab, et le webhook projet peut déjà être utilisé par un autre outil.
 
-**CLI Claude Code + abonnement plutôt que SDK + clé API.** Usage perso : `claude -p` est l'usage headless documenté avec un abonnement. Le Claude Agent SDK exige une clé API pour un produit tiers. Le plafond de modèle est imposé dans le code. Un déploiement à l'équipe sur serveur passerait par le SDK et une clé entreprise (roadmap, item 25).
+**La CLI Claude Code dans les deux modes de connexion.** `claude -p` est l'usage headless documenté avec un abonnement ; avec `ANTHROPIC_API_KEY` dans son environnement, la même CLI s'authentifie par clé API (facturation à l'usage). Le choix est un réglage du dashboard (Paramètres > Modèles) : abonnement par défaut, clé API en option, avec un budget mensuel. Dans les deux cas les outils, les permissions et les protections d'isolation sont identiques, et le plafond de modèle est imposé dans le code. Un déploiement à l'équipe sur serveur utiliserait le mode clé API (roadmap-plateforme, lots C et D) ; le SDK reste une option si une bibliothèque devient nécessaire.
 
 **Décision et actions dans le code, pas dans le modèle.** Le modèle propose (review, code, rapport). Le code décide d'agir (approuver, pousser, créer la MR) selon des règles lisibles et testées.
 
 ## Sécurité
 
 **Les deux agents :**
-- **`--safe-mode`** : CLAUDE.md, hooks, plugins, skills et MCP du dépôt sont ignorés. Sinon, un dépôt ou une MR pourrait exécuter des commandes sur la machine via un `.claude/settings.json` piégé. Vérifié par `scripts/smoke-claude.sh`.
+- **`--safe-mode`** : CLAUDE.md, hooks, plugins, skills et MCP du dépôt sont ignorés. Sinon, un dépôt ou une MR pourrait exécuter des commandes sur la machine via un `.claude/settings.json` piégé. Vérifié par `scripts/smoke-review.ts`.
 - **Mode `dontAsk`** : ce qui n'est pas explicitement autorisé est refusé, sans question. Aucun accès réseau (`WebFetch`, `WebSearch`, `curl`, `wget`, `ssh` interdits).
 - **Contenus externes balisés** (ticket, discussion, description de MR) : ce sont des spécifications ou des données, jamais des ordres. Le prompt dev liste ce qu'un ticket ne peut pas demander : secrets, CI, réseau, autres dépôts, désactivation de sécurité.
 - **Clé API écartée** de l'environnement de la CLI : c'est toujours l'abonnement qui sert.

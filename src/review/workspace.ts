@@ -26,6 +26,8 @@ export class RepoWorkspace {
   constructor(
     reposDir: string,
     private readonly token: string,
+    /** Nom d'utilisateur de l'authentification HTTP (« oauth2 » chez GitLab). */
+    private readonly username = "oauth2",
   ) {
     // Absolu obligatoire : `git -C <miroir> worktree add <chemin>` résout un chemin relatif depuis le miroir.
     this.reposDir = path.resolve(reposDir);
@@ -37,10 +39,13 @@ export class RepoWorkspace {
 
   // --- Review ----------------------------------------------------------------
 
-  async checkoutMergeRequest(projectId: number, cloneUrl: string, mrIid: number, sha: string): Promise<Checkout> {
+  /**
+   * Extrait la demande de fusion au commit `sha`. `headRef` est la référence où la forge expose sa
+   * tête (refs/merge-requests/12/head chez GitLab, refs/pull/12/head chez GitHub) : fournie par le connecteur.
+   */
+  async checkoutChangeRequest(projectId: number, cloneUrl: string, mrIid: number, sha: string, headRef: string): Promise<Checkout> {
     const mirror = await this.ensureMirror(projectId, cloneUrl);
-    // GitLab expose la tête de chaque MR sous refs/merge-requests/<iid>/head
-    await this.git(["-C", mirror, "fetch", "--force", "origin", `refs/merge-requests/${mrIid}/head:refs/mr/${mrIid}`]);
+    await this.git(["-C", mirror, "fetch", "--force", "origin", `${headRef}:refs/mr/${mrIid}`]);
 
     const wt = path.join(this.worktreesDir, `${projectId}-${mrIid}-${sha.slice(0, 8)}`);
     if (existsSync(wt)) {
@@ -73,7 +78,7 @@ export class RepoWorkspace {
   }
 
   /**
-   * Reprise d'une MR : worktree sur la branche du ticket telle qu'elle est sur GitLab (commits
+   * Reprise d'une MR : worktree sur la branche du ticket telle qu'elle est sur le dépôt distant (commits
    * ajoutés à la main compris). Refuse si l'ancien worktree contient du travail non poussé.
    */
   async checkoutExistingBranch(projectId: number, cloneUrl: string, branch: string): Promise<string> {
@@ -118,6 +123,22 @@ export class RepoWorkspace {
         return p.includes(" -> ") ? (p.split(" -> ").pop() ?? p) : p;
       })
       .map((p) => p.replace(/^"|"$/g, ""));
+  }
+
+  /**
+   * Contenu brut d'un fichier à un commit donné (octets, sans réinterprétation de l'encodage), ou
+   * `null` s'il n'existait pas. Sert à comparer l'encodage d'origine avec celui du fichier modifié.
+   */
+  async readFileAtRef(worktree: string, ref: string, file: string): Promise<Buffer | null> {
+    try {
+      const { stdout } = await execFileAsync("git", ["-C", worktree, "show", `${ref}:${file}`], {
+        encoding: "buffer",
+        maxBuffer: 200 * 1024 * 1024,
+      });
+      return stdout;
+    } catch {
+      return null;
+    }
   }
 
   async headSha(worktree: string): Promise<string> {
@@ -170,7 +191,7 @@ export class RepoWorkspace {
   }
 
   private async git(args: string[], extraEnv: Record<string, string> = {}): Promise<string> {
-    const basic = Buffer.from(`oauth2:${this.token}`).toString("base64");
+    const basic = Buffer.from(`${this.username}:${this.token}`).toString("base64");
     const { stdout } = await execFileAsync("git", args, {
       env: {
         ...process.env,

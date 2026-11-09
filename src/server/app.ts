@@ -2,6 +2,7 @@ import path from "node:path";
 import Fastify, { type FastifyReply } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
+import { currentMonth } from "../db/costs.js";
 import type { DevTaskRepo } from "../db/devTasks.js";
 import type { ReviewStatus } from "../db/reviews.js";
 import { cancelDevTask } from "../dev/pipeline.js";
@@ -59,23 +60,40 @@ export function buildServer(deps: ServerDeps) {
   // --- Général ---------------------------------------------------------------
 
   app.get("/api/stats", async () => {
-    const settings = deps.settings.get();
+    const settings = await deps.settings.get();
     return {
       actionMode: settings.actionMode,
       model: settings.review.model,
       devModel: settings.dev.model,
       username: deps.config.gitlab.username,
       gitlabUrl: deps.config.gitlab.url,
-      counts: deps.reviews.countByStatus(),
+      agentAuth: settings.agentAuth,
+      /** Présence seulement : la clé n'est jamais renvoyée. */
+      apiKeyConfigured: deps.config.anthropicApiKey !== null,
+      counts: await deps.reviews.countByStatus(),
       queueSize: deps.queueSize(),
-      agreement: deps.reviews.agreementStats(),
+      agreement: await deps.reviews.agreementStats(),
+    };
+  });
+
+  /** Consommation du mois : sur l'abonnement un équivalent API, en mode clé API le montant facturé. */
+  app.get("/api/costs", async () => {
+    const settings = await deps.settings.get();
+    const month = currentMonth();
+    const lines = await deps.costs.breakdown(month);
+    return {
+      month,
+      agentAuth: settings.agentAuth,
+      budgetUsd: settings.budget.monthlyUsd,
+      totalUsd: lines.reduce((sum, l) => sum + l.usd, 0),
+      lines,
     };
   });
 
   // --- Paramètres ------------------------------------------------------------
 
   app.get("/api/settings", async () => ({
-    settings: deps.settings.get(),
+    settings: await deps.settings.get(),
     defaults: DEFAULT_SETTINGS,
     options: { models: ALLOWED_MODELS, efforts: ALLOWED_EFFORTS },
     /** Prompts de base livrés avec l'outil, pour "repartir du prompt par défaut" dans le dashboard. */
@@ -84,31 +102,31 @@ export function buildServer(deps: ServerDeps) {
 
   app.post<{ Body: unknown }>("/api/settings", async (req, reply) => {
     try {
-      return { settings: deps.settings.save(req.body) };
+      return { settings: await deps.settings.save(req.body) };
     } catch (err) {
       return fail(reply, err, 400);
     }
   });
 
-  app.get("/api/projects", async () => deps.settings.listProjects());
+  app.get("/api/projects", async () => await deps.settings.listProjects());
 
   app.post<{ Body: unknown }>("/api/projects", async (req, reply) => {
     try {
-      return deps.settings.saveProject(req.body);
+      return await deps.settings.saveProject(req.body);
     } catch (err) {
       return fail(reply, err, 400);
     }
   });
 
   app.post<IdParams>("/api/projects/:id/delete", async (req) => {
-    deps.settings.deleteProject(Number(req.params.id));
+    await deps.settings.deleteProject(Number(req.params.id));
     return { ok: true };
   });
 
   app.get<{ Querystring: { search?: string } }>("/api/gitlab/projects", async (req, reply) => {
     try {
-      const projects = await deps.gitlab.searchProjects(req.query.search ?? "");
-      return projects.map((p) => ({ id: p.id, path: p.path_with_namespace, name: p.name, url: p.web_url }));
+      const projects = await deps.connector.searchProjects(req.query.search ?? "");
+      return projects.map((p) => ({ id: p.id, path: p.path, name: p.name, url: p.url }));
     } catch (err) {
       return fail(reply, err);
     }
@@ -116,8 +134,8 @@ export function buildServer(deps: ServerDeps) {
 
   app.get<IdParams & { Querystring: { search?: string } }>("/api/gitlab/projects/:id/branches", async (req, reply) => {
     try {
-      const branches = await deps.gitlab.listBranches(Number(req.params.id), req.query.search ?? "");
-      return branches.map((b) => ({ name: b.name, default: b.default, protected: b.protected }));
+      const branches = await deps.connector.listBranches(Number(req.params.id), req.query.search ?? "");
+      return branches.map((b) => ({ name: b.name, default: b.isDefault, protected: b.isProtected }));
     } catch (err) {
       return fail(reply, err);
     }
@@ -127,23 +145,23 @@ export function buildServer(deps: ServerDeps) {
 
   app.get("/api/issues", async (_req, reply) => {
     try {
-      const settings = deps.settings.get();
-      const projects = new Map(deps.settings.listProjects().map((p) => [p.projectId, p]));
-      const latest = deps.tasks.latestByIssue();
-      const issues = await deps.gitlab.listAssignedIssues();
+      const settings = await deps.settings.get();
+      const projects = new Map((await deps.settings.listProjects()).map((p) => [p.projectId, p]));
+      const latest = await deps.tasks.latestByIssue();
+      const issues = await deps.connector.listAssignedTickets();
 
       return issues.map((i) => {
-        const project = projects.get(i.project_id);
-        const task = latest.get(`${i.project_id}#${i.iid}`);
+        const project = projects.get(i.projectId);
+        const task = latest.get(`${i.projectId}#${i.iid}`);
         return {
-          projectId: i.project_id,
-          projectPath: i.references?.full.replace(/#\d+$/, "") ?? String(i.project_id),
+          projectId: i.projectId,
+          projectPath: i.projectPath ?? String(i.projectId),
           iid: i.iid,
           title: i.title,
           labels: i.labels,
-          url: i.web_url,
-          updatedAt: i.updated_at ?? null,
-          milestone: i.milestone?.title ?? null,
+          url: i.url,
+          updatedAt: i.updatedAt,
+          milestone: i.milestone,
           column: classifyIssue(i.labels, settings.workflow),
           devReady: Boolean(project?.devEnabled),
           branchPreview: project?.devEnabled ? renderTemplate(settings.templates.branch, { iid: i.iid, title: i.title, slug: slugify(i.title) }) : null,
@@ -159,38 +177,38 @@ export function buildServer(deps: ServerDeps) {
 
   // --- Agent dev -------------------------------------------------------------
 
-  app.get("/api/tasks", async () => deps.tasks.list().map(({ result_json: _r, ...t }) => t));
+  app.get("/api/tasks", async () => (await deps.tasks.list()).map(({ result_json: _r, ...t }) => t));
 
   app.get<IdParams>("/api/tasks/:id", async (req, reply) => {
-    const task = deps.tasks.get(Number(req.params.id));
+    const task = await deps.tasks.get(Number(req.params.id));
     if (!task) return reply.code(404).send({ error: "Tâche introuvable" });
     return { ...task, result: task.result_json ? JSON.parse(task.result_json) : null };
   });
 
   app.get<IdParams & { Querystring: { after?: string } }>("/api/tasks/:id/events", async (req) => {
-    return deps.tasks.events(Number(req.params.id), Number(req.query.after ?? 0));
+    return await deps.tasks.events(Number(req.params.id), Number(req.query.after ?? 0));
   });
 
   app.post<{ Body: { projectId: number; issueIid: number; extraInstructions?: string } }>("/api/tasks", async (req, reply) => {
     try {
       const { projectId, issueIid } = req.body;
-      const project = deps.settings.getProject(Number(projectId));
+      const project = await deps.settings.getProject(Number(projectId));
       if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
-      if (deps.tasks.findActive(Number(projectId), Number(issueIid))) {
+      if (await deps.tasks.findActive(Number(projectId), Number(issueIid))) {
         return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
       }
-      const issue = await deps.gitlab.getIssue(Number(projectId), Number(issueIid));
+      const issue = await deps.connector.getTicket(Number(projectId), Number(issueIid));
       if (!issue) return reply.code(404).send({ error: "Ticket introuvable" });
 
-      const id = deps.tasks.insert({
+      const id = await deps.tasks.insert({
         projectId: project.projectId,
         projectPath: project.path,
         issueIid: issue.iid,
         issueTitle: issue.title,
-        issueUrl: issue.web_url,
+        issueUrl: issue.url,
         extraInstructions: req.body.extraInstructions?.trim() || null,
       });
-      deps.tasks.addEvent(id, "step", "Tâche créée, en attente de l'agent");
+      await deps.tasks.addEvent(id, "step", "Tâche créée, en attente de l'agent");
       deps.enqueueDev(id);
       return { id };
     } catch (err) {
@@ -201,20 +219,20 @@ export function buildServer(deps: ServerDeps) {
   /** Reprise : relance l'agent sur la branche de la MR créée par cette tâche, avec des consignes. */
   app.post<IdParams & { Body: { instructions?: string } }>("/api/tasks/:id/followup", async (req, reply) => {
     try {
-      const origin = deps.tasks.get(Number(req.params.id));
+      const origin = await deps.tasks.get(Number(req.params.id));
       if (!origin) return reply.code(404).send({ error: "Tâche introuvable" });
       const instructions = req.body?.instructions?.trim();
       if (!instructions) return reply.code(400).send({ error: "Les consignes de reprise sont obligatoires" });
       if (!origin.branch || !origin.mr_iid || !origin.mr_url || origin.status === "running" || origin.status === "queued") {
         return reply.code(400).send({ error: "Seule une tâche terminée liée à une MR peut être reprise" });
       }
-      const project = deps.settings.getProject(origin.project_id);
+      const project = await deps.settings.getProject(origin.project_id);
       if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
-      if (deps.tasks.findActive(origin.project_id, origin.issue_iid)) {
+      if (await deps.tasks.findActive(origin.project_id, origin.issue_iid)) {
         return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
       }
 
-      const id = deps.tasks.insert({
+      const id = await deps.tasks.insert({
         projectId: origin.project_id,
         projectPath: origin.project_path,
         issueIid: origin.issue_iid,
@@ -230,7 +248,7 @@ export function buildServer(deps: ServerDeps) {
           mrUrl: origin.mr_url,
         },
       });
-      deps.tasks.addEvent(id, "step", `Reprise de la MR !${origin.mr_iid} (tâche #${origin.id}), en attente de l'agent`);
+      await deps.tasks.addEvent(id, "step", `Reprise de la MR !${origin.mr_iid} (tâche #${origin.id}), en attente de l'agent`);
       deps.enqueueDev(id);
       return { id };
     } catch (err) {
@@ -240,10 +258,10 @@ export function buildServer(deps: ServerDeps) {
 
   app.post<IdParams>("/api/tasks/:id/cancel", async (req) => {
     const id = Number(req.params.id);
-    const task = deps.tasks.get(id);
+    const task = await deps.tasks.get(id);
     if (!cancelDevTask(id) && task?.status === "queued") {
-      deps.tasks.update(id, { status: "cancelled" });
-      deps.tasks.addEvent(id, "step", "Tâche annulée avant démarrage");
+      await deps.tasks.update(id, { status: "cancelled" });
+      await deps.tasks.addEvent(id, "step", "Tâche annulée avant démarrage");
     }
     return { ok: true };
   });
@@ -251,12 +269,12 @@ export function buildServer(deps: ServerDeps) {
   /** Supprime le dossier de travail local d'une tâche terminée (la branche poussée n'est pas touchée). */
   app.post<IdParams>("/api/tasks/:id/cleanup", async (req, reply) => {
     try {
-      const task = deps.tasks.get(Number(req.params.id));
+      const task = await deps.tasks.get(Number(req.params.id));
       if (!task?.worktree_path) return { ok: true };
       if (task.status === "running" || task.status === "queued") return reply.code(409).send({ error: "Tâche en cours" });
-      const project = await deps.gitlab.getProject(task.project_id);
-      await deps.workspace.removeDevWorktree(task.project_id, project.http_url_to_repo, task.worktree_path);
-      deps.tasks.update(task.id, { worktree_path: null });
+      const project = await deps.connector.getProject(task.project_id);
+      await deps.workspace.removeDevWorktree(task.project_id, project.cloneUrl, task.worktree_path);
+      await deps.tasks.update(task.id, { worktree_path: null });
       return { ok: true };
     } catch (err) {
       return fail(reply, err);
@@ -267,7 +285,7 @@ export function buildServer(deps: ServerDeps) {
 
   /** Liste allégée : le résultat complet est remplacé par un décompte des points par sévérité. */
   app.get<{ Querystring: { status?: ReviewStatus } }>("/api/reviews", async (req) => {
-    return deps.reviews.list(req.query.status).map(({ result_json, ...row }) => {
+    return (await deps.reviews.list(req.query.status)).map(({ result_json, ...row }) => {
       const result = result_json ? (JSON.parse(result_json) as ReviewResult) : null;
       const count = (s: Finding["severity"]) => result?.findings.filter((f) => f.severity === s).length ?? 0;
       return {
@@ -280,7 +298,7 @@ export function buildServer(deps: ServerDeps) {
   });
 
   app.get<IdParams>("/api/reviews/:id", async (req, reply) => {
-    const row = deps.reviews.get(Number(req.params.id));
+    const row = await deps.reviews.get(Number(req.params.id));
     if (!row) return reply.code(404).send({ error: "Review introuvable" });
     return { ...row, result: row.result_json ? JSON.parse(row.result_json) : null };
   });
@@ -297,7 +315,7 @@ export function buildServer(deps: ServerDeps) {
   app.post<IdParams>("/api/reviews/:id/approve", async (req, reply) => {
     const id = Number(req.params.id);
     try {
-      const row = deps.reviews.get(id);
+      const row = await deps.reviews.get(id);
       if (row?.status !== "published") await publishComment(id, deps, false);
       await approve(id, deps, false);
       return { ok: true };
@@ -308,22 +326,22 @@ export function buildServer(deps: ServerDeps) {
 
   app.post<IdParams>("/api/reviews/:id/dismiss", async (req) => {
     const id = Number(req.params.id);
-    deps.reviews.setStatus(id, "dismissed");
-    deps.reviews.logAction(id, "dismiss", false);
+    await deps.reviews.setStatus(id, "dismissed");
+    await deps.reviews.logAction(id, "dismiss", false);
     return { ok: true };
   });
 
   app.post<IdParams>("/api/reviews/:id/retry", async (req) => {
     const id = Number(req.params.id);
-    deps.reviews.setStatus(id, "queued");
-    deps.reviews.logAction(id, "retry", false);
+    await deps.reviews.setStatus(id, "queued");
+    await deps.reviews.logAction(id, "retry", false);
     deps.enqueueReview(id);
     return { ok: true };
   });
 
   /** Mode ombre : tu notes si tu es d'accord avec la décision de l'agent. */
   app.post<IdParams & { Body: { agree: boolean; note?: string } }>("/api/reviews/:id/feedback", async (req) => {
-    deps.reviews.saveFeedback(Number(req.params.id), Boolean(req.body.agree), req.body.note?.trim() || null);
+    await deps.reviews.saveFeedback(Number(req.params.id), Boolean(req.body.agree), req.body.note?.trim() || null);
     return { ok: true };
   });
 

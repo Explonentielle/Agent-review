@@ -1,27 +1,29 @@
 import { spawn } from "node:child_process";
 import type { AgentSettings } from "../settings/schema.js";
 
-/** Paramètres d'exécution d'un agent (réglages du dashboard + chemin de la CLI). */
+/** Paramètres d'exécution d'un agent (réglages du dashboard). */
 export interface AgentRunConfig {
-  claudeBin: string;
   model: AgentSettings["model"];
   effort: AgentSettings["effort"];
   maxTurns: number;
   timeoutMs: number;
 }
 
-export function agentRunConfig(claudeBin: string, s: AgentSettings): AgentRunConfig {
-  return { claudeBin, model: s.model, effort: s.effort, maxTurns: s.maxTurns, timeoutMs: s.timeoutMin * 60_000 };
+export function agentRunConfig(s: AgentSettings): AgentRunConfig {
+  return { model: s.model, effort: s.effort, maxTurns: s.maxTurns, timeoutMs: s.timeoutMin * 60_000 };
 }
 
 /**
- * Environnement de la CLI : une clé API présente dans le shell passerait devant le login
- * d'abonnement, on l'écarte pour que ce soit toujours l'abonnement qui serve.
+ * Environnement de la CLI. Sans `apiKey` (mode abonnement), toute clé présente dans le shell est
+ * écartée : elle passerait devant le login d'abonnement et ferait facturer l'API sans que tu l'aies
+ * demandé. Avec `apiKey` (mode clé API, choisi dans les réglages), seule cette clé est transmise.
+ * Un jeton d'authentification de session (ANTHROPIC_AUTH_TOKEN) n'est jamais transmis.
  */
-export function claudeEnv(): NodeJS.ProcessEnv {
+export function claudeEnv(apiKey?: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
+  if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
   return env;
 }
 

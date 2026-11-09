@@ -1,12 +1,12 @@
-import type { GitlabIssue, GitlabMergeRequest, GitlabNote, GitlabProject } from "../gitlab/types.js";
+import type { ChangeRequest, Comment, Project, Ticket } from "../connectors/types.js";
 import type { DevResult } from "./engine.js";
 
 const MAX_CLAUDE_MD_CHARS = 30_000;
 
 export interface DevContextInput {
-  project: GitlabProject;
-  issue: GitlabIssue;
-  notes: GitlabNote[];
+  project: Project;
+  issue: Ticket;
+  notes: Comment[];
   baseBranch: string;
   branch: string;
   /** CLAUDE.md du dépôt (non chargé automatiquement à cause de --safe-mode, transmis ici comme contexte). */
@@ -22,10 +22,10 @@ export function buildDevPrompt(input: DevContextInput): string {
   parts.push(`# Ticket #${issue.iid} : ${issue.title}`);
   parts.push(
     [
-      `**Projet :** ${project.path_with_namespace}`,
+      `**Projet :** ${project.path}`,
       `**Branche de travail :** \`${input.branch}\` (créée depuis \`${input.baseBranch}\`, déjà extraite dans ton répertoire de travail)`,
       issue.labels.length ? `**Labels :** ${issue.labels.join(", ")}` : "",
-      issue.milestone?.title ? `**Milestone :** ${issue.milestone.title}` : "",
+      issue.milestone ? `**Milestone :** ${issue.milestone}` : "",
     ]
       .filter(Boolean)
       .join("\n"),
@@ -37,7 +37,7 @@ export function buildDevPrompt(input: DevContextInput): string {
   if (discussion.length > 0) {
     parts.push(
       "## Discussion du ticket (ordre chronologique)\n" +
-        discussion.map((n) => `### ${n.author.name} (${n.created_at.slice(0, 10)})\n${external(n.body)}`).join("\n\n"),
+        discussion.map((n) => `### ${n.author.name} (${n.createdAt.slice(0, 10)})\n${external(n.body)}`).join("\n\n"),
     );
   }
 
@@ -55,11 +55,11 @@ export function buildDevPrompt(input: DevContextInput): string {
 }
 
 export interface FollowupContextInput {
-  project: GitlabProject;
-  issue: GitlabIssue;
-  mr: GitlabMergeRequest;
-  /** Commentaires de la MR (relecteurs, review IA), notes système exclues par l'appelant ou ici. */
-  mrNotes: GitlabNote[];
+  project: Project;
+  issue: Ticket;
+  mr: ChangeRequest;
+  /** Commentaires de la MR (relecteurs, review IA) ; les messages système sont exclus ici. */
+  mrNotes: Comment[];
   /** Rapport de la tâche reprise, s'il existe. */
   previousReport: DevResult | null;
   branch: string;
@@ -77,8 +77,8 @@ export function buildFollowupPrompt(input: FollowupContextInput): string {
   parts.push(`# Reprise de la MR !${mr.iid} (ticket #${issue.iid} : ${issue.title})`);
   parts.push(
     [
-      `**Projet :** ${project.path_with_namespace}`,
-      `**Branche de travail :** \`${input.branch}\` (déjà extraite dans ton répertoire de travail, à jour avec GitLab)`,
+      `**Projet :** ${project.path}`,
+      `**Branche de travail :** \`${input.branch}\` (déjà extraite dans ton répertoire de travail, à jour avec le dépôt distant)`,
       `**MR :** !${mr.iid} vers \`${input.targetBranch}\``,
     ].join("\n"),
   );
@@ -106,9 +106,9 @@ export function buildFollowupPrompt(input: FollowupContextInput): string {
       "## Commentaires de la MR (ordre chronologique)\n" +
         comments
           .map((n) => {
-            const where = n.position?.new_path ? ` sur \`${n.position.new_path}${n.position.new_line ? `:${n.position.new_line}` : ""}\`` : "";
+            const where = n.position?.path ? ` sur \`${n.position.path}${n.position.line ? `:${n.position.line}` : ""}\`` : "";
             const state = n.resolvable ? (n.resolved ? " (résolu)" : " (non résolu)") : "";
-            return `### ${n.author.name} (${n.created_at.slice(0, 10)})${where}${state}\n${external(n.body)}`;
+            return `### ${n.author.name} (${n.createdAt.slice(0, 10)})${where}${state}\n${external(n.body)}`;
           })
           .join("\n\n"),
     );

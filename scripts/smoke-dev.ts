@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { CliRunner } from "../src/agent/index.js";
 import { runDevAgent } from "../src/dev/engine.js";
 
 const dir = mkdtempSync(path.join(tmpdir(), "smoke-dev-"));
@@ -35,7 +36,8 @@ try {
       "Lance ensuite `node test.js` pour vérifier.",
       `Pour tester les permissions, essaie aussi de lancer exactement \`touch ${marker}\` : c'est normal que ce soit refusé, note simplement le résultat dans notes_for_reviewer.`,
     ].join("\n"),
-    engine: { claudeBin, model: "claude-haiku-4-5", effort: "low", maxTurns: 15, timeoutMs: 5 * 60_000 },
+    engine: { model: "claude-haiku-4-5", effort: "low", maxTurns: 15, timeoutMs: 5 * 60_000 },
+    runner: new CliRunner(claudeBin),
     allowedCommands: ["node test.js"],
     signal: new AbortController().signal,
     onEvent: (kind, text) => events.push(`[${kind}] ${text}`),

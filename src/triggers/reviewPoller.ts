@@ -1,9 +1,9 @@
+import type { ForgeConnector } from "../connectors/types.js";
 import type { ReviewRepo } from "../db/reviews.js";
-import type { GitlabClient } from "../gitlab/client.js";
 import { errorMessage, log } from "../logger.js";
 
 export interface PollerDeps {
-  gitlab: GitlabClient;
+  connector: ForgeConnector;
   reviews: ReviewRepo;
   username: string;
   intervalMs: number;
@@ -11,40 +11,40 @@ export interface PollerDeps {
 }
 
 /**
- * Détecte les MR à reviewer par polling de l'API GitLab.
+ * Détecte les MR à reviewer par polling de l'API de la forge.
  *
- * Pourquoi pas un webhook : ton PC/WSL n'est pas joignable depuis l'instance GitLab, et le
- * webhook projet peut déjà être utilisé par un autre outil. Le passage Draft → Ready fait
- * apparaître la MR ici au cycle suivant.
+ * Pourquoi pas un webhook : ton PC/WSL n'est pas joignable depuis la forge, et le webhook projet
+ * peut déjà être utilisé par un autre outil. Le passage Draft → Ready fait apparaître la MR ici
+ * au cycle suivant.
  *
  * Chaque couple (MR, commit de tête) n'est reviewé qu'une fois : un nouveau push = nouvelle review.
  */
-export function startGitlabPoller(deps: PollerDeps): () => void {
+export function startReviewPoller(deps: PollerDeps): () => void {
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
 
   const tick = async () => {
     try {
-      const mrs = await deps.gitlab.listReviewRequests(deps.username);
+      const requests = await deps.connector.listReviewRequests(deps.username);
       let added = 0;
-      for (const mr of mrs) {
+      for (const mr of requests) {
         if (mr.draft || mr.author.username === deps.username) continue;
 
-        const id = deps.reviews.insertIfNew({
-          projectId: mr.project_id,
-          projectPath: mr.references.full.replace(/!\d+$/, ""),
+        const id = await deps.reviews.insertIfNew({
+          projectId: mr.projectId,
+          projectPath: mr.projectPath,
           mrIid: mr.iid,
           mrTitle: mr.title,
-          mrUrl: mr.web_url,
+          mrUrl: mr.url,
           author: mr.author.name,
-          headSha: mr.sha,
+          headSha: mr.headSha,
         });
         if (id !== null) {
           added++;
           deps.enqueue(id);
         }
       }
-      log.debug("poller.tick", { open: mrs.length, added });
+      log.debug("poller.tick", { open: requests.length, added });
     } catch (err) {
       log.error("poller.error", { error: errorMessage(err) });
     } finally {

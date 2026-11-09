@@ -113,6 +113,8 @@ Principe : **caviarder avant tout prompt**. Le modèle ne voit jamais de donnée
 - **fournisseur** : seuls des textes caviardés partent chez Anthropic. Les conditions de conservation et d'entraînement dépendent du mode (abonnement personnel, API, offre Team ou Entreprise) : à confirmer par contrat avant d'ouvrir le support à de vraies données ;
 - **validation humaine** : obligatoire par défaut pour tout message sortant vers un client. Assouplissement envisageable par catégorie, seulement après un taux d'accord mesuré (proposition : au moins 95 % sur 50 réponses de la catégorie), et jamais pour les réclamations, remboursements, données personnelles et sujets juridiques.
 
+**Implémentation** : `src/redact/` (2026-11-09), non branché au pipeline. Détail et limites : `docs/roadmap-plateforme.md`, A4.
+
 **Limites assumées** : le caviardage réduit le risque, il ne l'élimine pas. Il sera mesuré (rappel et faux positifs) sur un corpus annoté de demandes réelles avant toute mise en service, et une analyse d'impact (AIPD) est nécessaire.
 
 ## 4. Construire ou s'appuyer sur l'existant
@@ -196,6 +198,11 @@ Sources : [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_pla
 | 2026-11-09 | Accès au code depuis le conteneur | Le plan de contrôle clone et pousse. Le conteneur travaille sur une copie autonome sans identifiants ni accès réseau à la forge, et **seul un patch en sort** (3.4) | Un jeton dans le conteneur est lisible par un agent manipulé, et les forges ne limitent pas un jeton à une branche. Relais à jeton court écarté |
 | 2026-11-09 | Données personnelles du support | Caviardage avant tout prompt, repères stables, table de correspondance dans le plan de contrôle seul, mode strict au départ (3.5) | Le modèle n'a pas besoin des valeurs réelles pour diagnostiquer ; réduit l'exposition RGPD |
 | 2026-11-09 | Validation humaine du support | Obligatoire par défaut. Assouplissement par catégorie après taux d'accord mesuré, jamais pour les catégories sensibles (seuils à confirmer) | Responsabilité sur ce qui part chez le client |
+| 2026-11-09 | Connexion à Claude par clé API | La même CLI avec `ANTHROPIC_API_KEY`, pas le SDK | Mêmes outils, permissions et protections d'isolation, rien de nouveau à sécuriser, testable avec un faux binaire. La clé est masquée partout |
+| 2026-11-09 | Base de données du mode serveur | PostgreSQL | Cohérence avec les autres projets, écritures concurrentes |
+| 2026-11-09 | Hébergement | Docker (docker compose), serveur à choisir | L'utilisateur connaît Docker |
+| 2026-11-09 | GitHub : type de jeton | Jeton personnel à portée fine en local, application GitHub pour la plateforme | Simple et limité par dépôt en local, voie propre en multi-utilisateur |
+| 2026-11-09 | Autres fournisseurs de modèles (OpenAI...) | Pas pour l'instant (A7, idée) | La CLI et le SDK ne pilotent que les modèles Claude : il faudrait une boucle d'agent et des outils propres, avec les garde-fous à reconstruire |
 
 ## 9. Questions ouvertes (à trancher avant l'étape concernée)
 

@@ -959,9 +959,10 @@ async function loadSettings() {
   const prefillSearch = state.prefillProject;
   state.prefillProject = null;
   try {
-    const [s, projects] = await Promise.all([api("/api/settings"), api("/api/projects")]);
+    const [s, projects, costs] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), refreshHeader()]);
     settingsData = s;
     state.settingsCache = s.settings;
+    state.costs = costs;
     projectsData = projects;
     renderSettings();
     if (prefillSearch) openProjectEditor(null, prefillSearch);
@@ -983,7 +984,12 @@ function agentFields(prefix, a, title, hint) {
 function renderSettings() {
   const s = settingsData.settings;
   const st = state.stats || {};
+  const costs = state.costs;
   const seenLabels = [...new Set((state.issues || []).flatMap((i) => i.labels))].sort();
+  const usd = (n) => `${n.toFixed(2)} $`;
+  const costsLine = !costs ? "indisponible" : costs.lines.length
+    ? `${usd(costs.totalUsd)} <span class="note" style="display:inline">(${costs.lines.map((l) => `${l.kind === "dev" ? "dev" : "review"} ${esc(l.projectPath)} : ${usd(l.usd)}`).slice(0, 3).join(" · ")}${costs.lines.length > 3 ? " · ..." : ""})</span>`
+    : "0.00 $";
 
   document.getElementById("settings").innerHTML = `
     <div class="page-head"><div><h1>Paramètres</h1><div class="sub">Enregistrés dans la base locale de l'outil. Seuls les secrets restent dans le fichier .env.</div></div></div>
@@ -1004,8 +1010,17 @@ function renderSettings() {
 
       <section class="card-section">
         <h2>Modèles</h2>
-        <p class="desc">Les agents passent par ton abonnement Claude. Le plafond (Sonnet 5.5, effort élevé) est imposé par le code.</p>
-        <div style="display:grid;gap:18px">
+        <p class="desc">Le plafond (Sonnet 5.5, effort élevé) est imposé par le code, quelle que soit la connexion.</p>
+        <div class="sub-title">Connexion à Claude</div>
+        <div class="radios">
+          <label class="radio"><input type="radio" name="agentAuth" value="subscription" ${s.agentAuth === "subscription" ? "checked" : ""}><span><b>Abonnement Claude</b><small>La CLI utilise ton abonnement (Pro, Max...), sans facturation à l'usage. Une clé API présente dans ton shell est ignorée.</small></span></label>
+          <label class="radio"><input type="radio" name="agentAuth" value="api" ${s.agentAuth === "api" ? "checked" : ""}><span><b>Clé API Anthropic</b><small>Facturation à l'usage, avec la clé <code>ANTHROPIC_API_KEY</code> de ton fichier .env. ${st.apiKeyConfigured ? pill("green", "clé définie dans .env") : pill("orange", "clé absente du .env")}</small></span></label>
+        </div>
+        <div class="grid2" style="margin-top:14px">
+          <label class="field"><span>Budget mensuel en mode clé API ($)</span><input type="number" min="0" step="1" name="budget.monthlyUsd" value="${s.budget.monthlyUsd}"><small>0 = aucune limite. Une fois le budget atteint, les nouvelles reviews et tâches de dev sont refusées jusqu'au mois suivant.</small></label>
+          <div class="field"><span>Consommation de ce mois</span><b>${costsLine}</b><small>${costs?.agentAuth === "api" ? "Coût estimé par la CLI : c'est ce qui est facturé par Anthropic, à quelques centimes près." : "Équivalent API : un indicateur de consommation, pas une facture."}</small></div>
+        </div>
+        <div style="display:grid;gap:18px;margin-top:22px">
           ${agentFields("review", s.review, "Review", "Une review lit le dépôt : 40 tours suffisent en général.")}
           ${agentFields("dev", s.dev, "Agent dev", "Une tâche de dev consomme bien plus qu'une review : surveille ton quota.")}
         </div>
@@ -1130,6 +1145,8 @@ function collectSettings() {
   const agent = (p) => ({ model: f[`${p}.model`].value, effort: f[`${p}.effort`].value, maxTurns: num(`${p}.maxTurns`), timeoutMin: num(`${p}.timeoutMin`) });
   return {
     actionMode: f.actionMode.value,
+    agentAuth: f.agentAuth.value,
+    budget: { monthlyUsd: Number(f["budget.monthlyUsd"].value) || 0 },
     review: agent("review"),
     dev: agent("dev"),
     rules: { maxChangedLinesAuto: num("rules.maxChangedLinesAuto"), sensitivePaths: lines(f["rules.sensitivePaths"].value) },

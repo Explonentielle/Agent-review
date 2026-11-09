@@ -57,7 +57,7 @@ npm run review:once -- <url de la MR>         # review manuelle d'une MR, rien n
 
 ```bash
 npm test                          # 26 tests, dont un test d'intégration git
-bash scripts/smoke-claude.sh      # options de la review + isolation (hook piégé non exécuté)
+npx tsx scripts/smoke-review.ts   # review via CliRunner + isolation (hook piégé non exécuté)
 npx tsx scripts/smoke-dev.ts      # agent dev réel sur un dépôt jetable (Haiku, quelques centimes)
 ```
 

@@ -24,6 +24,10 @@ export const AgentSettingsSchema = z.object({
  */
 export const SettingsSchema = z.object({
   actionMode: z.enum(["shadow", "comment", "auto"]),
+  /** Connexion à Claude : abonnement de l'utilisateur, ou clé API (ANTHROPIC_API_KEY du .env, facturée à l'usage). */
+  agentAuth: z.enum(["subscription", "api"]),
+  /** Budget du mois en dollars, appliqué seulement en mode clé API (0 = aucune limite). */
+  budget: z.object({ monthlyUsd: z.number().min(0).max(100_000) }),
   review: AgentSettingsSchema,
   dev: AgentSettingsSchema,
   rules: z.object({
@@ -68,6 +72,8 @@ export type AgentSettings = z.infer<typeof AgentSettingsSchema>;
 
 export const DEFAULT_SETTINGS: Settings = {
   actionMode: "shadow",
+  agentAuth: "subscription",
+  budget: { monthlyUsd: 0 },
   review: { model: "claude-sonnet-5-5", effort: "high", maxTurns: 40, timeoutMin: 20 },
   dev: { model: "claude-sonnet-5-5", effort: "high", maxTurns: 120, timeoutMin: 45 },
   rules: {

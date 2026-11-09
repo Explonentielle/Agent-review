@@ -1,8 +1,10 @@
+import { createRunner, type AgentRunner } from "../agent/index.js";
 import { agentRunConfig } from "../claude/process.js";
 import type { Config } from "../config.js";
+import { assertBudgetAvailable } from "../budget.js";
+import type { CostRepo } from "../db/costs.js";
 import type { ReviewRepo, ReviewRow } from "../db/reviews.js";
-import type { GitlabClient } from "../gitlab/client.js";
-import type { GitlabIssue } from "../gitlab/types.js";
+import type { ForgeConnector, Ticket } from "../connectors/types.js";
 import { errorMessage, log } from "../logger.js";
 import { loadSystemPrompt } from "../prompts.js";
 import { compileRules, type SettingsStore } from "../settings/store.js";
@@ -15,45 +17,49 @@ import type { RepoWorkspace } from "./workspace.js";
 
 export interface PipelineDeps {
   config: Config;
-  gitlab: GitlabClient;
+  connector: ForgeConnector;
+  costs: CostRepo;
   reviews: ReviewRepo;
   workspace: RepoWorkspace;
   settings: SettingsStore;
   /** Force le mode ombre quel que soit le réglage (review manuelle en ligne de commande). */
   forceShadow?: boolean;
+  /** Exécuteur d'agent imposé (tests). Par défaut : celui qui correspond aux réglages. */
+  runner?: AgentRunner;
 }
 
 export async function runReview(reviewId: number, deps: PipelineDeps): Promise<void> {
-  const { config, gitlab, reviews, workspace } = deps;
-  const row = reviews.get(reviewId);
+  const { config, connector, reviews, workspace } = deps;
+  const row = await reviews.get(reviewId);
   if (!row) return;
   // Relus à chaque review : une modification dans le dashboard s'applique sans redémarrer
-  const settings = deps.settings.get();
+  const settings = await deps.settings.get();
   const actionMode = deps.forceShadow ? "shadow" : settings.actionMode;
 
-  reviews.setStatus(reviewId, "running");
+  await reviews.setStatus(reviewId, "running");
   log.info("review.start", { reviewId, project: row.project_path, mr: row.mr_iid });
 
   let cleanup: (() => Promise<void>) | undefined;
   try {
-    const [project, mr] = await Promise.all([gitlab.getProject(row.project_id), gitlab.getMergeRequest(row.project_id, row.mr_iid)]);
+    await assertBudgetAvailable(settings, deps.costs);
+    const [project, mr] = await Promise.all([connector.getProject(row.project_id), connector.getChangeRequest(row.project_id, row.mr_iid)]);
 
-    if (mr.sha !== row.head_sha) {
+    if (mr.headSha !== row.head_sha) {
       // Nouveau commit poussé depuis la détection : le poller créera une review pour le nouveau sha
-      reviews.setStatus(reviewId, "dismissed");
-      reviews.logAction(reviewId, "dismiss", true, `obsolète : la MR est passée à ${mr.sha.slice(0, 8)}`);
+      await reviews.setStatus(reviewId, "dismissed");
+      await reviews.logAction(reviewId, "dismiss", true, `obsolète : la MR est passée à ${mr.headSha.slice(0, 8)}`);
       return;
     }
 
-    const allDiffs = await gitlab.getMergeRequestDiffs(row.project_id, row.mr_iid);
+    const allDiffs = await connector.getChangeRequestDiffs(row.project_id, row.mr_iid);
     const diffs = filterDiffs(allDiffs);
     const [commits, statuses, issues] = await Promise.all([
-      gitlab.getMergeRequestCommits(row.project_id, row.mr_iid),
-      gitlab.getCommitStatuses(row.project_id, mr.sha),
-      Promise.all(findLinkedIssueIids(mr).map((iid) => gitlab.getIssue(row.project_id, iid))),
+      connector.getChangeRequestCommits(row.project_id, row.mr_iid),
+      connector.getCheckStatuses(row.project_id, mr.headSha),
+      Promise.all(findLinkedIssueIids(mr).map((iid) => connector.getTicket(row.project_id, iid))),
     ]);
 
-    const checkout = await workspace.checkoutMergeRequest(row.project_id, project.http_url_to_repo, row.mr_iid, mr.sha);
+    const checkout = await workspace.checkoutChangeRequest(row.project_id, project.cloneUrl, row.mr_iid, mr.headSha, connector.changeRequestHeadRef(row.mr_iid));
     cleanup = checkout.cleanup;
 
     const { result, costUsd, numTurns } = await runReviewAgent({
@@ -61,23 +67,24 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
       systemPrompt: await loadSystemPrompt("review", {
         override: settings.systemPrompts.review,
         instructions: settings.instructions.review,
-        project: deps.settings.getProject(row.project_id),
+        project: await deps.settings.getProject(row.project_id),
       }),
       prompt: buildReviewPrompt({
         project,
         mr,
-        issues: issues.filter((i): i is GitlabIssue => i !== null),
+        issues: issues.filter((i): i is Ticket => i !== null),
         diffs,
         commits,
         statuses,
       }),
-      engine: agentRunConfig(config.claudeBin, settings.review),
+      engine: agentRunConfig(settings.review),
+      runner: deps.runner ?? createRunner(config, settings),
     });
 
     const changedLines = countChangedLines(diffs);
-    const decision = decide({ result, changedLines, changedPaths: diffs.map((d) => d.new_path) }, compileRules(settings));
+    const decision = decide({ result, changedLines, changedPaths: diffs.map((d) => d.newPath) }, compileRules(settings));
 
-    reviews.saveResult(reviewId, {
+    await reviews.saveResult(reviewId, {
       status: decision.outcome,
       decisionReasons: decision.reasons,
       resultJson: JSON.stringify(result),
@@ -98,7 +105,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
     }
   } catch (err) {
     log.error("review.error", { reviewId, error: errorMessage(err) });
-    reviews.saveError(reviewId, errorMessage(err));
+    await reviews.saveError(reviewId, errorMessage(err));
   } finally {
     await cleanup?.();
   }
@@ -110,25 +117,25 @@ function requireResult(row: ReviewRow) {
 }
 
 export async function publishComment(reviewId: number, deps: PipelineDeps, automatic: boolean): Promise<void> {
-  const row = deps.reviews.get(reviewId);
+  const row = await deps.reviews.get(reviewId);
   if (!row) throw new Error(`Review ${reviewId} introuvable`);
 
-  const body = formatReviewComment(requireResult(row), { model: deps.settings.get().review.model, sha: row.head_sha });
-  await deps.gitlab.createMergeRequestDiscussion(row.project_id, row.mr_iid, body);
+  const body = formatReviewComment(requireResult(row), { model: (await deps.settings.get()).review.model, sha: row.head_sha });
+  await deps.connector.commentOnChangeRequest(row.project_id, row.mr_iid, body, "review");
 
-  deps.reviews.setStatus(reviewId, "published");
-  deps.reviews.logAction(reviewId, "comment", automatic);
+  await deps.reviews.setStatus(reviewId, "published");
+  await deps.reviews.logAction(reviewId, "comment", automatic);
   log.info("review.published", { reviewId, automatic });
 }
 
 export async function approve(reviewId: number, deps: PipelineDeps, automatic: boolean): Promise<void> {
-  const row = deps.reviews.get(reviewId);
+  const row = await deps.reviews.get(reviewId);
   if (!row) throw new Error(`Review ${reviewId} introuvable`);
 
   // Le sha garantit qu'on approuve exactement le code reviewé
-  await deps.gitlab.approveMergeRequest(row.project_id, row.mr_iid, row.head_sha);
+  await deps.connector.approveChangeRequest(row.project_id, row.mr_iid, row.head_sha);
 
-  deps.reviews.setStatus(reviewId, "approved");
-  deps.reviews.logAction(reviewId, "approve", automatic);
+  await deps.reviews.setStatus(reviewId, "approved");
+  await deps.reviews.logAction(reviewId, "approve", automatic);
   log.info("review.approved", { reviewId, automatic });
 }

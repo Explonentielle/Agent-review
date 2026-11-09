@@ -15,10 +15,14 @@ const EnvSchema = z.object({
   POLL_INTERVAL_SEC: z.coerce.number().int().min(30).default(90),
 
   CLAUDE_BIN: z.string().optional(),
+  /** Seulement utilisée si le mode « clé API » est choisi dans les réglages. Jamais affichée ni journalisée. */
+  ANTHROPIC_API_KEY: z.string().trim().min(1).optional(),
 
   HOST: z.string().default("127.0.0.1"),
   PORT: z.coerce.number().int().default(4321),
   DATA_DIR: z.string().default("./data"),
+  /** Base PostgreSQL du mode serveur (postgres://utilisateur:motdepasse@hote:5432/base). Absente : SQLite local dans DATA_DIR. */
+  DATABASE_URL: z.string().url().optional(),
 
   PLANIO_URL: z.string().url().optional(),
   PLANIO_API_KEY: z.string().optional(),
@@ -29,8 +33,11 @@ export type ActionMode = "shadow" | "comment" | "auto";
 export interface Config {
   gitlab: { url: string; token: string; username: string; pollIntervalMs: number };
   claudeBin: string;
+  /** Clé API Anthropic, ou null. Utilisée uniquement quand les réglages demandent le mode clé API. */
+  anthropicApiKey: string | null;
   server: { host: string; port: number };
   dataDir: string;
+  databaseUrl: string | null;
   planio: { url: string; apiKey: string } | null;
 }
 
@@ -56,8 +63,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       pollIntervalMs: e.POLL_INTERVAL_SEC * 1000,
     },
     claudeBin: e.CLAUDE_BIN ?? defaultClaudeBin(),
+    anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
     server: { host: e.HOST, port: e.PORT },
     dataDir: path.resolve(e.DATA_DIR),
+    databaseUrl: e.DATABASE_URL ?? null,
     planio: e.PLANIO_URL && e.PLANIO_API_KEY ? { url: e.PLANIO_URL.replace(/\/+$/, ""), apiKey: e.PLANIO_API_KEY } : null,
   };
 }

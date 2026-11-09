@@ -1,4 +1,4 @@
-import type { Db } from "./index.js";
+import type { Db } from "./db.js";
 
 export type DevTaskStatus =
   | "queued" // en attente de l'agent
@@ -77,7 +77,7 @@ const ACTIVE = "('queued', 'running')";
 
 export function createDevTaskRepo(db: Db) {
   return {
-    insert(t: {
+    async insert(t: {
       projectId: number;
       projectPath: string;
       issueIid: number;
@@ -85,67 +85,58 @@ export function createDevTaskRepo(db: Db) {
       issueUrl: string;
       extraInstructions: string | null;
       followup?: FollowupOrigin;
-    }): number {
+    }): Promise<number> {
       const f = t.followup;
-      const res = db
-        .prepare(
-          `INSERT INTO dev_tasks (project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
-                                  mode, parent_id, branch, base_branch, target_branch, mr_iid, mr_url)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
+      const row = await db.get<{ id: number }>(
+        `INSERT INTO dev_tasks (project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
+                                mode, parent_id, branch, base_branch, target_branch, mr_iid, mr_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         RETURNING id`,
+        [
           t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions,
           f ? "followup" : "new", f?.parentId ?? null, f?.branch ?? null, f?.baseBranch ?? null,
           f?.targetBranch ?? null, f?.mrIid ?? null, f?.mrUrl ?? null,
-        );
-      return Number(res.lastInsertRowid);
+        ],
+      );
+      return row!.id;
     },
 
-    get(id: number): DevTaskRow | undefined {
-      return db.prepare("SELECT * FROM dev_tasks WHERE id = ?").get(id) as DevTaskRow | undefined;
+    get(id: number): Promise<DevTaskRow | undefined> {
+      return db.get<DevTaskRow>("SELECT * FROM dev_tasks WHERE id = ?", [id]);
     },
 
-    list(limit = 100): DevTaskRow[] {
-      return db.prepare("SELECT * FROM dev_tasks ORDER BY id DESC LIMIT ?").all(limit) as unknown as DevTaskRow[];
+    list(limit = 100): Promise<DevTaskRow[]> {
+      return db.all<DevTaskRow>("SELECT * FROM dev_tasks ORDER BY id DESC LIMIT ?", [limit]);
     },
 
     /** Tâche en cours ou en attente pour ce ticket (empêche de lancer deux agents dessus). */
-    findActive(projectId: number, issueIid: number): DevTaskRow | undefined {
-      return db
-        .prepare(`SELECT * FROM dev_tasks WHERE project_id = ? AND issue_iid = ? AND status IN ${ACTIVE} LIMIT 1`)
-        .get(projectId, issueIid) as DevTaskRow | undefined;
+    findActive(projectId: number, issueIid: number): Promise<DevTaskRow | undefined> {
+      return db.get<DevTaskRow>(`SELECT * FROM dev_tasks WHERE project_id = ? AND issue_iid = ? AND status IN ${ACTIVE} LIMIT 1`, [projectId, issueIid]);
     },
 
     /** Dernière tâche par ticket, pour l'affichage dans l'onglet Tickets. */
-    latestByIssue(): Map<string, DevTaskRow> {
-      const rows = db
-        .prepare("SELECT * FROM dev_tasks WHERE id IN (SELECT MAX(id) FROM dev_tasks GROUP BY project_id, issue_iid)")
-        .all() as unknown as DevTaskRow[];
+    async latestByIssue(): Promise<Map<string, DevTaskRow>> {
+      const rows = await db.all<DevTaskRow>("SELECT * FROM dev_tasks WHERE id IN (SELECT MAX(id) FROM dev_tasks GROUP BY project_id, issue_iid)");
       return new Map(rows.map((r) => [`${r.project_id}#${r.issue_iid}`, r]));
     },
 
-    listInterrupted(): DevTaskRow[] {
-      return db.prepare(`SELECT * FROM dev_tasks WHERE status IN ${ACTIVE}`).all() as unknown as DevTaskRow[];
+    listInterrupted(): Promise<DevTaskRow[]> {
+      return db.all<DevTaskRow>(`SELECT * FROM dev_tasks WHERE status IN ${ACTIVE}`);
     },
 
-    update(id: number, fields: Partial<Pick<DevTaskRow, UpdatableField>>): void {
+    async update(id: number, fields: Partial<Pick<DevTaskRow, UpdatableField>>): Promise<void> {
       const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
       if (entries.length === 0) return;
       const set = entries.map(([k]) => `${k} = ?`).join(", ");
-      db.prepare(`UPDATE dev_tasks SET ${set}, updated_at = datetime('now') WHERE id = ?`).run(
-        ...entries.map(([, v]) => v as string | number | null),
-        id,
-      );
+      await db.run(`UPDATE dev_tasks SET ${set}, updated_at = ${db.sql.now} WHERE id = ?`, [...entries.map(([, v]) => v), id]);
     },
 
-    addEvent(taskId: number, kind: DevTaskEvent["kind"], text: string): void {
-      db.prepare("INSERT INTO dev_task_events (task_id, kind, text) VALUES (?, ?, ?)").run(taskId, kind, text.slice(0, 4000));
+    async addEvent(taskId: number, kind: DevTaskEvent["kind"], text: string): Promise<void> {
+      await db.run("INSERT INTO dev_task_events (task_id, kind, text) VALUES (?, ?, ?)", [taskId, kind, text.slice(0, 4000)]);
     },
 
-    events(taskId: number, afterId = 0): DevTaskEvent[] {
-      return db
-        .prepare("SELECT * FROM dev_task_events WHERE task_id = ? AND id > ? ORDER BY id LIMIT 500")
-        .all(taskId, afterId) as unknown as DevTaskEvent[];
+    events(taskId: number, afterId = 0): Promise<DevTaskEvent[]> {
+      return db.all<DevTaskEvent>("SELECT * FROM dev_task_events WHERE task_id = ? AND id > ? ORDER BY id LIMIT 500", [taskId, afterId]);
     },
   };
 }

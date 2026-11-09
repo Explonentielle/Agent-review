@@ -1,4 +1,5 @@
-import { claudeEnv, runProcess, type AgentRunConfig } from "../claude/process.js";
+import type { AgentRunner } from "../agent/runner.js";
+import type { AgentRunConfig } from "../claude/process.js";
 import { ReviewResultSchema, reviewResultJsonSchema, type ReviewResult } from "./schema.js";
 
 export interface EngineInput {
@@ -9,6 +10,7 @@ export interface EngineInput {
   /** Contexte de la MR (envoyé par stdin : pas de limite de taille d'argument). */
   prompt: string;
   engine: AgentRunConfig;
+  runner: AgentRunner;
 }
 
 export interface EngineOutput {
@@ -18,77 +20,31 @@ export interface EngineOutput {
   numTurns: number | null;
 }
 
-/** Résultat de `claude -p --output-format json`. */
-interface CliResult {
-  type?: string;
-  subtype?: string;
-  is_error?: boolean;
-  result?: string;
-  structured_output?: unknown;
-  total_cost_usd?: number;
-  num_turns?: number;
-}
-
 /** L'agent ne fait que lire : aucune écriture, aucune commande, aucun accès réseau. */
-const READ_ONLY_TOOLS = "Read,Grep,Glob";
+const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
 
 /**
- * Lance l'agent de review via la CLI Claude Code en mode headless (`claude -p`), authentifiée
- * avec l'abonnement de l'utilisateur. Usage perso uniquement : pour un déploiement à l'équipe,
- * basculer sur le Claude Agent SDK avec une clé API (cf. roadmap).
- *
- * Isolation vis-à-vis du dépôt reviewé : sans précaution, `claude -p` exécute les hooks de
- * `.claude/settings.json` et connecte les serveurs de `.mcp.json` présents dans le dépôt, et une
- * MR pourrait donc lancer des commandes sur ta machine. `--safe-mode` coupe CLAUDE.md, hooks,
- * plugins, skills et MCP (l'auth reste normale) ; `--strict-mcp-config` sans `--mcp-config` = aucun MCP.
+ * Lance l'agent de review, en lecture seule. L'exécuteur (`input.runner`) porte l'isolation vis-à-vis
+ * du dépôt reviewé (hooks et MCP du dépôt coupés, aucune invite de permission) : voir `src/agent/cliRunner.ts`.
+ * Usage perso : la CLI sur l'abonnement de l'utilisateur. Pour un déploiement à l'équipe : clé API
+ * (roadmap-plateforme, A3).
  */
 export async function runReviewAgent(input: EngineInput): Promise<EngineOutput> {
-  const { engine } = input;
-  const args = [
-    "-p",
-    "--output-format", "json",
-    "--json-schema", JSON.stringify(reviewResultJsonSchema),
-    "--model", engine.model,
-    "--effort", engine.effort,
-    "--max-turns", String(engine.maxTurns),
-    "--append-system-prompt", input.systemPrompt,
-    "--tools", READ_ONLY_TOOLS,
-    "--allowedTools", READ_ONLY_TOOLS,
-    "--disallowedTools", "mcp__*",
-    "--permission-mode", "dontAsk",
-    "--permission-prompts", "none",
-    "--safe-mode",
-    "--strict-mcp-config",
-    "--no-session-persistence",
-  ];
-
-  const { stdout, stderr, exitCode } = await runProcess(engine.claudeBin, args, input.prompt, {
+  const out = await input.runner.run({
     cwd: input.cwd,
-    env: claudeEnv(),
-    timeoutMs: engine.timeoutMs,
+    systemPrompt: input.systemPrompt,
+    prompt: input.prompt,
+    outputSchema: reviewResultJsonSchema,
+    tools: READ_ONLY_TOOLS,
+    allowedTools: READ_ONLY_TOOLS,
+    disallowedTools: [],
+    ...input.engine,
+    persistSession: false,
+    stream: false,
   });
 
-  const payload = parseCliOutput(stdout);
-  if (!payload) {
-    throw new Error(`Sortie de Claude Code illisible (code ${exitCode}) : ${(stderr || stdout).slice(0, 800)}`);
-  }
-  if (payload.is_error || payload.subtype !== "success" || payload.structured_output == null) {
-    throw new Error(`Claude Code a échoué (${payload.subtype ?? "inconnu"}) : ${String(payload.result ?? stderr).slice(0, 800)}`);
-  }
-
-  const parsed = ReviewResultSchema.safeParse(payload.structured_output);
+  const parsed = ReviewResultSchema.safeParse(out.structured);
   if (!parsed.success) throw new Error(`Sortie structurée invalide : ${parsed.error.message}`);
 
-  return { result: parsed.data, costUsd: payload.total_cost_usd ?? null, numTurns: payload.num_turns ?? null };
-}
-
-/** Objet résultat unique ; tolère aussi un tableau d'événements (mode verbose). */
-function parseCliOutput(stdout: string): CliResult | null {
-  try {
-    const data = JSON.parse(stdout) as CliResult | CliResult[];
-    if (Array.isArray(data)) return data.findLast((m) => m.type === "result") ?? null;
-    return data;
-  } catch {
-    return null;
-  }
+  return { result: parsed.data, costUsd: out.costUsd, numTurns: out.numTurns };
 }

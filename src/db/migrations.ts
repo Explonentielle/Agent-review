@@ -1,0 +1,113 @@
+import type { Db, Sql } from "./db.js";
+
+/**
+ * Migrations appliquées dans l'ordre, une seule fois chacune (version de schéma suivie par le moteur :
+ * `PRAGMA user_version` sur SQLite, table `schema_migrations` sur PostgreSQL).
+ * Ne jamais modifier une migration déjà appliquée : en ajouter une nouvelle à la fin.
+ * Le SQL est commun aux deux moteurs ; seuls les types et les défauts passent par `Sql`.
+ */
+export function migrationsFor(s: Sql): string[] {
+  return [
+    `
+  CREATE TABLE reviews (
+    id               ${s.pk},
+    project_id       INTEGER NOT NULL,
+    project_path     TEXT    NOT NULL,
+    mr_iid           INTEGER NOT NULL,
+    mr_title         TEXT    NOT NULL,
+    mr_url           TEXT    NOT NULL,
+    author           TEXT    NOT NULL,
+    head_sha         TEXT    NOT NULL,
+    status           TEXT    NOT NULL DEFAULT 'queued',
+    decision_reasons TEXT,
+    result_json      TEXT,
+    changed_lines    INTEGER,
+    cost_usd         ${s.real},
+    num_turns        INTEGER,
+    error            TEXT,
+    feedback_agree   INTEGER,
+    feedback_note    TEXT,
+    created_at       TEXT    NOT NULL ${s.nowDefault},
+    updated_at       TEXT    NOT NULL ${s.nowDefault},
+    UNIQUE (project_id, mr_iid, head_sha)
+  );
+  CREATE INDEX idx_reviews_status ON reviews(status);
+
+  CREATE TABLE actions (
+    id         ${s.pk},
+    review_id  INTEGER NOT NULL REFERENCES reviews(id),
+    kind       TEXT    NOT NULL,
+    automatic  INTEGER NOT NULL,
+    detail     TEXT,
+    created_at TEXT    NOT NULL ${s.nowDefault}
+  );
+  `,
+    `
+  CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
+  CREATE TABLE projects (
+    project_id INTEGER PRIMARY KEY,
+    path       TEXT NOT NULL,
+    config     TEXT NOT NULL
+  );
+
+  CREATE TABLE dev_tasks (
+    id                 ${s.pk},
+    project_id         INTEGER NOT NULL,
+    project_path       TEXT    NOT NULL,
+    issue_iid          INTEGER NOT NULL,
+    issue_title        TEXT    NOT NULL,
+    issue_url          TEXT    NOT NULL,
+    extra_instructions TEXT,
+    branch             TEXT,
+    base_branch        TEXT,
+    target_branch      TEXT,
+    worktree_path      TEXT,
+    session_id         TEXT,
+    status             TEXT    NOT NULL DEFAULT 'queued',
+    result_json        TEXT,
+    mr_iid             INTEGER,
+    mr_url             TEXT,
+    files_changed      INTEGER,
+    cost_usd           ${s.real},
+    num_turns          INTEGER,
+    error              TEXT,
+    created_at         TEXT    NOT NULL ${s.nowDefault},
+    updated_at         TEXT    NOT NULL ${s.nowDefault}
+  );
+  CREATE INDEX idx_dev_tasks_issue ON dev_tasks(project_id, issue_iid);
+
+  CREATE TABLE dev_task_events (
+    id         ${s.pk},
+    task_id    INTEGER NOT NULL REFERENCES dev_tasks(id),
+    kind       TEXT    NOT NULL,
+    text       TEXT    NOT NULL,
+    created_at TEXT    NOT NULL ${s.nowDefault}
+  );
+  CREATE INDEX idx_dev_task_events_task ON dev_task_events(task_id, id);
+  `,
+    // Reprise d'une MR existante avec des consignes (roadmap, item 30)
+    `
+  ALTER TABLE dev_tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'new';
+  ALTER TABLE dev_tasks ADD COLUMN parent_id INTEGER REFERENCES dev_tasks(id);
+  `,
+  ];
+}
+
+/** Applique les migrations manquantes, chacune dans une transaction avec la mise à jour de la version. */
+export async function migrate(db: Db): Promise<void> {
+  const migrations = migrationsFor(db.sql);
+  const current = await db.schemaVersion();
+  if (current > migrations.length) {
+    throw new Error(`La base est à la version ${current} du schéma, plus récente que cet outil (${migrations.length}) : mets l'outil à jour`);
+  }
+  for (let version = current; version < migrations.length; version++) {
+    await db.transaction(async (tx) => {
+      await tx.exec(migrations[version]!);
+      await tx.setSchemaVersion(version + 1);
+    });
+  }
+}

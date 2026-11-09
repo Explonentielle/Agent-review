@@ -7,9 +7,10 @@
  */
 import path from "node:path";
 import { loadConfig } from "../config.js";
+import { GitlabConnector } from "../connectors/gitlab.js";
+import { createCostRepo } from "../db/costs.js";
 import { openDb } from "../db/index.js";
 import { createReviewRepo } from "../db/reviews.js";
-import { GitlabClient } from "../gitlab/client.js";
 import { runReview } from "../review/pipeline.js";
 import { RepoWorkspace } from "../review/workspace.js";
 import { createSettingsStore } from "../settings/store.js";
@@ -18,45 +19,43 @@ const args = process.argv.slice(2);
 const usage = "Usage : npm run review:once -- <url de la MR>   (ou <projectId> <mrIid>)";
 
 const config = loadConfig();
-const db = openDb(config.dataDir);
+const db = await openDb({ dataDir: config.dataDir, databaseUrl: config.databaseUrl });
 const reviews = createReviewRepo(db);
 const settings = createSettingsStore(db);
-const gitlab = new GitlabClient(config.gitlab.url, config.gitlab.token);
-const workspace = new RepoWorkspace(path.join(config.dataDir, "repos"), config.gitlab.token);
+const connector = GitlabConnector.fromConfig(config.gitlab);
+const git = connector.gitCredentials();
+const workspace = new RepoWorkspace(path.join(config.dataDir, "repos"), git.token, git.username);
 
 async function resolveTarget(): Promise<{ projectId: number; mrIid: number }> {
   const [first, second] = args;
-  const fromUrl = first?.match(/^https?:\/\/[^/]+\/(.+?)\/-\/merge_requests\/(\d+)/);
-  if (fromUrl) {
-    const project = await gitlab.getProjectByPath(fromUrl[1]!);
-    return { projectId: project.id, mrIid: Number(fromUrl[2]) };
-  }
+  const fromUrl = first ? await connector.resolveChangeRequestUrl(first) : null;
+  if (fromUrl) return { projectId: fromUrl.projectId, mrIid: fromUrl.iid };
   if (first && second && /^\d+$/.test(first) && /^\d+$/.test(second)) return { projectId: Number(first), mrIid: Number(second) };
   console.error(usage);
   process.exit(1);
 }
 
 const { projectId, mrIid } = await resolveTarget();
-const mr = await gitlab.getMergeRequest(projectId, mrIid);
-const project = await gitlab.getProject(mr.project_id);
+const mr = await connector.getChangeRequest(projectId, mrIid);
+const project = await connector.getProject(mr.projectId);
 
 const id =
-  reviews.insertIfNew({
-    projectId: mr.project_id,
-    projectPath: project.path_with_namespace,
+  (await reviews.insertIfNew({
+    projectId: mr.projectId,
+    projectPath: project.path,
     mrIid: mr.iid,
     mrTitle: mr.title,
-    mrUrl: mr.web_url,
+    mrUrl: mr.url,
     author: mr.author.name,
-    headSha: mr.sha,
-  }) ?? reviews.list().find((r) => r.project_id === mr.project_id && r.mr_iid === mr.iid && r.head_sha === mr.sha)?.id;
+    headSha: mr.headSha,
+  })) ?? (await reviews.list()).find((r) => r.project_id === mr.projectId && r.mr_iid === mr.iid && r.head_sha === mr.headSha)?.id;
 
 if (id === undefined) throw new Error("Impossible de créer la review");
 
-console.log(`Review de ${project.path_with_namespace} !${mr.iid} en cours (quelques minutes)...`);
-await runReview(id, { config, gitlab, reviews, workspace, settings, forceShadow: true });
+console.log(`Review de ${project.path} !${mr.iid} en cours (quelques minutes)...`);
+await runReview(id, { config, connector, costs: createCostRepo(db), reviews, workspace, settings, forceShadow: true });
 
-const row = reviews.get(id);
+const row = await reviews.get(id);
 console.log(JSON.stringify({ status: row?.status, reasons: row?.decision_reasons ? JSON.parse(row.decision_reasons) : [], cost: row?.cost_usd, error: row?.error }, null, 2));
 if (row?.result_json) console.log(JSON.stringify(JSON.parse(row.result_json), null, 2));
-db.close();
+await db.close();

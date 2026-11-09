@@ -42,8 +42,8 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 32 | Outillage | Serveur MCP GitLab | Faible | Écarté (2026-11-04), voir section |
 | 33 | Paramétrage | Aucune info d'entreprise dans le code : consignes des agents dans le dashboard | Faible | ✅ Fait (2026-11-06) |
 | 34 | Paramétrage | Prompts de base remplaçables dans le dashboard, garde-fous verrouillés | Faible | ✅ Fait (2026-11-09) |
-| 35 | Agent dev | Dépôts en ISO-8859-1 (sra-moteur) : l'édition de l'agent corrompt les accents | Moyen | Noté, pas implémenté : ne pas activer l'agent dev sur ces dépôts |
-| 36 | Plateforme | Plateforme hébergée : conteneur par utilisateur, GitLab / GitHub / tickets internes, abonnement ou clé API | Très élevé | Spec et plan écrits (2026-11-09), voir `docs/vision-plateforme.md` ; questions ouvertes à trancher |
+| 35 | Agent dev | Dépôts en ISO-8859-1 (sra-moteur) : l'édition de l'agent corrompt les accents | Moyen | Détection faite (2026-11-09, `src/dev/fileGuard.ts`) : un fichier corrompu est refusé avant le push. Réparation non faite : ne pas activer l'agent dev sur ces dépôts |
+| 36 | Plateforme | Plateforme hébergée : conteneur par utilisateur, GitLab / GitHub / tickets internes, abonnement ou clé API | Très élevé | Spec, parcours et roadmap détaillée écrits (2026-11-09) ; lot A fait sauf A3 (attend une clé API de test) et A6 : A1, A2, A4 et A5 faits (2026-11-09), voir `docs/roadmap-plateforme.md` |
 
 ---
 
@@ -86,7 +86,7 @@ Note : `~/.local/bin` n'est pas dans le PATH des shells non interactifs. La conf
 
 **Plafond (demande explicite)** : `REVIEW_MODEL` est limité à `claude-sonnet-5-5` (défaut) ou `claude-haiku-4-5`, et `REVIEW_EFFORT` à `low`/`medium`/`high` (défaut `high`). Le refus se fait à la validation de la config, et seuls les IDs complets sont acceptés (un alias suivrait les futurs modèles).
 
-**Testé en réel** (`scripts/smoke-claude.sh`, Haiku effort low, ~0,017 $ équivalent API) :
+**Testé en réel** (`scripts/smoke-claude.sh`, remplacé depuis par `scripts/smoke-review.ts`, Haiku effort low, ~0,017 $ équivalent API) :
 - toutes les options sont acceptées par la CLI 2.1.294 ;
 - la sortie structurée est conforme au schéma ;
 - un hook `SessionStart` piégé dans `.claude/settings.json` du dépôt **n'a pas été exécuté**.
@@ -101,7 +101,7 @@ Note : `~/.local/bin` n'est pas dans le PATH des shells non interactifs. La conf
 
 ### 4. Polling des MR : ✅ Écrit
 
-`src/triggers/gitlabPoller.ts` : MR ouvertes, hors draft, où je suis reviewer, et dont je ne suis pas l'auteur. Le passage Draft → Ready, qui fait passer le ticket en validation technique selon le workflow de l'équipe, fait apparaître la MR au cycle suivant (90 s par défaut).
+`src/triggers/reviewPoller.ts` (anciennement `gitlabPoller.ts`) : MR ouvertes, hors draft, où je suis reviewer, et dont je ne suis pas l'auteur. Le passage Draft → Ready, qui fait passer le ticket en validation technique selon le workflow de l'équipe, fait apparaître la MR au cycle suivant (90 s par défaut).
 
 **Pourquoi pas un webhook** : la WSL n'est pas joignable depuis GitLab, et le webhook projet peut déjà être utilisé par un autre outil.
 
@@ -344,7 +344,9 @@ GitLab a un serveur MCP officiel (`/api/v4/mcp`), en beta depuis 18.6 en auto-h�
 
 **Constat (2026-11-09)** : les fichiers de sra-moteur sont en ISO-8859-1. Les outils d'édition de l'agent (Edit, Write) lisent et écrivent en UTF-8 : sur un fichier Latin-1, chaque caractère accentué est remplacé par U+FFFD **dans tout le fichier**, et l'accent est perdu définitivement. L'agent n'a pas le droit de lancer `sed`, `iconv` ou Python, qui permettraient d'éditer sans réinterpréter l'encodage.
 
-**En attendant** : ne pas activer l'agent dev sur sra-moteur. Les consignes du projet peuvent demander à l'agent de terminer en `blocked` s'il doit modifier un fichier accentué, mais ce n'est qu'un filet de sécurité.
+**Fait (2026-11-09)** : la première piste (garde-fou déterministe avant le push) est en place, voir `docs/roadmap-plateforme.md`, A2. Un fichier ISO-8859-1 réécrit par l'agent est refusé avec un message clair, le travail reste dans le dossier local. Le garde-fou protège le dépôt mais ne répare rien.
+
+**En attendant** : ne pas activer l'agent dev sur sra-moteur, la tâche échouerait dès qu'un fichier accentué est modifié. Les consignes du projet peuvent demander à l'agent de terminer en `blocked` s'il doit modifier un fichier accentué, mais ce n'est qu'un filet de sécurité.
 
 **Pistes** :
 - un garde-fou dans le code avant le push : refuser si le diff ajoute le caractère U+FFFD, ou si un fichier dont l'encodage d'origine est ISO-8859-1 n'est plus valide dans cet encodage (contrôle déterministe, indépendant du modèle) ;
@@ -358,6 +360,8 @@ GitLab a un serveur MCP officiel (`/api/v4/mcp`), en beta depuis 18.6 en auto-h�
 **Décision de principe** : « ton environnement, ta session Claude ». La plateforme ne voit, ne stocke et n'utilise jamais les identifiants claude.ai : l'utilisateur se connecte lui-même (`/login`) dans le terminal de son propre conteneur. Clé API possible comme secret personnel injecté dans son seul conteneur. À faire valider par Anthropic avant une ouverture au-delà de l'équipe.
 
 **Plan** : six étapes livrables séparément, détaillées dans `docs/vision-plateforme.md` : cœur indépendant de la forge et du moteur, GitHub, multi-utilisateur sur serveur (clé API), conteneur par utilisateur, tickets internes avec Gitea, industrialisation.
+
+**Roadmap d'exécution** : `docs/roadmap-plateforme.md` (lots A à G, tâches, critères d'acceptation, jalons, chemin critique, décisions bloquantes).
 
 **Documents** : `docs/vision-plateforme.md` (architecture, concurrence, historique des décisions) et `docs/parcours-utilisateur.md` (parcours en neuf étapes, parcours transverses support / ticket interne / review, écosystèmes à brancher, écrans cibles, existant contre à construire).
 

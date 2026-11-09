@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { GitlabDiff } from "../gitlab/types.js";
+import type { Diff } from "../connectors/types.js";
 import { countChangedLines, filterDiffs, findLinkedIssueIids } from "./context.js";
 
-function diff(new_path: string, content = ""): GitlabDiff {
-  return { old_path: new_path, new_path, diff: content, new_file: false, renamed_file: false, deleted_file: false };
+function diff(newPath: string, content = ""): Diff {
+  return { oldPath: newPath, newPath, diff: content, isNew: false, isRenamed: false, isDeleted: false };
 }
 
 describe("filterDiffs", () => {
@@ -17,7 +17,7 @@ describe("filterDiffs", () => {
       diff(".env.prod"),
       diff("config/.env"),
       diff("resources/js/app.ts"),
-    ]).map((d) => d.new_path);
+    ]).map((d) => d.newPath);
     expect(kept).toEqual(["app/Foo.php", "resources/js/app.ts"]);
   });
 });
