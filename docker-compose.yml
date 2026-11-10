@@ -1,0 +1,71 @@
+# Déploiement serveur (pilote sur le VPS, voir docs/deploiement.md).
+# Variables lues dans le fichier .env à côté de ce fichier (créé par toi, jamais versionné) :
+# POSTGRES_PASSWORD (obligatoire), SECRETS_MASTER_KEY (obligatoire en mode serveur), forges, AUTH_*...
+name: review-agent
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
+    image: review-agent:local
+    init: true # reprend les processus orphelins des agents
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Forcés ici : l'application écoute dans le conteneur, la base est celle du service ci-dessous
+      HOST: 0.0.0.0
+      PORT: "4321"
+      DATA_DIR: /app/data
+      DATABASE_URL: postgres://review:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans le .env}@postgres:5432/review_agent
+    ports:
+      # Boucle locale seulement : accès par tunnel SSH. Ne jamais publier sur toutes les interfaces avant TLS, connexion et conteneurs d'agents.
+      - "127.0.0.1:4321:4321"
+    volumes:
+      - appdata:/app/data
+    tmpfs:
+      - /tmp:size=512m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Plafonds de la machine partagée avec d'autres services (voir docs/deploiement.md) : à ajuster à la mesure
+    mem_limit: 2560m
+    cpus: 2
+    pids_limit: 512
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [db, edge]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: review
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans le .env}
+      POSTGRES_DB: review_agent
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U review -d review_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    # Aucun port publié, aucun accès à Internet : seule l'application le joint
+    networks: [db]
+
+networks:
+  # Réseau de la base : sans sortie vers Internet
+  db:
+    internal: true
+  # Réseau de l'application : sortie vers les forges et Anthropic
+  edge: {}
+
+volumes:
+  appdata: {}
+  pgdata: {}

@@ -94,6 +94,7 @@ Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le do
 |---|---|
 | `src/index.ts` | Point d'entrée : config, BDD, deux files (review, dev), poller, serveur |
 | `src/config.ts` | Lecture du `.env` (secrets et machine uniquement) |
+| `Dockerfile`, `docker-compose.yml`, `scripts/` | Déploiement serveur (application et PostgreSQL), sauvegarde et restauration : `docs/deploiement.md` |
 | `src/tenants/` | Exécution par personne et par espace : connexions aux forges de son coffre, dépôts liés à son espace, files et pollers (`manager.ts`), limite commune d'agents simultanés (`limiter.ts`). Le serveur redirige chaque requête vers l'exécution de la personne connectée |
 | `src/auth/` | Connexion par compte de forge : OAuth avec PKCE (`oauth.ts`), sessions (`sessions.ts`), règles d'accès (`login.ts`), routes et contrôle d'accès du serveur (`routes.ts`). Dormante sans application OAuth configurée |
 | `src/secrets/` | Coffre à secrets : chiffrement AES-256-GCM (`crypto.ts`), clé maître hors base (`masterKey.ts`), table `secrets` par espace et utilisateur (`store.ts`), jeton GitHub et clé API saisis dans le dashboard (`vault.ts`). `src/logger.ts` masque dans les journaux toute valeur déclarée secrète |

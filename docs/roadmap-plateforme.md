@@ -48,7 +48,7 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | C6 | Serveur | Journal d'audit des écritures sur les forges | M | C4 | ⬜ |
 | C7 | Serveur | Quotas et budgets par utilisateur | M | A6, C4 | ⬜ |
 | C8 | Serveur | File de tâches par utilisateur, limites de concurrence | M | C4 | ✅ 2026-11-10 (files par personne, limite commune) ; priorité équitable et éviction des inactifs non faites |
-| C9 | Serveur | Déploiement : image de la plateforme, TLS, sauvegardes | L | C1a | ⬜ |
+| C9 | Serveur | Déploiement : image de la plateforme, TLS, sauvegardes | L | C1a | 🟡 2026-11-10 préparé (image, compose, sauvegardes), jamais construit ni lancé ; TLS non fait |
 | D1 | Environnements | Modèle d'environnement et lecture de `devcontainer.json` | M | C4 | ⬜ |
 | D2 | Environnements | Orchestrateur Docker : rootless, limites, volumes, arrêt à l'inactivité | L | D1 | ⬜ |
 | D3 | Environnements | Génération du Dockerfile par l'agent (droits réduits) | M | D1, A1 | ⬜ |
@@ -201,6 +201,14 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - **Pas encore fait** : arrêt des pollers des personnes inactives (gardés jusqu'à l'arrêt de l'outil), quotas par personne (C7), audit des écritures (C6), invitations (ajout d'un membre à un espace d'équipe), ordre équitable entre personnes (la file commune est première arrivée, première servie).
 - **Vérifié** : 14 tests (exécution du propriétaire et des autres, dépôts séparés, jetons du coffre, reconstruction, reprise, limite commune, serveur de bout en bout avec deux personnes), 14 mutations toutes détectées. Non vérifié : avec de vrais comptes et de vrais agents.
 
+**C9 (2026-11-10, préparé, non essayé)** : déploiement, voir `docs/deploiement.md`.
+- **Fichiers** : `Dockerfile` (deux étages, Node 24, CLI Claude Code, utilisateur sans droits), `docker-compose.yml` (application et PostgreSQL 16), `.dockerignore`, `tsconfig.build.json` (compilation sans les tests), `scripts/backup.sh` et `scripts/restore.sh`.
+- **Durcissement** : système de fichiers en lecture seule hors volume de données et `/tmp`, aucune capacité Linux, `no-new-privileges`, mémoire (2,5 Go) et processeurs (2) plafonnés, base sans port publié sur un réseau sans sortie, application publiée sur `127.0.0.1` seulement (accès par tunnel SSH).
+- **Sauvegardes** : `pg_dump` compressé, vérifié, 14 gardées, lisible par son propriétaire seul ; la clé maître n'y est jamais incluse. Restauration protégée par `--yes`.
+- **Vérifié** : syntaxe du fichier compose (`docker compose config` sur un `.env` factice), syntaxe des scripts, compilation de production et chargement des 68 modules sans erreur. **Non vérifié** : `docker build`, le démarrage, la coexistence avec rag-saas, la mémoire réelle, une sauvegarde et une restauration réelles.
+- **Pas fait** : TLS (inutile avec le tunnel), import de la base SQLite locale vers PostgreSQL, rotation des journaux, supervision (G2), restauration testée automatiquement (G3).
+- **Environnement des agents filtré** (`src/claude/process.ts`) : l'agent ne reçoit plus que PATH, HOME, la langue, les proxys et certificats, `XDG_*`, `CLAUDE_*` et `ANTHROPIC_*` (hors noms qui ressemblent à des secrets). Les jetons de forge, la clé maître, l'adresse de la base et les secrets OAuth du `.env` n'y sont plus. Ce n'est **pas** une isolation : un processus du même utilisateur lit l'environnement de son parent (`/proc`) ; seuls des conteneurs par personne (lot D) l'empêchent. 4 tests, 4 mutations détectées. Risque de régression : une commande de projet qui dépendrait d'une variable d'environnement non listée ne la verrait plus (à constater lors d'une vraie exécution, voir `docs/a-tester.md`).
+
 ## Lot B : GitHub (jalon J2)
 
 Objectif : traiter un ticket GitHub et reviewer une PR, comme aujourd'hui pour GitLab.
@@ -255,6 +263,6 @@ Objectif : tenir en production : isolation renforcée, supervision, sauvegardes 
 1. **A3** dès qu'une clé API de test est disponible.
 2. **Lot B** (GitHub) : fait (2026-11-10). Il reste à le valider sur un vrai dépôt : jeton à portée fine dans le `.env`, un dépôt de test avec quelques tickets.
 3. **A6** : coûts par utilisateur et budget en mode API (dépend d'A3).
-4. **C9** (déploiement sur le VPS : image, compose, sauvegardes). C1b à C4, C8 sont faits (2026-11-10) ; D (conteneurs par personne) conditionne l'ouverture à des personnes autres que de confiance.
+4. **Essayer C9 sur le VPS** (`docs/deploiement.md`), puis **D** (conteneurs par personne), qui conditionne toute ouverture à des personnes autres que de confiance. C1b à C4, C8 sont faits et C9 est préparé (2026-11-10).
 
 A1, A2, A4 et A5 sont faits (2026-11-09).

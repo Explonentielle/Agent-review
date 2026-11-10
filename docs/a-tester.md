@@ -70,7 +70,23 @@ Fermé par défaut : sans `AUTH_ALLOWED_USERS`, tu es seul. À n'essayer qu'avec
 - [ ] Lancer une review chez toi et une chez lui en même temps : l'une attend l'autre (`MAX_CONCURRENT_AGENTS=1`).
 - [ ] Retirer son identifiant d'`AUTH_ALLOWED_USERS` et redémarrer : il est refusé à sa prochaine connexion.
 
-## 7. Pas testé du tout
+## 7. Agents : environnement filtré (régression possible)
+
+Les agents ne reçoivent plus tout l'environnement de l'outil, seulement PATH, HOME, la langue, les proxys et certificats, `XDG_*`, `CLAUDE_*` et `ANTHROPIC_*` (hors noms qui ressemblent à des secrets). Les tests passent et la CLI démarre avec un environnement minimal (`claude --version`), mais **aucune vraie exécution d'agent n'a eu lieu depuis ce changement**.
+
+- [ ] Lancer l'agent dev sur un ticket, et une review : ils démarrent, lisent le dépôt, produisent un résultat comme avant (en mode abonnement, donc la connexion Claude passe toujours).
+- [ ] Si les tests d'un projet (`allowedCommands`) échouent maintenant alors qu'ils passaient, une variable d'environnement qu'ils utilisaient n'est plus transmise : la lister, je l'ajoute à `AGENT_ENV_NAMES` dans `src/claude/process.ts`.
+
+## 8. Déploiement sur le VPS (C9, jamais essayé)
+
+Suivre `docs/deploiement.md`. À noter ce qui se passe réellement :
+- [ ] `docker compose build` aboutit (durée, erreurs éventuelles de la CLI Claude Code ou de `npm ci`).
+- [ ] `docker compose up -d` : `app` et `postgres` passent en `healthy`, le journal affiche `app.started`.
+- [ ] Le tunnel SSH ouvre le dashboard ; `ss -tlnp | grep 4321` ne montre que `127.0.0.1`.
+- [ ] `bash scripts/backup.sh` produit un fichier non vide ; `bash scripts/restore.sh <fichier> --yes` le recharge sur une pile d'essai.
+- [ ] `free -h` avant et après : combien de mémoire reste-t-il avec rag-saas et la pile en marche ?
+
+## 9. Pas testé du tout
 
 - Un vrai serveur PostgreSQL (pilote `pg`) : seuls SQLite et PostgreSQL embarqué (PGlite) sont testés. Lancer avec `TEST_DATABASE_URL` pour la suite complète.
 - Le dashboard dans plusieurs navigateurs.
