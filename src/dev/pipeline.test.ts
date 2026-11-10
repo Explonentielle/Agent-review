@@ -38,7 +38,7 @@ function runnerThat(edit: (cwd: string) => void, structured: unknown = devResult
 
 describe.each(BACKENDS)("agent dev, de bout en bout, base %s (faux connecteur, vrai dépôt git local)", (backend) => {
   let h: Harness;
-  const deps = (runner: AgentRunner): DevDeps => ({ config: h.config, connector: h.connector, costs: h.costs, settings: h.settings, tasks: h.tasks, workspace: h.workspace, runner });
+  const deps = (runner: AgentRunner): DevDeps => ({ config: h.config, forges: h.forges, costs: h.costs, settings: h.settings, tasks: h.tasks, runner });
   const newTask = () =>
     h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 609, issueTitle: "Import des règles", issueUrl: "https://forge.example/groupe/projet/-/issues/609", extraInstructions: null });
 

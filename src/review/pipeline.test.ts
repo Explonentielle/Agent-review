@@ -40,10 +40,9 @@ describe.each(BACKENDS)("review, de bout en bout, base %s (faux connecteur, vrai
 
   const deps = (runner: AgentRunner, extra: Partial<PipelineDeps> = {}): PipelineDeps => ({
     config: h.config,
-    connector: h.connector,
+    forges: h.forges,
     costs: h.costs,
     reviews: h.reviews,
-    workspace: h.workspace,
     settings: h.settings,
     runner,
     ...extra,

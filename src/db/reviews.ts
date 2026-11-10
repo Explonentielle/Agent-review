@@ -1,3 +1,5 @@
+import { DEFAULT_FORGE } from "../connectors/forges.js";
+import type { ForgeKind } from "../connectors/types.js";
 import type { Db } from "./db.js";
 
 export type ReviewStatus =
@@ -12,6 +14,8 @@ export type ReviewStatus =
 
 export interface ReviewRow {
   id: number;
+  /** Forge d'où vient la demande de fusion. */
+  source: ForgeKind;
   project_id: number;
   project_path: string;
   mr_iid: number;
@@ -33,6 +37,8 @@ export interface ReviewRow {
 }
 
 export interface NewReview {
+  /** Forge d'où vient la demande de fusion (GitLab par défaut). */
+  source?: ForgeKind;
   projectId: number;
   projectPath: string;
   mrIid: number;
@@ -60,11 +66,11 @@ export function createReviewRepo(db: Db) {
     /** Insère une review si ce commit de cette MR n'a jamais été vu. Retourne l'id, ou null si déjà connue. */
     async insertIfNew(r: NewReview): Promise<number | null> {
       const row = await db.get<{ id: number }>(
-        `INSERT INTO reviews (project_id, project_path, mr_iid, mr_title, mr_url, author, head_sha)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO reviews (source, project_id, project_path, mr_iid, mr_title, mr_url, author, head_sha)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (project_id, mr_iid, head_sha) DO NOTHING
          RETURNING id`,
-        [r.projectId, r.projectPath, r.mrIid, r.mrTitle, r.mrUrl, r.author, r.headSha],
+        [r.source ?? DEFAULT_FORGE, r.projectId, r.projectPath, r.mrIid, r.mrTitle, r.mrUrl, r.author, r.headSha],
       );
       return row ? row.id : null;
     },

@@ -4,7 +4,8 @@ import type { Config } from "../config.js";
 import { assertBudgetAvailable } from "../budget.js";
 import type { CostRepo } from "../db/costs.js";
 import type { ReviewRepo, ReviewRow } from "../db/reviews.js";
-import type { ForgeConnector, Ticket } from "../connectors/types.js";
+import type { ForgeRegistry } from "../connectors/registry.js";
+import type { Ticket } from "../connectors/types.js";
 import { errorMessage, log } from "../logger.js";
 import { loadSystemPrompt } from "../prompts.js";
 import { compileRules, type SettingsStore } from "../settings/store.js";
@@ -13,14 +14,13 @@ import { decide } from "./decision.js";
 import { runReviewAgent } from "./engine.js";
 import { formatReviewComment } from "./format.js";
 import { ReviewResultSchema } from "./schema.js";
-import type { RepoWorkspace } from "./workspace.js";
 
 export interface PipelineDeps {
   config: Config;
-  connector: ForgeConnector;
+  /** Forges configurées : une review passe toujours par la forge qui l'a créée (colonne « source »). */
+  forges: ForgeRegistry;
   costs: CostRepo;
   reviews: ReviewRepo;
-  workspace: RepoWorkspace;
   settings: SettingsStore;
   /** Force le mode ombre quel que soit le réglage (review manuelle en ligne de commande). */
   forceShadow?: boolean;
@@ -29,7 +29,7 @@ export interface PipelineDeps {
 }
 
 export async function runReview(reviewId: number, deps: PipelineDeps): Promise<void> {
-  const { config, connector, reviews, workspace } = deps;
+  const { config, reviews } = deps;
   const row = await reviews.get(reviewId);
   if (!row) return;
   // Relus à chaque review : une modification dans le dashboard s'applique sans redémarrer
@@ -42,6 +42,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
   let cleanup: (() => Promise<void>) | undefined;
   try {
     await assertBudgetAvailable(settings, deps.costs);
+    const { connector, workspace } = deps.forges.get(row.source);
     const [project, mr] = await Promise.all([connector.getProject(row.project_id), connector.getChangeRequest(row.project_id, row.mr_iid)]);
 
     if (mr.headSha !== row.head_sha) {
@@ -67,7 +68,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
       systemPrompt: await loadSystemPrompt("review", {
         override: settings.systemPrompts.review,
         instructions: settings.instructions.review,
-        project: await deps.settings.getProject(row.project_id),
+        project: await deps.settings.getProject(row.source, row.project_id),
       }),
       prompt: buildReviewPrompt({
         project,
@@ -121,7 +122,7 @@ export async function publishComment(reviewId: number, deps: PipelineDeps, autom
   if (!row) throw new Error(`Review ${reviewId} introuvable`);
 
   const body = formatReviewComment(requireResult(row), { model: (await deps.settings.get()).review.model, sha: row.head_sha });
-  await deps.connector.commentOnChangeRequest(row.project_id, row.mr_iid, body, "review");
+  await deps.forges.get(row.source).connector.commentOnChangeRequest(row.project_id, row.mr_iid, body, "review");
 
   await deps.reviews.setStatus(reviewId, "published");
   await deps.reviews.logAction(reviewId, "comment", automatic);
@@ -133,7 +134,7 @@ export async function approve(reviewId: number, deps: PipelineDeps, automatic: b
   if (!row) throw new Error(`Review ${reviewId} introuvable`);
 
   // Le sha garantit qu'on approuve exactement le code reviewé
-  await deps.connector.approveChangeRequest(row.project_id, row.mr_iid, row.head_sha);
+  await deps.forges.get(row.source).connector.approveChangeRequest(row.project_id, row.mr_iid, row.head_sha);
 
   await deps.reviews.setStatus(reviewId, "approved");
   await deps.reviews.logAction(reviewId, "approve", automatic);

@@ -3,6 +3,7 @@ import { assembleSystemPrompt, loadSystemPrompt } from "./prompts.js";
 import type { ProjectSettings } from "./settings/schema.js";
 
 const project: ProjectSettings = {
+  source: "gitlab",
   projectId: 1,
   path: "groupe/projet",
   devEnabled: true,

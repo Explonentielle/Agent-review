@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 
 /**
  * Modèles autorisés. Plafond volontaire : Sonnet 5.5 au maximum, pour ne pas épuiser le quota
@@ -121,8 +122,10 @@ export const DEFAULT_SETTINGS: Settings = {
   },
 };
 
-/** Configuration d'un projet GitLab pour l'agent dev. */
+/** Configuration d'un projet (GitLab ou GitHub) pour l'agent dev. */
 export const ProjectSettingsSchema = z.object({
+  /** Forge du projet : les réglages enregistrés avant la prise en charge de GitHub sont des projets GitLab. */
+  source: z.enum(FORGE_KINDS).default(DEFAULT_FORGE),
   projectId: z.number().int().positive(),
   path: z.string().min(1),
   devEnabled: z.boolean(),

@@ -1,46 +1,53 @@
 /**
  * Lance une review à la main sur une MR précise, sans poller ni dashboard.
- * Usage : npm run review:once -- <url de la MR>
- *     ou npm run review:once -- <projectId> <mrIid>
- * Rien n'est posté sur GitLab (mode ombre forcé) : le résultat est affiché et enregistré en base,
+ * Usage : npm run review:once -- <url de la MR ou de la PR>
+ *     ou npm run review:once -- <projectId> <mrIid>   (forge GitLab, ou la seule forge configurée)
+ * Rien n'est posté sur la forge (mode ombre forcé) : le résultat est affiché et enregistré en base,
  * visible ensuite dans le dashboard.
  */
-import path from "node:path";
 import { loadConfig } from "../config.js";
-import { GitlabConnector } from "../connectors/gitlab.js";
+import { createForges } from "../connectors/factory.js";
+import { DEFAULT_FORGE } from "../connectors/forges.js";
+import type { Forge } from "../connectors/registry.js";
 import { createCostRepo } from "../db/costs.js";
 import { openDb } from "../db/index.js";
 import { createReviewRepo } from "../db/reviews.js";
 import { runReview } from "../review/pipeline.js";
-import { RepoWorkspace } from "../review/workspace.js";
 import { createSettingsStore } from "../settings/store.js";
 
 const args = process.argv.slice(2);
-const usage = "Usage : npm run review:once -- <url de la MR>   (ou <projectId> <mrIid>)";
+const usage = "Usage : npm run review:once -- <url de la MR ou de la PR>   (ou <projectId> <mrIid>)";
 
 const config = loadConfig();
 const db = await openDb({ dataDir: config.dataDir, databaseUrl: config.databaseUrl });
 const reviews = createReviewRepo(db);
 const settings = createSettingsStore(db);
-const connector = GitlabConnector.fromConfig(config.gitlab);
-const git = connector.gitCredentials();
-const workspace = new RepoWorkspace(path.join(config.dataDir, "repos"), git.token, git.username);
+const forges = await createForges(config);
 
-async function resolveTarget(): Promise<{ projectId: number; mrIid: number }> {
+async function resolveTarget(): Promise<{ forge: Forge; projectId: number; mrIid: number }> {
   const [first, second] = args;
-  const fromUrl = first ? await connector.resolveChangeRequestUrl(first) : null;
-  if (fromUrl) return { projectId: fromUrl.projectId, mrIid: fromUrl.iid };
-  if (first && second && /^\d+$/.test(first) && /^\d+$/.test(second)) return { projectId: Number(first), mrIid: Number(second) };
+  if (first) {
+    for (const forge of forges.all()) {
+      const fromUrl = await forge.connector.resolveChangeRequestUrl(first);
+      if (fromUrl) return { forge, projectId: fromUrl.projectId, mrIid: fromUrl.iid };
+    }
+  }
+  if (first && second && /^\d+$/.test(first) && /^\d+$/.test(second)) {
+    const forge = forges.has(DEFAULT_FORGE) ? forges.get(DEFAULT_FORGE) : forges.all()[0]!;
+    return { forge, projectId: Number(first), mrIid: Number(second) };
+  }
   console.error(usage);
   process.exit(1);
 }
 
-const { projectId, mrIid } = await resolveTarget();
+const { forge, projectId, mrIid } = await resolveTarget();
+const { connector } = forge;
 const mr = await connector.getChangeRequest(projectId, mrIid);
 const project = await connector.getProject(mr.projectId);
 
 const id =
   (await reviews.insertIfNew({
+    source: connector.kind,
     projectId: mr.projectId,
     projectPath: project.path,
     mrIid: mr.iid,
@@ -48,12 +55,12 @@ const id =
     mrUrl: mr.url,
     author: mr.author.name,
     headSha: mr.headSha,
-  })) ?? (await reviews.list()).find((r) => r.project_id === mr.projectId && r.mr_iid === mr.iid && r.head_sha === mr.headSha)?.id;
+  })) ?? (await reviews.list()).find((r) => r.source === connector.kind && r.project_id === mr.projectId && r.mr_iid === mr.iid && r.head_sha === mr.headSha)?.id;
 
 if (id === undefined) throw new Error("Impossible de créer la review");
 
 console.log(`Review de ${project.path} !${mr.iid} en cours (quelques minutes)...`);
-await runReview(id, { config, connector, costs: createCostRepo(db), reviews, workspace, settings, forceShadow: true });
+await runReview(id, { config, forges, costs: createCostRepo(db), reviews, settings, forceShadow: true });
 
 const row = await reviews.get(id);
 console.log(JSON.stringify({ status: row?.status, reasons: row?.decision_reasons ? JSON.parse(row.decision_reasons) : [], cost: row?.cost_usd, error: row?.error }, null, 2));

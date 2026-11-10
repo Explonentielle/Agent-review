@@ -17,17 +17,20 @@ import { openSqlite } from "./sqlite.js";
 interface Backend {
   name: string;
   open(): Promise<Db>;
+  /** Chaque ouverture donne une base neuve et indépendante (pas le serveur réel, dont l'ouverture vide la base partagée). */
+  fresh: boolean;
 }
 
 const backends: Backend[] = [
-  { name: "SQLite", open: async () => openSqlite(":memory:") },
-  { name: "PostgreSQL (PGlite)", open: async () => postgresFromPglite(new PGlite() as unknown as PgliteLike) },
+  { name: "SQLite", open: async () => openSqlite(":memory:"), fresh: true },
+  { name: "PostgreSQL (PGlite)", open: async () => postgresFromPglite(new PGlite() as unknown as PgliteLike), fresh: true },
 ];
 
 const testUrl = process.env.TEST_DATABASE_URL;
 if (testUrl) {
   backends.push({
     name: "PostgreSQL (serveur réel, pilote pg)",
+    fresh: false,
     async open() {
       if (!/test/i.test(new URL(testUrl).pathname)) throw new Error("TEST_DATABASE_URL doit viser une base dont le nom contient « test » : elle est vidée");
       const db = await openPostgres(testUrl);
@@ -122,8 +125,8 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     const id = await tasks.insert({ projectId: 1, projectPath: "g/p", issueIid: 609, issueTitle: "Import", issueUrl: "u", extraInstructions: null });
     expect(typeof id).toBe("number");
     expect(await tasks.get(id)).toMatchObject({ status: "queued", mode: "new", parent_id: null, branch: null });
-    expect((await tasks.findActive(1, 609))?.id).toBe(id);
-    expect(await tasks.findActive(1, 610)).toBeUndefined();
+    expect((await tasks.findActive("gitlab", 1, 609))?.id).toBe(id);
+    expect(await tasks.findActive("gitlab", 1, 610)).toBeUndefined();
 
     await tasks.update(id, { status: "running", branch: "feature/609-x", cost_usd: undefined });
     await tasks.update(id, {});
@@ -131,14 +134,14 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     const done = (await tasks.get(id))!;
     expect(done).toMatchObject({ status: "mr_created", branch: "feature/609-x", mr_iid: 12, cost_usd: 0.5, num_turns: 9, files_changed: 3 });
     expect(done.updated_at).toMatch(DATE_FORMAT);
-    expect(await tasks.findActive(1, 609)).toBeUndefined();
+    expect(await tasks.findActive("gitlab", 1, 609)).toBeUndefined();
 
     const follow = await tasks.insert({
       projectId: 1, projectPath: "g/p", issueIid: 609, issueTitle: "Import", issueUrl: "u", extraInstructions: "Ajoute les docblocks",
       followup: { parentId: id, branch: "feature/609-x", baseBranch: "develop", targetBranch: "develop", mrIid: 12, mrUrl: "https://m/12" },
     });
     expect(await tasks.get(follow)).toMatchObject({ mode: "followup", parent_id: id, branch: "feature/609-x", base_branch: "develop", mr_iid: 12 });
-    expect((await tasks.latestByIssue()).get("1#609")?.id).toBe(follow);
+    expect((await tasks.latestByIssue()).get("gitlab#1#609")?.id).toBe(follow);
     expect((await tasks.listInterrupted()).map((t) => t.id)).toEqual([follow]);
     expect((await tasks.list()).map((t) => t.id)).toEqual([follow, id]);
 
@@ -165,11 +168,51 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     await settings.saveProject({ ...project, projectId: 2, path: "g/a" });
     await settings.saveProject({ ...project, instructions: "mis à jour" }); // même projet : remplacé
     expect((await settings.listProjects()).map((p) => p.path)).toEqual(["g/a", "g/b"]);
-    expect((await settings.getProject(5))?.instructions).toBe("mis à jour");
-    expect(await settings.getProject(99)).toBeNull();
+    expect((await settings.getProject("gitlab", 5))?.instructions).toBe("mis à jour");
+    expect(await settings.getProject("gitlab", 99)).toBeNull();
     await expect(settings.saveProject({ ...project, baseBranch: "" })).rejects.toThrow(/Branche de départ/);
-    await settings.deleteProject(5);
-    expect(await settings.getProject(5)).toBeNull();
+    await settings.deleteProject("gitlab", 5);
+    expect(await settings.getProject("gitlab", 5)).toBeNull();
+  });
+
+  it("deux forges, même numéro de projet : tout reste séparé", async () => {
+    const settings = createSettingsStore(db);
+    const project = { projectId: 5, path: "g/b", devEnabled: true, baseBranch: "develop", targetBranch: "develop", allowedCommands: [], instructions: "" };
+    await settings.saveProject({ ...project, instructions: "côté GitLab" }); // sans « source » : GitLab, comme avant
+    await settings.saveProject({ ...project, source: "github", path: "acme/b", instructions: "côté GitHub" });
+
+    expect((await settings.listProjects()).map((p) => `${p.source}:${p.path}`)).toEqual(["github:acme/b", "gitlab:g/b"]);
+    expect((await settings.getProject("gitlab", 5))?.instructions).toBe("côté GitLab");
+    expect((await settings.getProject("github", 5))?.instructions).toBe("côté GitHub");
+    await settings.saveProject({ ...project, source: "github", path: "acme/b", instructions: "GitHub mis à jour" });
+    expect((await settings.getProject("github", 5))?.instructions).toBe("GitHub mis à jour");
+    expect((await settings.getProject("gitlab", 5))?.instructions).toBe("côté GitLab");
+
+    await settings.deleteProject("github", 5);
+    expect(await settings.getProject("github", 5)).toBeNull();
+    expect(await settings.getProject("gitlab", 5)).not.toBeNull();
+    await expect(settings.saveProject({ ...project, source: "gitea" })).rejects.toThrow();
+
+    const tasks = createDevTaskRepo(db);
+    const base = { projectId: 1, projectPath: "g/p", issueIid: 609, issueTitle: "t", issueUrl: "u", extraInstructions: null };
+    const onGitlab = await tasks.insert(base);
+    const onGithub = await tasks.insert({ ...base, source: "github", projectPath: "acme/p" });
+    expect(await tasks.get(onGitlab)).toMatchObject({ source: "gitlab" });
+    expect(await tasks.get(onGithub)).toMatchObject({ source: "github" });
+    expect((await tasks.findActive("github", 1, 609))?.id).toBe(onGithub);
+    expect((await tasks.findActive("gitlab", 1, 609))?.id).toBe(onGitlab);
+    await tasks.update(onGitlab, { status: "mr_created" });
+    expect(await tasks.findActive("gitlab", 1, 609)).toBeUndefined();
+    expect((await tasks.findActive("github", 1, 609))?.id).toBe(onGithub);
+    const latest = await tasks.latestByIssue();
+    expect([latest.get("gitlab#1#609")?.id, latest.get("github#1#609")?.id]).toEqual([onGitlab, onGithub]);
+
+    const reviews = createReviewRepo(db);
+    const mr = { projectId: 1, projectPath: "g/p", mrIid: 7, mrTitle: "t", mrUrl: "u", author: "a", headSha: "d".repeat(40) };
+    const review = (await reviews.insertIfNew(mr))!;
+    const reviewOnGithub = (await reviews.insertIfNew({ ...mr, source: "github", headSha: "e".repeat(40) }))!;
+    expect((await reviews.get(review))?.source).toBe("gitlab");
+    expect((await reviews.get(reviewOnGithub))?.source).toBe("github");
   });
 
   it("coûts : nombres (jamais du texte), mois courant", async () => {
@@ -181,5 +224,42 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     expect(lines).toEqual([{ kind: "review", projectPath: "g/p", usd: 1.25, count: 1 }]);
     expect(typeof lines[0]!.usd).toBe("number");
     expect(typeof lines[0]!.count).toBe("number");
+  });
+});
+
+describe.each(backends.filter((b) => b.fresh))("migration « plusieurs forges » : $name", ({ open }) => {
+  it("les données d'un outil à la version 3 sont conservées et deviennent des données GitLab", async () => {
+    const db = await open();
+    try {
+      const all = migrationsFor(db.sql);
+      expect(all).toHaveLength(4);
+      await db.schemaVersion(); // comme `migrate` : sur PostgreSQL, crée la table de suivi des versions
+      for (const [i, sql] of all.slice(0, 3).entries()) {
+        await db.transaction(async (tx) => {
+          await tx.exec(sql);
+          await tx.setSchemaVersion(i + 1);
+        });
+      }
+      const config = { projectId: 29, path: "g/bo", devEnabled: true, baseBranch: "develop", targetBranch: "develop", allowedCommands: [], instructions: "FuelPHP" };
+      await db.run("INSERT INTO reviews (project_id, project_path, mr_iid, mr_title, mr_url, author, head_sha) VALUES (29, 'g/bo', 716, 't', 'u', 'a', ?)", ["a".repeat(40)]);
+      await db.run("INSERT INTO dev_tasks (project_id, project_path, issue_iid, issue_title, issue_url) VALUES (29, 'g/bo', 609, 't', 'u')");
+      await db.run("INSERT INTO projects (project_id, path, config) VALUES (29, 'g/bo', ?)", [JSON.stringify(config)]);
+      expect(await db.schemaVersion()).toBe(3);
+
+      await migrate(db);
+
+      expect(await db.schemaVersion()).toBe(4);
+      expect(await db.get("SELECT source, project_id, mr_iid FROM reviews")).toEqual({ source: "gitlab", project_id: 29, mr_iid: 716 });
+      expect(await db.get("SELECT source, project_id, issue_iid FROM dev_tasks")).toEqual({ source: "gitlab", project_id: 29, issue_iid: 609 });
+      expect(await db.get("SELECT source, project_id, path FROM projects")).toEqual({ source: "gitlab", project_id: 29, path: "g/bo" });
+      expect(await createSettingsStore(db).getProject("gitlab", 29)).toMatchObject({ source: "gitlab", path: "g/bo", devEnabled: true, instructions: "FuelPHP" });
+      expect(await createSettingsStore(db).getProject("github", 29)).toBeNull();
+
+      // La clé des projets inclut maintenant la forge : le même numéro chez GitHub est un autre projet
+      await createSettingsStore(db).saveProject({ ...config, source: "github", path: "acme/bo" });
+      expect((await createSettingsStore(db).listProjects()).map((p) => `${p.source}:${p.path}`)).toEqual(["github:acme/bo", "gitlab:g/bo"]);
+    } finally {
+      await db.close();
+    }
   });
 });

@@ -82,13 +82,13 @@ describe.each(BACKENDS)("coûts et budget, base %s", (backend) => {
 
     h.connector.tickets.set(609, h.ticket());
     const taskId = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 609, issueTitle: "Import", issueUrl: "u", extraInstructions: null });
-    await runDevTask(taskId, { config: h.config, connector: h.connector, costs: h.costs, settings: h.settings, tasks: h.tasks, workspace: h.workspace, runner });
+    await runDevTask(taskId, { config: h.config, forges: h.forges, costs: h.costs, settings: h.settings, tasks: h.tasks, runner });
     expect(await h.tasks.get(taskId)).toMatchObject({ status: "error" });
     expect((await h.tasks.get(taskId))!.error).toMatch(/Budget mensuel atteint/);
 
     const sha = h.addMergeRequestRef(7, { "app.js": "x\n" });
     const reviewId = (await h.reviews.insertIfNew({ projectId: 1, projectPath: "groupe/projet", mrIid: 7, mrTitle: "t", mrUrl: "u", author: "a", headSha: sha }))!;
-    await runReview(reviewId, { config: h.config, connector: h.connector, costs: h.costs, reviews: h.reviews, workspace: h.workspace, settings: h.settings, runner });
+    await runReview(reviewId, { config: h.config, forges: h.forges, costs: h.costs, reviews: h.reviews, settings: h.settings, runner });
     expect(await h.reviews.get(reviewId)).toMatchObject({ status: "error" });
     expect((await h.reviews.get(reviewId))!.error).toMatch(/Budget mensuel atteint/);
 

@@ -4,12 +4,12 @@ import { createRunner, type AgentRunner } from "../agent/index.js";
 import { agentRunConfig, ProcessCancelledError } from "../claude/process.js";
 import type { Config } from "../config.js";
 import { assertBudgetAvailable } from "../budget.js";
-import type { CurrentUser, ForgeConnector } from "../connectors/types.js";
+import type { ForgeRegistry } from "../connectors/registry.js";
+import type { CurrentUser } from "../connectors/types.js";
 import type { CostRepo } from "../db/costs.js";
 import type { DevTaskRepo, DevTaskRow } from "../db/devTasks.js";
 import { errorMessage, log } from "../logger.js";
 import { loadSystemPrompt } from "../prompts.js";
-import type { RepoWorkspace } from "../review/workspace.js";
 import type { ProjectSettings, Settings } from "../settings/schema.js";
 import type { SettingsStore } from "../settings/store.js";
 import { buildDevPrompt, buildFollowupPrompt } from "./context.js";
@@ -21,11 +21,11 @@ import { cleanCommitSubject, ensureDraftTitle, renderTemplate, slugify } from ".
 
 export interface DevDeps {
   config: Config;
-  connector: ForgeConnector;
+  /** Forges configurées : une tâche passe toujours par la forge qui l'a créée (colonne « source »). */
+  forges: ForgeRegistry;
   costs: CostRepo;
   settings: SettingsStore;
   tasks: DevTaskRepo;
-  workspace: RepoWorkspace;
   /** Exécuteur d'agent imposé (tests). Par défaut : celui qui correspond aux réglages. */
   runner?: AgentRunner;
 }
@@ -87,7 +87,7 @@ export async function runDevTask(taskId: number, deps: DevDeps): Promise<void> {
 
   try {
     const settings = await deps.settings.get();
-    const project = await deps.settings.getProject(task.project_id);
+    const project = await deps.settings.getProject(task.source, task.project_id);
     if (!project?.devEnabled) throw new Error("Projet non configuré pour l'agent dev (Paramètres > Projets)");
     await assertBudgetAvailable(settings, deps.costs);
 
@@ -113,8 +113,9 @@ export async function runDevTask(taskId: number, deps: DevDeps): Promise<void> {
 }
 
 async function runNewTicket(c: RunContext): Promise<void> {
-  const { connector, tasks, workspace } = c.deps;
+  const { tasks } = c.deps;
   const { task, settings, project, step } = c;
+  const { connector, workspace } = c.deps.forges.get(task.source);
   await tasks.update(task.id, { base_branch: project.baseBranch, target_branch: project.targetBranch });
 
   const [gproject, issue, notes, me, protectedBranches] = await Promise.all([
@@ -180,8 +181,9 @@ async function runNewTicket(c: RunContext): Promise<void> {
 }
 
 async function runFollowup(c: RunContext): Promise<void> {
-  const { connector, tasks, workspace } = c.deps;
+  const { tasks } = c.deps;
   const { task, project, step } = c;
+  const { connector, workspace } = c.deps.forges.get(task.source);
   const instructions = task.extra_instructions?.trim();
   if (!task.branch || !task.mr_iid || !instructions) throw new Error("Reprise incomplète : branche, MR ou consignes manquantes");
   const branch = task.branch;
@@ -271,7 +273,7 @@ async function commitAgentWork(
   issue: { iid: number; title: string },
   result: DevResult,
 ): Promise<string[]> {
-  const { workspace } = c.deps;
+  const { workspace } = c.deps.forges.get(c.task.source);
   if (await workspace.foldAgentCommits(worktree, baseSha)) {
     await c.step("L'agent avait committé lui-même : ses commits sont repliés dans le commit de l'outil");
   }

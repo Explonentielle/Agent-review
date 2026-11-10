@@ -94,6 +94,25 @@ export function migrationsFor(s: Sql): string[] {
   ALTER TABLE dev_tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'new';
   ALTER TABLE dev_tasks ADD COLUMN parent_id INTEGER REFERENCES dev_tasks(id);
   `,
+    // Plusieurs forges : la « source » accompagne l'identifiant de projet (roadmap-plateforme, lot B).
+    // Les données existantes viennent de GitLab. Les réglages de projet sont recréés avec la clé (source, project_id) ;
+    // pour les reviews, la contrainte d'unicité existante reste : elle ne se heurterait que pour un même commit.
+    `
+  ALTER TABLE reviews ADD COLUMN source TEXT NOT NULL DEFAULT 'gitlab';
+  ALTER TABLE dev_tasks ADD COLUMN source TEXT NOT NULL DEFAULT 'gitlab';
+  CREATE INDEX idx_dev_tasks_source_issue ON dev_tasks(source, project_id, issue_iid);
+
+  CREATE TABLE projects_by_source (
+    source     TEXT    NOT NULL,
+    project_id INTEGER NOT NULL,
+    path       TEXT    NOT NULL,
+    config     TEXT    NOT NULL,
+    PRIMARY KEY (source, project_id)
+  );
+  INSERT INTO projects_by_source (source, project_id, path, config) SELECT 'gitlab', project_id, path, config FROM projects;
+  DROP TABLE projects;
+  ALTER TABLE projects_by_source RENAME TO projects;
+  `,
   ];
 }
 

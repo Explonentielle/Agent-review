@@ -1,15 +1,13 @@
-import path from "node:path";
 import { loadConfig } from "./config.js";
 import { createDevTaskRepo } from "./db/devTasks.js";
 import { openDb } from "./db/index.js";
 import { createReviewRepo } from "./db/reviews.js";
-import { GitlabConnector } from "./connectors/gitlab.js";
+import { createForges } from "./connectors/factory.js";
 import { createCostRepo } from "./db/costs.js";
 import { runDevTask } from "./dev/pipeline.js";
 import { initFileLogging, log } from "./logger.js";
 import { SerialQueue } from "./queue.js";
 import { runReview, type PipelineDeps } from "./review/pipeline.js";
-import { RepoWorkspace } from "./review/workspace.js";
 import { buildServer } from "./server/app.js";
 import { createSettingsStore } from "./settings/store.js";
 import { startReviewPoller } from "./triggers/reviewPoller.js";
@@ -22,16 +20,14 @@ async function main(): Promise<void> {
   const reviews = createReviewRepo(db);
   const tasks = createDevTaskRepo(db);
   const settings = createSettingsStore(db);
-  const connector = GitlabConnector.fromConfig(config.gitlab);
-  const git = connector.gitCredentials();
-  const workspace = new RepoWorkspace(path.join(config.dataDir, "repos"), git.token, git.username);
+  const forges = await createForges(config);
 
   const costs = createCostRepo(db);
 
-  const deps: PipelineDeps = { config, connector, costs, reviews, workspace, settings };
+  const deps: PipelineDeps = { config, forges, costs, reviews, settings };
   // Deux files séparées : une review n'attend pas la fin d'une tâche de dev (et inversement)
   const reviewQueue = new SerialQueue((id) => runReview(id, deps));
-  const devQueue = new SerialQueue((id) => runDevTask(id, { config, connector, costs, settings, tasks, workspace }));
+  const devQueue = new SerialQueue((id) => runDevTask(id, { config, forges, costs, settings, tasks }));
 
   // Reviews interrompues : relancées. Tâches dev interrompues : pas de reprise automatique
   // (un agent coupé en plein travail laisse un état incertain), elles passent en erreur.
@@ -43,13 +39,16 @@ async function main(): Promise<void> {
     await tasks.update(task.id, { status: "error", error: "Interrompue par un redémarrage de l'outil. Rien n'a été poussé si la MR n'existe pas." });
   }
 
-  const stopPoller = startReviewPoller({
-    connector,
-    reviews,
-    username: config.gitlab.username,
-    intervalMs: config.gitlab.pollIntervalMs,
-    enqueue: (id) => reviewQueue.push(id),
-  });
+  // Un poller par forge : chacun détecte les demandes de fusion où l'utilisateur est relecteur chez elle
+  const stopPollers = forges.all().map((forge) =>
+    startReviewPoller({
+      connector: forge.connector,
+      reviews,
+      username: forge.username,
+      intervalMs: config.pollIntervalMs,
+      enqueue: (id) => reviewQueue.push(id),
+    }),
+  );
 
   const server = buildServer({
     ...deps,
@@ -63,7 +62,7 @@ async function main(): Promise<void> {
   log.info("app.started", { dashboard: `http://localhost:${config.server.port}`, actionMode: (await settings.get()).actionMode });
 
   const shutdown = async () => {
-    stopPoller();
+    for (const stop of stopPollers) stop();
     await server.close();
     await db.close();
     process.exit(0);

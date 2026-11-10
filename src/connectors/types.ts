@@ -5,9 +5,13 @@
  * - **Ticket** : une issue.
  * - **ChangeRequest** : une demande de fusion (merge request GitLab, pull request GitHub).
  * - `iid` : numéro du ticket ou de la demande dans son projet (iid GitLab, number GitHub).
- * - `projectId` : identifiant numérique du projet chez la forge. Plusieurs forges dans une même
- *   base demanderont une colonne « source » (roadmap-plateforme, lot B).
+ * - `projectId` : identifiant numérique du projet chez la forge. Deux forges peuvent donner le même
+ *   numéro : en base, il est toujours accompagné de la colonne « source » (`ForgeKind`).
  */
+
+import type { FORGE_KINDS } from "./forges.js";
+
+export type ForgeKind = (typeof FORGE_KINDS)[number];
 
 export interface Person {
   id: number;
@@ -128,7 +132,7 @@ export interface GitCredentials {
 export type CommentKind = "review" | "note";
 
 export interface ForgeConnector {
-  readonly kind: "gitlab" | "github";
+  readonly kind: ForgeKind;
 
   gitCredentials(): GitCredentials;
   /** Référence git où la forge expose la tête d'une demande de fusion (refs/merge-requests/12/head). */

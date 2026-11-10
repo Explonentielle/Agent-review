@@ -1,3 +1,5 @@
+import { DEFAULT_FORGE } from "../connectors/forges.js";
+import type { ForgeKind } from "../connectors/types.js";
 import type { Db } from "./db.js";
 
 export type DevTaskStatus =
@@ -11,6 +13,8 @@ export type DevTaskStatus =
 
 export interface DevTaskRow {
   id: number;
+  /** Forge d'où vient le ticket. */
+  source: ForgeKind;
   project_id: number;
   project_path: string;
   issue_iid: number;
@@ -78,6 +82,8 @@ const ACTIVE = "('queued', 'running')";
 export function createDevTaskRepo(db: Db) {
   return {
     async insert(t: {
+      /** Forge d'où vient le ticket (GitLab par défaut). */
+      source?: ForgeKind;
       projectId: number;
       projectPath: string;
       issueIid: number;
@@ -88,12 +94,12 @@ export function createDevTaskRepo(db: Db) {
     }): Promise<number> {
       const f = t.followup;
       const row = await db.get<{ id: number }>(
-        `INSERT INTO dev_tasks (project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
+        `INSERT INTO dev_tasks (source, project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
                                 mode, parent_id, branch, base_branch, target_branch, mr_iid, mr_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING id`,
         [
-          t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions,
+          t.source ?? DEFAULT_FORGE, t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions,
           f ? "followup" : "new", f?.parentId ?? null, f?.branch ?? null, f?.baseBranch ?? null,
           f?.targetBranch ?? null, f?.mrIid ?? null, f?.mrUrl ?? null,
         ],
@@ -110,14 +116,14 @@ export function createDevTaskRepo(db: Db) {
     },
 
     /** Tâche en cours ou en attente pour ce ticket (empêche de lancer deux agents dessus). */
-    findActive(projectId: number, issueIid: number): Promise<DevTaskRow | undefined> {
-      return db.get<DevTaskRow>(`SELECT * FROM dev_tasks WHERE project_id = ? AND issue_iid = ? AND status IN ${ACTIVE} LIMIT 1`, [projectId, issueIid]);
+    findActive(source: ForgeKind, projectId: number, issueIid: number): Promise<DevTaskRow | undefined> {
+      return db.get<DevTaskRow>(`SELECT * FROM dev_tasks WHERE source = ? AND project_id = ? AND issue_iid = ? AND status IN ${ACTIVE} LIMIT 1`, [source, projectId, issueIid]);
     },
 
-    /** Dernière tâche par ticket, pour l'affichage dans l'onglet Tickets. */
+    /** Dernière tâche par ticket, pour l'affichage dans l'onglet Tickets. Clé : `source#projet#ticket`. */
     async latestByIssue(): Promise<Map<string, DevTaskRow>> {
-      const rows = await db.all<DevTaskRow>("SELECT * FROM dev_tasks WHERE id IN (SELECT MAX(id) FROM dev_tasks GROUP BY project_id, issue_iid)");
-      return new Map(rows.map((r) => [`${r.project_id}#${r.issue_iid}`, r]));
+      const rows = await db.all<DevTaskRow>("SELECT * FROM dev_tasks WHERE id IN (SELECT MAX(id) FROM dev_tasks GROUP BY source, project_id, issue_iid)");
+      return new Map(rows.map((r) => [`${r.source}#${r.project_id}#${r.issue_iid}`, r]));
     },
 
     listInterrupted(): Promise<DevTaskRow[]> {

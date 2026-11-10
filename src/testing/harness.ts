@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadConfig, type Config } from "../config.js";
+import { ForgeRegistry } from "../connectors/registry.js";
 import type { Ticket } from "../connectors/types.js";
 import { createCostRepo, type CostRepo } from "../db/costs.js";
 import { createDevTaskRepo, type DevTaskRepo } from "../db/devTasks.js";
@@ -32,6 +33,8 @@ export interface Harness {
   costs: CostRepo;
   workspace: RepoWorkspace;
   connector: FakeConnector;
+  /** Registre à passer aux pipelines et au serveur : une seule forge, le faux connecteur (genre « gitlab »). */
+  forges: ForgeRegistry;
   /** Tête d'une branche du dépôt distant, ou chaîne vide si elle n'existe pas. */
   remoteBranchSha(branch: string): string;
   /** Nombre de commits de la branche qui ne sont pas dans develop. */
@@ -84,6 +87,7 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
   const settings = createSettingsStore(db);
   await settings.saveProject({ projectId: 1, path: "groupe/projet", devEnabled: true, baseBranch: "develop", targetBranch: "develop", allowedCommands: [], instructions: "" });
   const connector = new FakeConnector({ cloneUrl: remoteUrl });
+  const workspace = new RepoWorkspace(path.join(root, "repos"), "token-factice");
 
   const remoteBranchSha = (branch: string) => execFileSync("git", ["ls-remote", remoteUrl, `refs/heads/${branch}`]).toString().split(/\s/)[0] ?? "";
 
@@ -97,8 +101,9 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
     tasks: createDevTaskRepo(db),
     reviews: createReviewRepo(db),
     costs: createCostRepo(db),
-    workspace: new RepoWorkspace(path.join(root, "repos"), "token-factice"),
+    workspace,
     connector,
+    forges: new ForgeRegistry([{ connector, workspace, username: "alex" }]),
     remoteBranchSha,
     commitsAhead: (branch) => Number(git(remoteDir, "rev-list", "--count", `develop..${branch}`)),
     lastCommit: (branch) => git(remoteDir, "log", "-1", "--format=%an|%ae|%s", branch),

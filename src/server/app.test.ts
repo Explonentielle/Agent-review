@@ -17,10 +17,9 @@ describe("API du dashboard sur le connecteur", () => {
     await h.settings.save({ ...current, workflow: { ...current.workflow, todoLabels: ["Statut::A traiter"] } });
     app = buildServer({
       config: h.config,
-      connector: h.connector,
+      forges: h.forges,
       costs: h.costs,
       reviews: h.reviews,
-      workspace: h.workspace,
       settings: h.settings,
       tasks: h.tasks,
       enqueueReview: () => undefined,
@@ -39,6 +38,7 @@ describe("API du dashboard sur le connecteur", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([
       {
+        source: "gitlab",
         projectId: 1,
         projectPath: "groupe/projet",
         iid: 609,

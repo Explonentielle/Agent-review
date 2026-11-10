@@ -31,6 +31,7 @@ export function startReviewPoller(deps: PollerDeps): () => void {
         if (mr.draft || mr.author.username === deps.username) continue;
 
         const id = await deps.reviews.insertIfNew({
+          source: deps.connector.kind,
           projectId: mr.projectId,
           projectPath: mr.projectPath,
           mrIid: mr.iid,

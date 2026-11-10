@@ -1,3 +1,4 @@
+import type { ForgeKind } from "../connectors/types.js";
 import type { Db } from "../db/db.js";
 import { log } from "../logger.js";
 import { DEFAULT_SETTINGS, ProjectSettingsSchema, SettingsSchema, type ProjectSettings, type Settings } from "./schema.js";
@@ -56,9 +57,9 @@ export function createSettingsStore(db: Db) {
       return rows.map((r) => ProjectSettingsSchema.parse(JSON.parse(r.config)));
     },
 
-    async getProject(projectId: number): Promise<ProjectSettings | null> {
-      const row = await db.get<{ config: string }>("SELECT config FROM projects WHERE project_id = ?", [projectId]);
-      return row ? ProjectSettingsSchema.parse(JSON.parse(row.config)) : null;
+    async getProject(source: ForgeKind, projectId: number): Promise<ProjectSettings | null> {
+      const row = await db.get<{ config: string }>("SELECT config FROM projects WHERE source = ? AND project_id = ?", [source, projectId]);
+      return row ? ProjectSettingsSchema.parse({ ...JSON.parse(row.config), source }) : null;
     },
 
     async saveProject(input: unknown): Promise<ProjectSettings> {
@@ -67,15 +68,15 @@ export function createSettingsStore(db: Db) {
         throw new Error("Branche de départ et branche cible obligatoires pour activer l'agent dev");
       }
       await db.run(
-        `INSERT INTO projects (project_id, path, config) VALUES (?, ?, ?)
-         ON CONFLICT (project_id) DO UPDATE SET path = excluded.path, config = excluded.config`,
-        [project.projectId, project.path, JSON.stringify(project)],
+        `INSERT INTO projects (source, project_id, path, config) VALUES (?, ?, ?, ?)
+         ON CONFLICT (source, project_id) DO UPDATE SET path = excluded.path, config = excluded.config`,
+        [project.source, project.projectId, project.path, JSON.stringify(project)],
       );
       return project;
     },
 
-    async deleteProject(projectId: number): Promise<void> {
-      await db.run("DELETE FROM projects WHERE project_id = ?", [projectId]);
+    async deleteProject(source: ForgeKind, projectId: number): Promise<void> {
+      await db.run("DELETE FROM projects WHERE source = ? AND project_id = ?", [source, projectId]);
     },
   };
 }

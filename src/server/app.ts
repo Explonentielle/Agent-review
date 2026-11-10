@@ -2,12 +2,14 @@ import path from "node:path";
 import Fastify, { type FastifyReply } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
+import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
+import type { ForgeKind } from "../connectors/types.js";
 import { currentMonth } from "../db/costs.js";
 import type { DevTaskRepo } from "../db/devTasks.js";
 import type { ReviewStatus } from "../db/reviews.js";
 import { cancelDevTask } from "../dev/pipeline.js";
 import { renderTemplate, slugify } from "../dev/templates.js";
-import { errorMessage } from "../logger.js";
+import { errorMessage, log } from "../logger.js";
 import { PROJECT_ROOT } from "../paths.js";
 import { readDefaultSystemPrompt } from "../prompts.js";
 import { approve, publishComment, type PipelineDeps } from "../review/pipeline.js";
@@ -32,11 +34,23 @@ export function classifyIssue(labels: string[], workflow: Settings["workflow"]):
   return "other";
 }
 
+/** Requête invalide (paramètre inconnu) : répondue en 400. */
+class BadRequestError extends Error {}
+
 function fail(reply: FastifyReply, err: unknown, code = 502) {
   if (err instanceof ZodError) {
     return reply.code(400).send({ error: err.issues.map((i) => `${i.path.join(".") || "valeur"} : ${i.message}`).join(" · ") });
   }
+  if (err instanceof BadRequestError) return reply.code(400).send({ error: err.message });
   return reply.code(code).send({ error: errorMessage(err) });
+}
+
+/** Forge demandée par le dashboard (GitLab si le paramètre est absent, comme avant l'arrivée de GitHub). */
+function forgeOf(value: unknown): ForgeKind {
+  if (value === undefined || value === null || value === "") return DEFAULT_FORGE;
+  const kind = FORGE_KINDS.find((k) => k === value);
+  if (!kind) throw new BadRequestError(`Forge inconnue : ${String(value)}`);
+  return kind;
 }
 
 /**
@@ -61,12 +75,15 @@ export function buildServer(deps: ServerDeps) {
 
   app.get("/api/stats", async () => {
     const settings = await deps.settings.get();
+    const primary = deps.forges.has(DEFAULT_FORGE) ? deps.forges.get(DEFAULT_FORGE) : deps.forges.all()[0]!;
     return {
       actionMode: settings.actionMode,
       model: settings.review.model,
       devModel: settings.dev.model,
-      username: deps.config.gitlab.username,
-      gitlabUrl: deps.config.gitlab.url,
+      username: primary.username,
+      gitlabUrl: deps.config.gitlab?.url ?? "",
+      /** Forges configurées sur cette machine (jamais leurs jetons). */
+      forges: deps.forges.all().map((f) => ({ kind: f.connector.kind, username: f.username })),
       agentAuth: settings.agentAuth,
       /** Présence seulement : la clé n'est jamais renvoyée. */
       apiKeyConfigured: deps.config.anthropicApiKey !== null,
@@ -118,23 +135,28 @@ export function buildServer(deps: ServerDeps) {
     }
   });
 
-  app.post<IdParams>("/api/projects/:id/delete", async (req) => {
-    await deps.settings.deleteProject(Number(req.params.id));
-    return { ok: true };
+  app.post<IdParams & { Querystring: { source?: string } }>("/api/projects/:id/delete", async (req, reply) => {
+    try {
+      await deps.settings.deleteProject(forgeOf(req.query.source), Number(req.params.id));
+      return { ok: true };
+    } catch (err) {
+      return fail(reply, err);
+    }
   });
 
-  app.get<{ Querystring: { search?: string } }>("/api/gitlab/projects", async (req, reply) => {
+  /** Projets de la forge (GitLab par défaut, `?source=github` pour GitHub). Le chemin garde « gitlab » pour le dashboard existant. */
+  app.get<{ Querystring: { search?: string; source?: string } }>("/api/gitlab/projects", async (req, reply) => {
     try {
-      const projects = await deps.connector.searchProjects(req.query.search ?? "");
+      const projects = await deps.forges.get(forgeOf(req.query.source)).connector.searchProjects(req.query.search ?? "");
       return projects.map((p) => ({ id: p.id, path: p.path, name: p.name, url: p.url }));
     } catch (err) {
       return fail(reply, err);
     }
   });
 
-  app.get<IdParams & { Querystring: { search?: string } }>("/api/gitlab/projects/:id/branches", async (req, reply) => {
+  app.get<IdParams & { Querystring: { search?: string; source?: string } }>("/api/gitlab/projects/:id/branches", async (req, reply) => {
     try {
-      const branches = await deps.connector.listBranches(Number(req.params.id), req.query.search ?? "");
+      const branches = await deps.forges.get(forgeOf(req.query.source)).connector.listBranches(Number(req.params.id), req.query.search ?? "");
       return branches.map((b) => ({ name: b.name, default: b.isDefault, protected: b.isProtected }));
     } catch (err) {
       return fail(reply, err);
@@ -146,14 +168,21 @@ export function buildServer(deps: ServerDeps) {
   app.get("/api/issues", async (_req, reply) => {
     try {
       const settings = await deps.settings.get();
-      const projects = new Map((await deps.settings.listProjects()).map((p) => [p.projectId, p]));
+      const projects = new Map((await deps.settings.listProjects()).map((p) => [`${p.source}#${p.projectId}`, p]));
       const latest = await deps.tasks.latestByIssue();
-      const issues = await deps.connector.listAssignedTickets();
 
-      return issues.map((i) => {
-        const project = projects.get(i.projectId);
-        const task = latest.get(`${i.projectId}#${i.iid}`);
+      // Une forge en panne n'empêche pas d'afficher les tickets des autres
+      const results = await Promise.allSettled(deps.forges.all().map(async (f) => ({ source: f.connector.kind, tickets: await f.connector.listAssignedTickets() })));
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+      if (failed.length === results.length) throw failed[0]!.reason;
+      for (const r of failed) log.warn("issues.forge_error", { error: errorMessage(r.reason) });
+      const issues = results.flatMap((r) => (r.status === "fulfilled" ? r.value.tickets.map((ticket) => ({ source: r.value.source, ticket })) : []));
+
+      return issues.map(({ source, ticket: i }) => {
+        const project = projects.get(`${source}#${i.projectId}`);
+        const task = latest.get(`${source}#${i.projectId}#${i.iid}`);
         return {
+          source,
           projectId: i.projectId,
           projectPath: i.projectPath ?? String(i.projectId),
           iid: i.iid,
@@ -189,18 +218,20 @@ export function buildServer(deps: ServerDeps) {
     return await deps.tasks.events(Number(req.params.id), Number(req.query.after ?? 0));
   });
 
-  app.post<{ Body: { projectId: number; issueIid: number; extraInstructions?: string } }>("/api/tasks", async (req, reply) => {
+  app.post<{ Body: { source?: string; projectId: number; issueIid: number; extraInstructions?: string } }>("/api/tasks", async (req, reply) => {
     try {
       const { projectId, issueIid } = req.body;
-      const project = await deps.settings.getProject(Number(projectId));
+      const source = forgeOf(req.body.source);
+      const project = await deps.settings.getProject(source, Number(projectId));
       if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
-      if (await deps.tasks.findActive(Number(projectId), Number(issueIid))) {
+      if (await deps.tasks.findActive(source, Number(projectId), Number(issueIid))) {
         return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
       }
-      const issue = await deps.connector.getTicket(Number(projectId), Number(issueIid));
+      const issue = await deps.forges.get(source).connector.getTicket(Number(projectId), Number(issueIid));
       if (!issue) return reply.code(404).send({ error: "Ticket introuvable" });
 
       const id = await deps.tasks.insert({
+        source,
         projectId: project.projectId,
         projectPath: project.path,
         issueIid: issue.iid,
@@ -226,13 +257,14 @@ export function buildServer(deps: ServerDeps) {
       if (!origin.branch || !origin.mr_iid || !origin.mr_url || origin.status === "running" || origin.status === "queued") {
         return reply.code(400).send({ error: "Seule une tâche terminée liée à une MR peut être reprise" });
       }
-      const project = await deps.settings.getProject(origin.project_id);
+      const project = await deps.settings.getProject(origin.source, origin.project_id);
       if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
-      if (await deps.tasks.findActive(origin.project_id, origin.issue_iid)) {
+      if (await deps.tasks.findActive(origin.source, origin.project_id, origin.issue_iid)) {
         return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
       }
 
       const id = await deps.tasks.insert({
+        source: origin.source,
         projectId: origin.project_id,
         projectPath: origin.project_path,
         issueIid: origin.issue_iid,
@@ -272,8 +304,9 @@ export function buildServer(deps: ServerDeps) {
       const task = await deps.tasks.get(Number(req.params.id));
       if (!task?.worktree_path) return { ok: true };
       if (task.status === "running" || task.status === "queued") return reply.code(409).send({ error: "Tâche en cours" });
-      const project = await deps.connector.getProject(task.project_id);
-      await deps.workspace.removeDevWorktree(task.project_id, project.cloneUrl, task.worktree_path);
+      const { connector, workspace } = deps.forges.get(task.source);
+      const project = await connector.getProject(task.project_id);
+      await workspace.removeDevWorktree(task.project_id, project.cloneUrl, task.worktree_path);
       await deps.tasks.update(task.id, { worktree_path: null });
       return { ok: true };
     } catch (err) {

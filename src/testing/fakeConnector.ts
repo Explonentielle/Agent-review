@@ -8,6 +8,7 @@ import type {
   CurrentUser,
   Diff,
   ForgeConnector,
+  ForgeKind,
   GitCredentials,
   NewChangeRequest,
   Project,
@@ -20,7 +21,7 @@ import type {
  * Les actions d'écriture sont enregistrées pour que les tests les vérifient.
  */
 export class FakeConnector implements ForgeConnector {
-  readonly kind = "gitlab" as const;
+  readonly kind: ForgeKind;
 
   me: CurrentUser = { id: 7, username: "alex", name: "Alex Dev", commitEmail: "alex@example.com" };
   project: Project;
@@ -44,7 +45,9 @@ export class FakeConnector implements ForgeConnector {
 
   private nextIid = 12;
 
-  constructor(project: Partial<Project> & { cloneUrl: string }) {
+  /** `kind` : la forge que ce faux connecteur prétend être (« gitlab » par défaut), pour tester plusieurs forges. */
+  constructor(project: Partial<Project> & { cloneUrl: string }, kind: ForgeKind = "gitlab") {
+    this.kind = kind;
     this.project = { id: 1, path: "groupe/projet", name: "projet", description: null, url: "https://forge.example/groupe/projet", ...project };
   }
 
