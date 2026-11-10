@@ -524,6 +524,10 @@ async function api(path, body) {
   const res = await fetch(path, body === undefined ? {} : {
     method: "POST", headers: { "Content-Type": "application/json", "x-review-agent": "1" }, body: JSON.stringify(body),
   });
+  if (res.status === 401) {
+    location.href = "/login";
+    throw new Error("Connexion requise");
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -979,8 +983,9 @@ async function loadSettings() {
   state.prefillProject = null;
   state.prefillSource = null;
   try {
-    const [s, projects, costs, secrets] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), refreshHeader()]);
+    const [s, projects, costs, secrets, me] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), api("/api/me").catch(() => null), refreshHeader()]);
     settingsData = s;
+    state.me = me;
     state.secrets = secrets ? secrets.secrets : null;
     state.settingsCache = s.settings;
     state.costs = costs;
@@ -1005,6 +1010,15 @@ function agentFields(prefix, a, title, hint) {
 /** Pastille de la clé API Anthropic : définie (.env ou saisie) ou absente. */
 function apiKeyPill() {
   return state.stats?.apiKeyConfigured ? pill("green", "clé définie") : pill("orange", "clé absente");
+}
+
+/** Session de connexion : qui est connecté et bouton de déconnexion. Vide quand l'outil tourne sans connexion (mode local). */
+function sessionBlock() {
+  const me = state.me;
+  if (!me || me.mode !== "login") return "";
+  return `<div class="sub-title">Session</div>
+    <p class="note">Connecté comme <b>${esc(me.user?.name ?? "?")}</b>, espace « ${esc(me.workspace?.name ?? "?")} ».</p>
+    <button type="button" class="btn sm ghost" data-act="logout">Se déconnecter</button>`;
 }
 
 /** Jetons enregistrables dans l'outil (chiffrés en base) : origine, saisie et suppression. Le serveur ne renvoie jamais leur valeur. */
@@ -1063,6 +1077,7 @@ function renderSettings() {
           ${(st.forges || []).some((f) => f.kind === "github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : ajoute <code>GITHUB_TOKEN</code> dans le .env.</dd>`}
           ${(st.forges || []).some((f) => f.kind === "gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : ajoute <code>GITLAB_URL</code>, <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env.</dd>`}</dl>
         <div id="secrets-block">${secretsBlock()}</div>
+        ${sessionBlock()}
       </section>
 
       <section class="card-section">
@@ -1392,6 +1407,11 @@ document.addEventListener("click", async (e) => {
     return toast(act === "prompt-load-default" ? "Prompt d'origine affiché : modifie-le puis enregistre." : "Champ vidé : le prompt d'origine sera utilisé après enregistrement.");
   }
   if (act === "secret-save" || act === "secret-delete") return secretAction(act, t.dataset.name);
+  if (act === "logout") {
+    await api("/auth/logout", {}).catch(() => undefined);
+    location.href = "/login";
+    return;
+  }
   if (act === "settings-reset") {
     if (!(await ask({ title: "Revenir aux valeurs par défaut ?", html: "<p>Le formulaire est réinitialisé. Rien n'est enregistré tant que tu ne cliques pas sur Enregistrer. Les projets ne sont pas touchés.</p>", okLabel: "Réinitialiser" }))) return;
     settingsData.settings = settingsData.defaults;
