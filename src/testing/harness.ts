@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadConfig, type Config } from "../config.js";
 import { ForgeRegistry } from "../connectors/registry.js";
 import type { Ticket } from "../connectors/types.js";
+import { createAccountRepo } from "../db/accounts.js";
 import { createCostRepo, type CostRepo } from "../db/costs.js";
 import { createDevTaskRepo, type DevTaskRepo } from "../db/devTasks.js";
 import type { Db } from "../db/db.js";
@@ -13,6 +15,9 @@ import { migrate } from "../db/migrations.js";
 import { postgresFromPglite, type PgliteLike } from "../db/postgres.js";
 import { createReviewRepo, type ReviewRepo } from "../db/reviews.js";
 import { RepoWorkspace } from "../review/workspace.js";
+import { Keyring } from "../secrets/crypto.js";
+import { createSecretStore } from "../secrets/store.js";
+import { createVault, type Vault } from "../secrets/vault.js";
 import { createSettingsStore, type SettingsStore } from "../settings/store.js";
 import { FakeConnector } from "./fakeConnector.js";
 
@@ -35,6 +40,8 @@ export interface Harness {
   connector: FakeConnector;
   /** Registre à passer aux pipelines et au serveur : une seule forge, le faux connecteur (genre « gitlab »). */
   forges: ForgeRegistry;
+  /** Coffre à secrets de l'utilisateur local, clé maître aléatoire ; le contrôle d'un jeton GitHub accepte tout (remplaçable). */
+  vault: Vault;
   /** Tête d'une branche du dépôt distant, ou chaîne vide si elle n'existe pas. */
   remoteBranchSha(branch: string): string;
   /** Nombre de commits de la branche qui ne sont pas dans develop. */
@@ -88,6 +95,8 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
   await settings.saveProject({ projectId: 1, path: "groupe/projet", devEnabled: true, baseBranch: "develop", targetBranch: "develop", allowedCommands: [], instructions: "" });
   const connector = new FakeConnector({ cloneUrl: remoteUrl });
   const workspace = new RepoWorkspace(path.join(root, "repos"), "token-factice");
+  const local = await createAccountRepo(db).localContext();
+  const vault = createVault(config, createSecretStore(db, new Keyring([randomBytes(32)])), { workspaceId: local.workspaceId, userId: local.userId }, async () => undefined);
 
   const remoteBranchSha = (branch: string) => execFileSync("git", ["ls-remote", remoteUrl, `refs/heads/${branch}`]).toString().split(/\s/)[0] ?? "";
 
@@ -104,6 +113,7 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
     workspace,
     connector,
     forges: new ForgeRegistry([{ connector, workspace, username: "alex" }]),
+    vault,
     remoteBranchSha,
     commitsAhead: (branch) => Number(git(remoteDir, "rev-list", "--count", `develop..${branch}`)),
     lastCommit: (branch) => git(remoteDir, "log", "-1", "--format=%an|%ae|%s", branch),

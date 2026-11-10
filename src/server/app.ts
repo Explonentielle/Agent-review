@@ -14,10 +14,14 @@ import { PROJECT_ROOT } from "../paths.js";
 import { readDefaultSystemPrompt } from "../prompts.js";
 import { approve, publishComment, type PipelineDeps } from "../review/pipeline.js";
 import type { Finding, ReviewResult } from "../review/schema.js";
+import { SecretError } from "../secrets/crypto.js";
+import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret, type Vault } from "../secrets/vault.js";
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
 
 export interface ServerDeps extends PipelineDeps {
   tasks: DevTaskRepo;
+  /** Coffre à secrets de l'utilisateur local (jetons et clés saisis dans le dashboard). */
+  vault: Vault;
   enqueueReview: (reviewId: number) => void;
   enqueueDev: (taskId: number) => void;
   queueSize: () => number;
@@ -41,7 +45,8 @@ function fail(reply: FastifyReply, err: unknown, code = 502) {
   if (err instanceof ZodError) {
     return reply.code(400).send({ error: err.issues.map((i) => `${i.path.join(".") || "valeur"} : ${i.message}`).join(" · ") });
   }
-  if (err instanceof BadRequestError) return reply.code(400).send({ error: err.message });
+  if (err instanceof BadRequestError || err instanceof SecretError) return reply.code(400).send({ error: err.message });
+  if (err instanceof SecretConflictError) return reply.code(409).send({ error: err.message });
   return reply.code(code).send({ error: errorMessage(err) });
 }
 
@@ -105,6 +110,29 @@ export function buildServer(deps: ServerDeps) {
       totalUsd: lines.reduce((sum, l) => sum + l.usd, 0),
       lines,
     };
+  });
+
+  // --- Secrets : jamais renvoyés, seulement leur présence et leur origine -------
+
+  app.get("/api/secrets", async () => ({ secrets: await describeSecrets(deps.vault) }));
+
+  app.post<{ Params: { name: string }; Body: unknown }>("/api/secrets/:name", async (req, reply) => {
+    try {
+      const name = managedName(req.params.name);
+      const value = (req.body as { value?: unknown } | null)?.value;
+      if (typeof value !== "string") throw new BadRequestError("Valeur manquante");
+      return await saveManagedSecret(deps.config, deps.vault, name, value);
+    } catch (err) {
+      return fail(reply, err, 400);
+    }
+  });
+
+  app.post<{ Params: { name: string } }>("/api/secrets/:name/delete", async (req, reply) => {
+    try {
+      return await deleteManagedSecret(deps.config, deps.vault, managedName(req.params.name));
+    } catch (err) {
+      return fail(reply, err, 400);
+    }
   });
 
   // --- Paramètres ------------------------------------------------------------

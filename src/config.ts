@@ -34,6 +34,11 @@ const EnvSchema = z
 
     PLANIO_URL: z.string().url().optional(),
     PLANIO_API_KEY: z.string().optional(),
+
+    /** Clé maître qui chiffre les secrets enregistrés dans l'outil (32 octets en base64). Absente : fichier `master.key` dans DATA_DIR, en local seulement. */
+    SECRETS_MASTER_KEY: z.preprocess(blankIsMissing, z.string().trim().optional()),
+    /** Anciennes clés maîtres, séparées par des virgules : elles déchiffrent encore pendant une rotation. */
+    SECRETS_MASTER_KEY_PREVIOUS: z.preprocess(blankIsMissing, z.string().optional()),
   })
   .superRefine((e, ctx) => {
     const gitlab = { GITLAB_URL: e.GITLAB_URL, GITLAB_TOKEN: e.GITLAB_TOKEN, GITLAB_USERNAME: e.GITLAB_USERNAME };
@@ -55,6 +60,10 @@ export interface Config {
   gitlab: { url: string; token: string; username: string } | null;
   /** Null si GitHub n'est pas configuré. `apiUrl` : https://api.github.com sauf GitHub Enterprise. */
   github: { apiUrl: string; token: string } | null;
+  /** Adresse de l'API GitHub, même quand le jeton vient du coffre et non du .env (https://api.github.com sauf GitHub Enterprise). */
+  githubApiUrl: string;
+  /** Clés maîtres du coffre à secrets : la courante (ou null : fichier local) et les anciennes. */
+  secrets: { masterKey: string | null; previousKeys: string[] };
   /** Intervalle de détection des demandes de fusion à reviewer, pour chaque forge. */
   pollIntervalMs: number;
   claudeBin: string;
@@ -83,6 +92,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     gitlab: e.GITLAB_URL && e.GITLAB_TOKEN && e.GITLAB_USERNAME ? { url: e.GITLAB_URL, token: e.GITLAB_TOKEN, username: e.GITLAB_USERNAME } : null,
     github: e.GITHUB_TOKEN ? { apiUrl: e.GITHUB_API_URL, token: e.GITHUB_TOKEN } : null,
+    githubApiUrl: e.GITHUB_API_URL,
+    secrets: {
+      masterKey: e.SECRETS_MASTER_KEY ?? null,
+      previousKeys: (e.SECRETS_MASTER_KEY_PREVIOUS ?? "").split(",").map((k) => k.trim()).filter(Boolean),
+    },
     pollIntervalMs: e.POLL_INTERVAL_SEC * 1000,
     claudeBin: e.CLAUDE_BIN ?? defaultClaudeBin(),
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,

@@ -42,7 +42,7 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | C1a | Serveur | Couche de données asynchrone : SQLite (local) et PostgreSQL (serveur), migrations communes | L | | ✅ 2026-11-09 |
 | C1b | Serveur | Modèle multi-espaces : utilisateurs, espaces, appartenances (la colonne « source » est faite avec le lot B) | M | C1a | ✅ 2026-11-10 pour le modèle ; le rattachement des données à un espace est en C4 |
 | C2 | Serveur | Connexion OAuth GitLab et GitHub | M | C1b | ⬜ |
-| C3 | Serveur | Secrets chiffrés (AES-256-GCM, clé maître hors base) | M | C1b | ⬜ |
+| C3 | Serveur | Secrets chiffrés (AES-256-GCM, clé maître hors base) | M | C1b | ✅ 2026-11-10 pour le jeton GitHub et la clé API Anthropic ; jetons GitLab et Planio non gérés |
 | C4 | Serveur | Isolation des données par espace, tests d'étanchéité | L | C1b | ⬜ |
 | C5 | Serveur | Réglages par portée : équipe, utilisateur, projet | M | C4 | ⬜ |
 | C6 | Serveur | Journal d'audit des écritures sur les forges | M | C4 | ⬜ |
@@ -163,6 +163,16 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - **Limite connue** : sur PostgreSQL, deux rétrogradations simultanées des deux seuls admins pourraient chacune voir l'autre encore admin et laisser l'espace sans admin (les transactions sont réservées aux migrations). Impossible sur SQLite (une seule connexion). À fermer en C4 avec un verrou.
 - **Vérifié** : 10 tests de plus (220 au total) sur SQLite et PostgreSQL embarqué, dont la migration d'une base en version 4 avec données ; 5 mutations (garde du dernier admin, garde de l'espace personnel, email en minuscules, doublon de membre, un seul espace personnel) toutes détectées. Non testé sur un vrai serveur PostgreSQL via le pilote `pg`.
 
+**C3 (2026-11-10)** : coffre à secrets, `src/secrets/` et migration 6.
+- **Chiffrement** (`crypto.ts`) : AES-256-GCM, vecteur d'initialisation aléatoire à chaque chiffrement, enveloppe versionnée `v1:clé:iv:étiquette:donnée`. Le contexte (espace, utilisateur, nom du secret) est authentifié sans être stocké : recopier une valeur chiffrée dans une autre ligne la rend illisible. L'identifiant de la clé (début de son empreinte) permet la rotation.
+- **Clé maître hors base** (`masterKey.ts`) : variable `SECRETS_MASTER_KEY` (32 octets en base64) ; sinon, en local seulement, fichier `data/master.key` créé au premier besoin en mode 600. En mode serveur (`DATABASE_URL`) la variable est obligatoire : pas de fichier généré dans un conteneur jetable. Si la clé est perdue alors que des secrets existent, l'outil refuse de démarrer au lieu d'en créer une autre. Rotation : nouvelle clé dans `SECRETS_MASTER_KEY`, ancienne dans `SECRETS_MASTER_KEY_PREVIOUS` ; au démarrage suivant les secrets sont rechiffrés.
+- **Coffre** (`store.ts`) : table `secrets` (espace, utilisateur ou partagé de l'espace, nom, valeur chiffrée). La liste ne renvoie que noms et dates. Un secret lu ou enregistré est déclaré au journal.
+- **Journaux** (`logger.ts`) : toute valeur déclarée (jetons du `.env`, clé maître, mot de passe de `DATABASE_URL`, secrets du coffre) est remplacée par `[secret]` dans la console, le fichier de journal et les messages d'erreur renvoyés au dashboard.
+- **Dashboard** (Paramètres, Connexion) : saisie du **jeton GitHub** et de la **clé API Anthropic**, chiffrés en base. Le `.env` reste prioritaire (le dashboard affiche « défini dans le .env » et refuse d'écraser). Le jeton GitHub est contrôlé auprès de GitHub avant enregistrement (un jeton refusé empêcherait la forge de démarrer) et pris en compte au redémarrage ; la clé API sert tout de suite. Routes `GET /api/secrets` (origine et date, jamais la valeur), `POST /api/secrets/:nom` et `POST /api/secrets/:nom/delete`, avec l'en-tête anti-CSRF.
+- **Pas encore fait** : jetons GitLab (il faudrait aussi l'adresse et le nom d'utilisateur dans les réglages) et Planio ; un jeton par utilisateur et par forge pour plusieurs personnes (les forges sont montées une fois au démarrage avec les jetons de l'utilisateur local ; la structure par utilisateur vient avec C2 et C4) ; changement du jeton GitHub sans redémarrage.
+- **Limite** : la clé maître en fichier local est à côté de la base : elle protège d'une fuite de la base seule (sauvegarde, export), pas d'un accès au dossier de données. Pour le serveur, la clé vient du `.env`, hors du dossier de la base.
+- **Vérifié** : 54 tests de plus (264 au total) ; 16 mutations (contexte authentifié, étiquette, déclaration au journal, étanchéité utilisateur, priorité du .env, contrôle du jeton, clé perdue, mode serveur, masquage, valeur renvoyée par la liste) toutes détectées. Non vérifié : le dashboard dans un navigateur (syntaxe seulement), un jeton GitHub réel.
+
 ## Lot B : GitHub (jalon J2)
 
 Objectif : traiter un ticket GitHub et reviewer une PR, comme aujourd'hui pour GitLab.
@@ -217,6 +227,6 @@ Objectif : tenir en production : isolation renforcée, supervision, sauvegardes 
 1. **A3** dès qu'une clé API de test est disponible.
 2. **Lot B** (GitHub) : fait (2026-11-10). Il reste à le valider sur un vrai dépôt : jeton à portée fine dans le `.env`, un dépôt de test avec quelques tickets.
 3. **A6** : coûts par utilisateur et budget en mode API (dépend d'A3).
-4. **C3** (secrets chiffrés, jetons saisis dans l'interface) puis **C4** (données rattachées à un espace, tests d'étanchéité). C1b est fait (2026-11-10).
+4. **C4** (données rattachées à un espace, tests d'étanchéité). C1b et C3 sont faits (2026-11-10).
 
 A1, A2, A4 et A5 sont faits (2026-11-09).

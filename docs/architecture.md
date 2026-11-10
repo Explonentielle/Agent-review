@@ -94,6 +94,7 @@ Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le do
 |---|---|
 | `src/index.ts` | Point d'entrée : config, BDD, deux files (review, dev), poller, serveur |
 | `src/config.ts` | Lecture du `.env` (secrets et machine uniquement) |
+| `src/secrets/` | Coffre à secrets : chiffrement AES-256-GCM (`crypto.ts`), clé maître hors base (`masterKey.ts`), table `secrets` par espace et utilisateur (`store.ts`), jeton GitHub et clé API saisis dans le dashboard (`vault.ts`). `src/logger.ts` masque dans les journaux toute valeur déclarée secrète |
 | `src/settings/` | Schéma, valeurs par défaut et stockage des réglages et projets |
 | `src/db/` | Accès à la base indépendant du moteur : interface `Db` asynchrone, adaptateurs SQLite (`node:sqlite`, local) et PostgreSQL (`pg`, serveur), migrations communes ; dépôts `reviews`, `devTasks`, `costs` et `accounts` (utilisateurs, espaces, appartenances : un espace garde un admin, un espace personnel n'a qu'un membre) |
 | `src/connectors/` | Interface `ForgeConnector` et vocabulaire neutre (ticket, demande de fusion, commentaire...). `gitlab.ts` et `github.ts` : un connecteur par forge, les seuls à connaître l'API et les types de leur forge. `registry.ts` : registre des forges configurées (connecteur, copies locales de dépôts, identité de l'utilisateur), retrouvées par la colonne « source ». Les pipelines, le poller, le serveur et la CLI n'utilisent que l'interface |

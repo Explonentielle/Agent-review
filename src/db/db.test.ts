@@ -337,7 +337,7 @@ describe.each(backends.filter((b) => b.fresh))("migration « plusieurs forges »
     const db = await open();
     try {
       const all = migrationsFor(db.sql);
-      expect(all).toHaveLength(5);
+      expect(all.length).toBeGreaterThanOrEqual(5); // la migration « plusieurs forges » est la 4e ; les suivantes s'appliquent à la suite
       await db.schemaVersion(); // comme `migrate` : sur PostgreSQL, crée la table de suivi des versions
       for (const [i, sql] of all.slice(0, 3).entries()) {
         await db.transaction(async (tx) => {
@@ -353,7 +353,7 @@ describe.each(backends.filter((b) => b.fresh))("migration « plusieurs forges »
 
       await migrate(db);
 
-      expect(await db.schemaVersion()).toBe(5);
+      expect(await db.schemaVersion()).toBe(all.length);
       expect(await db.get("SELECT source, project_id, mr_iid FROM reviews")).toEqual({ source: "gitlab", project_id: 29, mr_iid: 716 });
       expect(await db.get("SELECT source, project_id, issue_iid FROM dev_tasks")).toEqual({ source: "gitlab", project_id: 29, issue_iid: 609 });
       expect(await db.get("SELECT source, project_id, path FROM projects")).toEqual({ source: "gitlab", project_id: 29, path: "g/bo" });
@@ -386,7 +386,7 @@ describe.each(backends.filter((b) => b.fresh))("migration « comptes et espaces 
 
       await migrate(db);
 
-      expect(await db.schemaVersion()).toBe(5);
+      expect(await db.schemaVersion()).toBe(migrationsFor(db.sql).length);
       expect(await db.get("SELECT source, project_id, mr_iid FROM reviews")).toEqual({ source: "gitlab", project_id: 29, mr_iid: 716 });
       expect(await db.get("SELECT value FROM settings WHERE key = 'actionMode'")).toEqual({ value: '"comment"' });
 

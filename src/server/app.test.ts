@@ -22,6 +22,7 @@ describe("API du dashboard sur le connecteur", () => {
       reviews: h.reviews,
       settings: h.settings,
       tasks: h.tasks,
+      vault: h.vault,
       enqueueReview: () => undefined,
       enqueueDev: (id) => enqueuedDev.push(id),
       queueSize: () => 0,
@@ -102,5 +103,63 @@ describe("API du dashboard sur le connecteur", () => {
     const res = await app.inject({ method: "POST", url: `/api/tasks/${id}/cleanup`, headers: WRITE });
     expect(res.statusCode).toBe(200);
     expect((await h.tasks.get(id))!.worktree_path).toBeNull();
+  });
+
+  it("secrets : valeurs jamais renvoyées, en-tête anti-CSRF, noms limités, jeton GitHub contrôlé", async () => {
+    const save = (name: string, payload: object, headers: Record<string, string> = WRITE) => app.inject({ method: "POST", url: `/api/secrets/${name}`, headers, payload });
+
+    const initial = await app.inject({ method: "GET", url: "/api/secrets" });
+    expect(initial.json()).toEqual({
+      secrets: [
+        { name: "github.token", label: "Jeton GitHub", source: null, updatedAt: null, live: false },
+        { name: "anthropic.api_key", label: "Clé API Anthropic", source: null, updatedAt: null, live: true },
+      ],
+    });
+
+    expect((await save("github.token", { value: "github_pat_X" }, {})).statusCode).toBe(403); // sans l'en-tête
+    expect((await save("gitlab.token", { value: "x".repeat(20) })).statusCode).toBe(400); // secret non géré ici
+    expect((await save("github.token", {})).statusCode).toBe(400); // valeur manquante
+    expect((await save("github.token", { value: 42 })).statusCode).toBe(400);
+    expect((await save("github.token", { value: "   " })).statusCode).toBe(400); // vide après nettoyage
+
+    const saved = await save("github.token", { value: "github_pat_SAISIE_AU_DASHBOARD_1" });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toEqual({ restartRequired: true });
+    expect(saved.body).not.toContain("SAISIE_AU_DASHBOARD");
+
+    const listed = await app.inject({ method: "GET", url: "/api/secrets" });
+    expect(listed.json<{ secrets: { name: string; source: string | null }[] }>().secrets.map((s) => [s.name, s.source])).toEqual([
+      ["github.token", "vault"],
+      ["anthropic.api_key", null],
+    ]);
+    for (const url of ["/api/secrets", "/api/stats", "/api/settings"]) expect((await app.inject({ method: "GET", url })).body).not.toContain("SAISIE_AU_DASHBOARD");
+
+    // La clé API sert tout de suite, sans redémarrage
+    expect(((await app.inject({ method: "GET", url: "/api/stats" })).json() as { apiKeyConfigured: boolean }).apiKeyConfigured).toBe(false);
+    expect((await save("anthropic.api_key", { value: "sk-ant-SAISIE-AU-DASHBOARD-1" })).json()).toEqual({ restartRequired: false });
+    expect(((await app.inject({ method: "GET", url: "/api/stats" })).json() as { apiKeyConfigured: boolean }).apiKeyConfigured).toBe(true);
+    expect(h.config.anthropicApiKey).toBe("sk-ant-SAISIE-AU-DASHBOARD-1");
+
+    const removed = await app.inject({ method: "POST", url: "/api/secrets/anthropic.api_key/delete", headers: WRITE });
+    expect(removed.json()).toEqual({ deleted: true, restartRequired: false });
+    expect(h.config.anthropicApiKey).toBeNull();
+    expect((await app.inject({ method: "POST", url: "/api/secrets/anthropic.api_key/delete" })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/secrets/inconnu/delete", headers: WRITE })).statusCode).toBe(400);
+  });
+
+  it("secrets : un jeton GitHub refusé par GitHub n'est pas enregistré ; un secret du .env n'est pas modifiable", async () => {
+    h.vault.verifyGithubToken = async () => {
+      throw new Error("Bad credentials");
+    };
+    const refused = await app.inject({ method: "POST", url: "/api/secrets/github.token", headers: WRITE, payload: { value: "github_pat_REFUSE_123456" } });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json()).toEqual({ error: "Bad credentials" });
+    expect(await h.vault.store.has(h.vault.scope, "github.token")).toBe(false);
+
+    h.vault.fromEnv["anthropic.api_key"] = true;
+    const conflict = await app.inject({ method: "POST", url: "/api/secrets/anthropic.api_key", headers: WRITE, payload: { value: "sk-ant-AUTRE-12345678" } });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json<{ error: string }>().error).toMatch(/\.env/);
+    expect((await app.inject({ method: "POST", url: "/api/secrets/anthropic.api_key/delete", headers: WRITE })).statusCode).toBe(409);
   });
 });

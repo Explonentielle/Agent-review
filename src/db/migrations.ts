@@ -143,6 +143,21 @@ export function migrationsFor(s: Sql): string[] {
   INSERT INTO workspaces (name, kind) VALUES ('Espace local', 'personal');
   INSERT INTO memberships (workspace_id, user_id, role) SELECT w.id, u.id, 'admin' FROM workspaces w, users u;
   `,
+    // Secrets chiffrés (roadmap-plateforme, C3) : jamais de valeur en clair, la clé maître est hors base.
+    // user_id vide : secret partagé de l'espace ; renseigné : secret personnel de cet utilisateur dans l'espace.
+    `
+  CREATE TABLE secrets (
+    id           ${s.pk},
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    user_id      INTEGER REFERENCES users(id),
+    name         TEXT    NOT NULL,
+    value        TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL ${s.nowDefault},
+    updated_at   TEXT    NOT NULL ${s.nowDefault}
+  );
+  CREATE UNIQUE INDEX idx_secrets_workspace ON secrets(workspace_id, name) WHERE user_id IS NULL;
+  CREATE UNIQUE INDEX idx_secrets_user ON secrets(workspace_id, user_id, name) WHERE user_id IS NOT NULL;
+  `,
   ];
 }
 
