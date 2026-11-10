@@ -67,7 +67,7 @@ describe.each(BACKENDS)("agent dev, de bout en bout, base %s (faux connecteur, v
     expect(h.lastCommit(BRANCH)).toBe("Alex Dev|alex@example.com|#609 - Correction de l'import");
 
     const mr = h.connector.createdChangeRequests[0]!;
-    expect(mr).toMatchObject({ sourceBranch: BRANCH, targetBranch: "develop", title: "Draft: #609 - Import des règles", assigneeId: 7, removeSourceBranch: true });
+    expect(mr).toMatchObject({ sourceBranch: BRANCH, targetBranch: "develop", title: "Draft: #609 - Import des règles", assigneeId: 7, removeSourceBranch: false });
     expect(mr.description).toContain("Related to #609");
     expect(mr.description).toContain("Développé par un agent IA");
 

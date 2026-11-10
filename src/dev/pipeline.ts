@@ -171,7 +171,7 @@ async function runNewTicket(c: RunContext): Promise<void> {
     title: ensureDraftTitle(renderTemplate(settings.templates.mrTitle, vars)),
     description: [renderTemplate(settings.templates.mrDescription, vars), formatDevReport(out.result, changed)].filter(Boolean).join("\n\n"),
     assigneeId: me.id,
-    removeSourceBranch: true,
+    removeSourceBranch: false, // case « supprimer la branche source » décochée
   });
 
   await tasks.update(task.id, { status: "mr_created", mr_iid: mr.iid, mr_url: mr.url, files_changed: changed.length });

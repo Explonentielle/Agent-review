@@ -129,11 +129,11 @@ describe("GitlabConnector", () => {
   });
 
   it("crée une demande de fusion avec les noms de champs de GitLab", async () => {
-    const cr = await connector.createChangeRequest(65, { sourceBranch: "feature/1-x", targetBranch: "develop", title: "Draft: x", description: "d", assigneeId: 7, removeSourceBranch: true });
+    const cr = await connector.createChangeRequest(65, { sourceBranch: "feature/1-x", targetBranch: "develop", title: "Draft: x", description: "d", assigneeId: 7, removeSourceBranch: false });
     expect(calls.at(-1)).toEqual([
       "createMergeRequest",
       65,
-      { source_branch: "feature/1-x", target_branch: "develop", title: "Draft: x", description: "d", assignee_id: 7, remove_source_branch: true },
+      { source_branch: "feature/1-x", target_branch: "develop", title: "Draft: x", description: "d", assignee_id: 7, remove_source_branch: false },
     ]);
     expect(cr.iid).toBe(7);
     expect(cr.url).toBe("https://gitlab.example/groupe/projet/-/merge_requests/7");
