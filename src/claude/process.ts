@@ -13,16 +13,36 @@ export function agentRunConfig(s: AgentSettings): AgentRunConfig {
   return { model: s.model, effort: s.effort, maxTurns: s.maxTurns, timeoutMs: s.timeoutMin * 60_000 };
 }
 
+/** Variables du processus de l'outil que l'agent reçoit : de quoi lancer des commandes et joindre le réseau, rien de plus. */
+const AGENT_ENV_NAMES = new Set([
+  "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TERM", "COLORTERM", "NO_COLOR", "TZ", "TMPDIR", "TMP", "TEMP",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+  "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+]);
+const AGENT_ENV_PREFIXES = ["LC_", "XDG_", "CLAUDE_", "ANTHROPIC_"];
+/** Un nom qui ressemble à un secret n'est jamais transmis, même sous un préfixe autorisé... */
+const SECRET_LOOKING = /(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|CREDENTIAL)/i;
+/** ... sauf la connexion à l'abonnement de l'utilisateur, dont la CLI a besoin. */
+const AGENT_ENV_SECRETS_ALLOWED = new Set(["CLAUDE_CODE_OAUTH_TOKEN"]);
+
 /**
- * Environnement de la CLI. Sans `apiKey` (mode abonnement), toute clé présente dans le shell est
- * écartée : elle passerait devant le login d'abonnement et ferait facturer l'API sans que tu l'aies
- * demandé. Avec `apiKey` (mode clé API, choisi dans les réglages), seule cette clé est transmise.
+ * Environnement de la CLI, filtré : seules les variables utiles à une commande passent (liste ci-dessus). Les jetons de forge, la clé maître des
+ * secrets, l'adresse de la base et les secrets OAuth du `.env` n'y sont donc jamais : une commande lancée par l'agent (tests d'un projet,
+ * script d'un dépôt piégé) qui affiche son environnement ne les voit pas. Ce n'est pas une isolation : un processus du même utilisateur peut
+ * lire l'environnement du processus parent (`/proc`). Seuls des conteneurs par personne (lot D) l'empêchent.
+ * Sans `apiKey` (mode abonnement), toute clé présente dans le shell est écartée : elle passerait devant le login d'abonnement et ferait
+ * facturer l'API sans que tu l'aies demandé. Avec `apiKey` (mode clé API, choisi dans les réglages), seule cette clé est transmise.
  * Un jeton d'authentification de session (ANTHROPIC_AUTH_TOKEN) n'est jamais transmis.
+ * @param apiKey Clé API Anthropic du mode « clé API », ou absente en mode abonnement.
+ * @returns L'environnement du processus de l'agent.
  */
 export function claudeEnv(apiKey?: string): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    const allowed = AGENT_ENV_NAMES.has(name) || AGENT_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
+    if (allowed && (!SECRET_LOOKING.test(name) || AGENT_ENV_SECRETS_ALLOWED.has(name))) env[name] = value;
+  }
   if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
   return env;
 }
