@@ -1032,7 +1032,7 @@ function secretsBlock() {
     <div class="secret-list">${list.map((x) => `
       <div class="field"><span>${esc(x.label)} ${origin(x)}</span>
         ${x.source === "env" ? "" : `<div class="secret-form"><input type="password" autocomplete="new-password" placeholder="${x.source === "vault" ? "Nouvelle valeur (remplace l'actuelle)" : "Coller la valeur"}" data-secret-input="${esc(x.name)}"><button type="button" class="btn sm primary" data-act="secret-save" data-name="${esc(x.name)}">Enregistrer</button>${x.source === "vault" ? `<button type="button" class="btn sm ghost" data-act="secret-delete" data-name="${esc(x.name)}">Supprimer</button>` : ""}</div>`}
-        <small>${x.live ? "Appliqué tout de suite." : "Pris en compte au prochain démarrage de l'outil."}</small></div>`).join("")}</div>`;
+        <small>Appliqué tout de suite.</small></div>`).join("")}</div>`;
 }
 
 /** Enregistre ou supprime un jeton de l'outil, puis met à jour son bloc sans toucher aux autres champs du formulaire. */
@@ -1044,6 +1044,7 @@ async function secretAction(act, name) {
       if (!value) return toast("Colle d'abord la valeur.", true);
       const res = await api(`/api/secrets/${encodeURIComponent(name)}`, { value });
       toast(res.restartRequired ? "Enregistré, chiffré. Redémarre l'outil pour le prendre en compte." : "Enregistré, chiffré et appliqué.");
+      state.issues = null; // les tickets viennent des forges : ils sont rechargés avec les nouvelles connexions
     } else {
       if (!(await ask({ title: "Supprimer ce jeton ?", html: "<p>Il est effacé de la base de l'outil. Rien n'est révoqué chez GitLab, GitHub ou Anthropic : fais-le là-bas si le jeton a fuité.</p>", okLabel: "Supprimer" }))) return;
       const res = await api(`/api/secrets/${encodeURIComponent(name)}/delete`, {});
@@ -1072,7 +1073,7 @@ function renderSettings() {
     <form id="settings-form" autocomplete="off">
       <section class="card-section">
         <h2>Connexion</h2>
-        <p class="desc">Les comptes GitLab et GitHub se lisent dans le fichier <code>.env</code> : à modifier là-bas, puis redémarrer l'outil. GitLab et GitHub peuvent être configurés ensemble. Le jeton GitHub et la clé API Anthropic peuvent aussi s'enregistrer ci-dessous, chiffrés en base.</p>
+        <p class="desc">Les comptes GitLab et GitHub se lisent dans le fichier <code>.env</code> : à modifier là-bas, puis redémarrer l'outil. GitLab et GitHub peuvent être configurés ensemble. Tes jetons GitLab et GitHub et ta clé API Anthropic peuvent aussi s'enregistrer ci-dessous, chiffrés en base : ils sont à toi seul et pris en compte tout de suite.</p>
         <dl class="kv">${(st.forges || []).map((f) => `<dt>${forgeName(f.kind)}</dt><dd>@${esc(f.username)}${f.kind === "gitlab" && st.gitlabUrl ? ` · ${esc(st.gitlabUrl)}` : ""}</dd>`).join("")}
           ${(st.forges || []).some((f) => f.kind === "github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : ajoute <code>GITHUB_TOKEN</code> dans le .env.</dd>`}
           ${(st.forges || []).some((f) => f.kind === "gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : ajoute <code>GITLAB_URL</code>, <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env.</dd>`}</dl>
