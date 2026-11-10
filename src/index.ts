@@ -1,3 +1,4 @@
+import { createAuthRuntime } from "./auth/runtime.js";
 import { loadConfig, type Config } from "./config.js";
 import { createAccountRepo } from "./db/accounts.js";
 import { createDevTaskRepo } from "./db/devTasks.js";
@@ -22,7 +23,16 @@ import { startReviewPoller } from "./triggers/reviewPoller.js";
  * @returns Rien.
  */
 function registerEnvSecrets(config: Config): void {
-  const secrets = [config.gitlab?.token, config.github?.token, config.anthropicApiKey, config.planio?.apiKey, config.secrets.masterKey, ...config.secrets.previousKeys];
+  const secrets = [
+    config.gitlab?.token,
+    config.github?.token,
+    config.anthropicApiKey,
+    config.planio?.apiKey,
+    config.secrets.masterKey,
+    ...config.secrets.previousKeys,
+    config.auth?.gitlab?.clientSecret,
+    config.auth?.github?.clientSecret,
+  ];
   if (config.databaseUrl) secrets.push(decodeURIComponent(new URL(config.databaseUrl).password));
   for (const secret of secrets) registerSecret(secret);
 }
@@ -34,7 +44,8 @@ async function main(): Promise<void> {
 
   const db = await openDb({ dataDir: config.dataDir, databaseUrl: config.databaseUrl });
   // Sans connexion, tout se passe dans l'espace de l'utilisateur local : les dépôts de données y sont liés
-  const local = await createAccountRepo(db).localContext();
+  const accounts = createAccountRepo(db);
+  const local = await accounts.localContext();
   const reviews = createReviewRepo(db, local.workspaceId);
   const tasks = createDevTaskRepo(db, local.workspaceId);
   const settings = createSettingsStore(db, local.workspaceId);
@@ -87,10 +98,22 @@ async function main(): Promise<void> {
     }),
   );
 
+  // Connexion par compte de forge : seulement si une application OAuth est configurée dans le .env, sinon l'outil sert l'utilisateur local
+  const auth = config.auth ? createAuthRuntime(config.auth, db, accounts) : undefined;
+  if (auth) {
+    const purge = () => void auth.sessions.purgeExpired().catch((err: unknown) => log.warn("auth.purge_failed", { error: errorMessage(err) }));
+    purge();
+    setInterval(purge, 3_600_000).unref();
+    log.info("auth.enabled", { providers: [...auth.providers.keys()], owner: auth.policy.owner, multiUser: auth.policy.multiUser });
+  }
+
   const server = buildServer({
     ...deps,
     tasks,
     vault,
+    accounts,
+    local,
+    auth,
     enqueueReview: (id) => reviewQueue.push(id),
     enqueueDev: (id) => devQueue.push(id),
     queueSize: () => reviewQueue.size + devQueue.size,

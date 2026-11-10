@@ -4,6 +4,8 @@ import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
 import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 import type { ForgeKind } from "../connectors/types.js";
+import { registerAuth, type AuthRuntime } from "../auth/routes.js";
+import type { AccountContext, AccountRepo } from "../db/accounts.js";
 import { currentMonth } from "../db/costs.js";
 import type { DevTaskRepo } from "../db/devTasks.js";
 import type { ReviewStatus } from "../db/reviews.js";
@@ -20,6 +22,12 @@ import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from
 
 export interface ServerDeps extends PipelineDeps {
   tasks: DevTaskRepo;
+  /** Comptes, pour dire qui est connecté. */
+  accounts: AccountRepo;
+  /** Utilisateur, espace et rôle servis sans connexion, et espace auquel sont liés tous les dépôts de ce serveur. */
+  local: AccountContext;
+  /** Connexion par compte de forge. Absente : pas de connexion, l'outil sert l'utilisateur local. */
+  auth?: AuthRuntime;
   /** Coffre à secrets de l'utilisateur local (jetons et clés saisis dans le dashboard). */
   vault: Vault;
   enqueueReview: (reviewId: number) => void;
@@ -76,7 +84,30 @@ export function buildServer(deps: ServerDeps) {
     }
   });
 
+  // Connexion (si configurée) : sans session valide, tout est refusé sauf la page de connexion et l'aller-retour OAuth
+  if (deps.auth) {
+    registerAuth(app, deps.auth);
+    // Les dépôts de ce serveur sont liés à l'espace local : une session d'un autre espace ne doit jamais être servie par eux
+    app.addHook("onRequest", async (req, reply) => {
+      if (req.session && req.session.workspaceId !== deps.local.workspaceId && req.url.startsWith("/api/")) {
+        return reply.code(403).send({ error: "Cet espace n'est pas servi par cette installation" });
+      }
+    });
+  }
+
   // --- Général ---------------------------------------------------------------
+
+  /** Qui est connecté : l'utilisateur, son espace actif et son rôle (sans connexion, l'utilisateur local). */
+  app.get("/api/me", async (req) => {
+    const context = req.session ?? deps.local;
+    const [user, workspace] = await Promise.all([deps.accounts.getUser(context.userId), deps.accounts.getWorkspace(context.workspaceId)]);
+    return {
+      mode: deps.auth ? "login" : "local",
+      user: user ? { id: user.id, name: user.name } : null,
+      workspace: workspace ? { id: workspace.id, name: workspace.name, kind: workspace.kind } : null,
+      role: context.role,
+    };
+  });
 
   app.get("/api/stats", async () => {
     const settings = await deps.settings.get();

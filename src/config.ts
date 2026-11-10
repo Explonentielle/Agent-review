@@ -39,8 +39,47 @@ const EnvSchema = z
     SECRETS_MASTER_KEY: z.preprocess(blankIsMissing, z.string().trim().optional()),
     /** Anciennes clés maîtres, séparées par des virgules : elles déchiffrent encore pendant une rotation. */
     SECRETS_MASTER_KEY_PREVIOUS: z.preprocess(blankIsMissing, z.string().optional()),
+
+    /** Adresse publique de l'outil, celle que voit le navigateur (URL de retour OAuth). Par défaut http://localhost:PORT. */
+    PUBLIC_URL: z.preprocess(blankIsMissing, z.string().url().transform((u) => u.replace(/\/+$/, "")).optional()),
+    /** Connexion par compte GitLab (application OAuth créée sur GITLAB_URL) : les deux ensemble, ou aucun. */
+    AUTH_GITLAB_CLIENT_ID: z.preprocess(blankIsMissing, z.string().trim().optional()),
+    AUTH_GITLAB_CLIENT_SECRET: z.preprocess(blankIsMissing, z.string().trim().optional()),
+    /** Connexion par compte GitHub (application OAuth de github.com) : les deux ensemble, ou aucun. */
+    AUTH_GITHUB_CLIENT_ID: z.preprocess(blankIsMissing, z.string().trim().optional()),
+    AUTH_GITHUB_CLIENT_SECRET: z.preprocess(blankIsMissing, z.string().trim().optional()),
+    /** Propriétaire de l'installation, au format `forge:identifiant` (ex. gitlab:alex) : il reprend le compte local et ses données. Obligatoire dès qu'une connexion est configurée. */
+    AUTH_OWNER: z.preprocess(blankIsMissing, z.string().trim().optional()),
+    /** Autres personnes autorisées à se connecter, `forge:identifiant` séparés par des virgules. */
+    AUTH_ALLOWED_USERS: z.preprocess(blankIsMissing, z.string().optional()),
+    /** Durée d'une session de connexion, en jours. */
+    SESSION_DAYS: z.coerce.number().int().min(1).max(90).default(7),
   })
   .superRefine((e, ctx) => {
+    const identity = /^(gitlab|github):[A-Za-z0-9._-]+$/i;
+    const pair = (provider: "GITLAB" | "GITHUB") => {
+      const id = e[`AUTH_${provider}_CLIENT_ID`];
+      const secret = e[`AUTH_${provider}_CLIENT_SECRET`];
+      if (Boolean(id) !== Boolean(secret)) {
+        ctx.addIssue({ code: "custom", path: [`AUTH_${provider}_CLIENT_${id ? "SECRET" : "ID"}`], message: `AUTH_${provider}_CLIENT_ID et AUTH_${provider}_CLIENT_SECRET vont ensemble` });
+      }
+      return Boolean(id && secret);
+    };
+    const gitlabLogin = pair("GITLAB");
+    const githubLogin = pair("GITHUB");
+    if (gitlabLogin && !e.GITLAB_URL) ctx.addIssue({ code: "custom", path: ["GITLAB_URL"], message: "la connexion par GitLab demande GITLAB_URL" });
+    if (gitlabLogin || githubLogin) {
+      if (!e.AUTH_OWNER) {
+        ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER est obligatoire quand une connexion est configurée (ex. gitlab:alex)" });
+      } else if (!identity.test(e.AUTH_OWNER)) {
+        ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER doit avoir la forme forge:identifiant (ex. gitlab:alex)" });
+      } else if (!(e.AUTH_OWNER.toLowerCase().startsWith("gitlab:") ? gitlabLogin : githubLogin)) {
+        ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER vise une forge dont la connexion n'est pas configurée" });
+      }
+      for (const entry of (e.AUTH_ALLOWED_USERS ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+        if (!identity.test(entry)) ctx.addIssue({ code: "custom", path: ["AUTH_ALLOWED_USERS"], message: `« ${entry} » doit avoir la forme forge:identifiant` });
+      }
+    }
     const gitlab = { GITLAB_URL: e.GITLAB_URL, GITLAB_TOKEN: e.GITLAB_TOKEN, GITLAB_USERNAME: e.GITLAB_USERNAME };
     const present = Object.values(gitlab).filter(Boolean).length;
     if (present > 0 && present < 3) {
@@ -55,7 +94,25 @@ const EnvSchema = z
 
 export type ActionMode = "shadow" | "comment" | "auto";
 
+/** Connexion par compte de forge (OAuth). Absente de la configuration : pas de connexion, l'outil sert l'utilisateur local. */
+export interface AuthConfig {
+  /** Adresse publique de l'outil, sans barre finale. */
+  publicUrl: string;
+  /** Null si la connexion par GitLab n'est pas configurée. */
+  gitlab: { baseUrl: string; clientId: string; clientSecret: string } | null;
+  /** Null si la connexion par GitHub n'est pas configurée. */
+  github: { clientId: string; clientSecret: string } | null;
+  /** Propriétaire de l'installation, `forge:identifiant` en minuscules. */
+  owner: string;
+  /** Autres personnes autorisées, `forge:identifiant` en minuscules. */
+  allowedUsers: string[];
+  /** Durée d'une session, en jours. */
+  sessionDays: number;
+}
+
 export interface Config {
+  /** Connexion par compte de forge, ou null (mode local sans connexion). */
+  auth: AuthConfig | null;
   /** Null si GitLab n'est pas configuré. */
   gitlab: { url: string; token: string; username: string } | null;
   /** Null si GitHub n'est pas configuré. `apiUrl` : https://api.github.com sauf GitHub Enterprise. */
@@ -89,7 +146,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   const e = parsed.data;
 
+  const gitlabLogin = e.AUTH_GITLAB_CLIENT_ID && e.AUTH_GITLAB_CLIENT_SECRET && e.GITLAB_URL ? { baseUrl: e.GITLAB_URL, clientId: e.AUTH_GITLAB_CLIENT_ID, clientSecret: e.AUTH_GITLAB_CLIENT_SECRET } : null;
+  const githubLogin = e.AUTH_GITHUB_CLIENT_ID && e.AUTH_GITHUB_CLIENT_SECRET ? { clientId: e.AUTH_GITHUB_CLIENT_ID, clientSecret: e.AUTH_GITHUB_CLIENT_SECRET } : null;
+
   return {
+    auth:
+      (gitlabLogin || githubLogin) && e.AUTH_OWNER
+        ? {
+            publicUrl: e.PUBLIC_URL ?? `http://localhost:${e.PORT}`,
+            gitlab: gitlabLogin,
+            github: githubLogin,
+            owner: e.AUTH_OWNER.toLowerCase(),
+            allowedUsers: (e.AUTH_ALLOWED_USERS ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean),
+            sessionDays: e.SESSION_DAYS,
+          }
+        : null,
     gitlab: e.GITLAB_URL && e.GITLAB_TOKEN && e.GITLAB_USERNAME ? { url: e.GITLAB_URL, token: e.GITLAB_TOKEN, username: e.GITLAB_USERNAME } : null,
     github: e.GITHUB_TOKEN ? { apiUrl: e.GITHUB_API_URL, token: e.GITHUB_TOKEN } : null,
     githubApiUrl: e.GITHUB_API_URL,

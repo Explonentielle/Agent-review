@@ -161,6 +161,29 @@ export function migrationsFor(s: Sql): string[] {
   `,
     // Données rattachées à un espace (roadmap-plateforme, C4) : voir workspaceScopeMigration.ts
     workspaceScopeMigration(s),
+    // Connexion par compte de forge (roadmap-plateforme, C2) : identités reconnues et sessions. Le jeton de session n'est jamais
+    // stocké, seulement son empreinte SHA-256 ; la session porte l'espace actif, que l'utilisateur doit toujours être membre.
+    `
+  CREATE TABLE identities (
+    id               ${s.pk},
+    user_id          INTEGER NOT NULL REFERENCES users(id),
+    provider         TEXT    NOT NULL CHECK (provider IN ('gitlab', 'github')),
+    provider_user_id TEXT    NOT NULL,
+    login            TEXT    NOT NULL,
+    created_at       TEXT    NOT NULL ${s.nowDefault}
+  );
+  CREATE UNIQUE INDEX uq_identities_provider ON identities(provider, provider_user_id);
+  CREATE INDEX idx_identities_user ON identities(user_id);
+
+  CREATE TABLE sessions (
+    token_hash   TEXT    PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    created_at   TEXT    NOT NULL ${s.nowDefault},
+    expires_at   TEXT    NOT NULL
+  );
+  CREATE INDEX idx_sessions_user ON sessions(user_id);
+  `,
   ];
 }
 

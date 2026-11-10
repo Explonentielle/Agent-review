@@ -23,6 +23,8 @@ describe("API du dashboard sur le connecteur", () => {
       settings: h.settings,
       tasks: h.tasks,
       vault: h.vault,
+      accounts: h.accounts,
+      local: h.local,
       enqueueReview: () => undefined,
       enqueueDev: (id) => enqueuedDev.push(id),
       queueSize: () => 0,

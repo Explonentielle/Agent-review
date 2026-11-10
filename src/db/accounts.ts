@@ -307,6 +307,70 @@ export function createAccountRepo(db: Db) {
     },
 
     /**
+     * Retrouve l'utilisateur lié à un compte de forge.
+     * @param provider Forge du compte (gitlab ou github).
+     * @param providerUserId Identifiant numérique du compte chez la forge (il ne change jamais, contrairement au login).
+     * @returns L'utilisateur, ou undefined si ce compte n'est lié à personne.
+     */
+    findUserByIdentity(provider: string, providerUserId: string): Promise<UserRow | undefined> {
+      return db.get<UserRow>(
+        "SELECT u.* FROM users u JOIN identities i ON i.user_id = u.id WHERE i.provider = ? AND i.provider_user_id = ?",
+        [provider, providerUserId],
+      );
+    },
+
+    /**
+     * Dit si un utilisateur a déjà un compte de forge lié.
+     * @param userId Identifiant de l'utilisateur.
+     * @returns true si au moins un compte de forge est lié.
+     */
+    async userHasIdentity(userId: number): Promise<boolean> {
+      return (await db.get("SELECT 1 AS found FROM identities WHERE user_id = ? LIMIT 1", [userId])) !== undefined;
+    },
+
+    /**
+     * Lie un compte de forge à un utilisateur.
+     * @param userId Identifiant de l'utilisateur.
+     * @param provider Forge du compte (gitlab ou github).
+     * @param providerUserId Identifiant numérique du compte chez la forge.
+     * @param login Nom de connexion du compte chez la forge.
+     * @returns Rien.
+     * @throws AccountError Si le compte de forge est déjà lié (à cet utilisateur ou à un autre).
+     */
+    async linkIdentity(userId: number, provider: string, providerUserId: string, login: string): Promise<void> {
+      const res = await db.run("INSERT INTO identities (user_id, provider, provider_user_id, login) VALUES (?, ?, ?, ?) ON CONFLICT (provider, provider_user_id) DO NOTHING", [
+        userId,
+        provider,
+        providerUserId,
+        login,
+      ]);
+      if (res.changes === 0) throw new AccountError("Ce compte de forge est déjà lié à un utilisateur");
+    },
+
+    /**
+     * Met à jour le nom de connexion mémorisé d'un compte de forge (il peut changer chez la forge).
+     * @param provider Forge du compte.
+     * @param providerUserId Identifiant numérique du compte chez la forge.
+     * @param login Nom de connexion actuel.
+     * @returns Rien.
+     */
+    async updateIdentityLogin(provider: string, providerUserId: string, login: string): Promise<void> {
+      await db.run("UPDATE identities SET login = ? WHERE provider = ? AND provider_user_id = ?", [login, provider, providerUserId]);
+    },
+
+    /**
+     * Change le nom affiché d'un utilisateur.
+     * @param userId Identifiant de l'utilisateur.
+     * @param name Nouveau nom.
+     * @returns Rien.
+     * @throws AccountError Si le nom est invalide ou l'utilisateur inconnu.
+     */
+    async renameUser(userId: number, name: string): Promise<void> {
+      const res = await db.run("UPDATE users SET name = ? WHERE id = ?", [cleanName(name, "Nom"), userId]);
+      if (res.changes === 0) throw new AccountError("Utilisateur introuvable");
+    },
+
+    /**
      * Contexte du mode local : le premier utilisateur (créé par la migration) et son espace personnel.
      * @returns L'utilisateur, l'espace et le rôle à utiliser quand il n'y a pas de connexion.
      * @throws AccountError Si la base ne contient aucun espace personnel.

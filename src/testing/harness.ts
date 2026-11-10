@@ -6,7 +6,7 @@ import path from "node:path";
 import { loadConfig, type Config } from "../config.js";
 import { ForgeRegistry } from "../connectors/registry.js";
 import type { Ticket } from "../connectors/types.js";
-import { createAccountRepo } from "../db/accounts.js";
+import { createAccountRepo, type AccountContext, type AccountRepo } from "../db/accounts.js";
 import { createCostRepo, type CostRepo } from "../db/costs.js";
 import { createDevTaskRepo, type DevTaskRepo } from "../db/devTasks.js";
 import type { Db } from "../db/db.js";
@@ -42,6 +42,10 @@ export interface Harness {
   forges: ForgeRegistry;
   /** Coffre à secrets de l'utilisateur local, clé maître aléatoire ; le contrôle d'un jeton GitHub accepte tout (remplaçable). */
   vault: Vault;
+  /** Dépôt des comptes de la base de test. */
+  accounts: AccountRepo;
+  /** Utilisateur, espace et rôle locaux : l'espace auquel sont liés les dépôts du harnais. */
+  local: AccountContext;
   /** Tête d'une branche du dépôt distant, ou chaîne vide si elle n'existe pas. */
   remoteBranchSha(branch: string): string;
   /** Nombre de commits de la branche qui ne sont pas dans develop. */
@@ -91,7 +95,8 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
   } else {
     db = await openDb({ dataDir, databaseUrl: null });
   }
-  const local = await createAccountRepo(db).localContext();
+  const accounts = createAccountRepo(db);
+  const local = await accounts.localContext();
   const settings = createSettingsStore(db, local.workspaceId);
   await settings.saveProject({ projectId: 1, path: "groupe/projet", devEnabled: true, baseBranch: "develop", targetBranch: "develop", allowedCommands: [], instructions: "" });
   const connector = new FakeConnector({ cloneUrl: remoteUrl });
@@ -114,6 +119,8 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
     connector,
     forges: new ForgeRegistry([{ connector, workspace, username: "alex" }]),
     vault,
+    accounts,
+    local,
     remoteBranchSha,
     commitsAhead: (branch) => Number(git(remoteDir, "rev-list", "--count", `develop..${branch}`)),
     lastCommit: (branch) => git(remoteDir, "log", "-1", "--format=%an|%ae|%s", branch),
