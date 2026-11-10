@@ -157,7 +157,7 @@ Objectif : traiter un ticket GitHub et reviewer une PR, comme aujourd'hui pour G
 
 Objectif : plusieurs personnes utilisent la même instance, chacune avec ses données, ses jetons et ses réglages. Les agents tournent en clé API uniquement à ce stade.
 - **Décisions (2026-11-09)** : base de données **PostgreSQL** (cohérent avec les autres projets de l'utilisateur) ; déploiement avec **Docker** (docker compose), serveur à choisir.
-- **Décidé ensuite (2026-11-09)** : SQLite pour l'outil local **et** PostgreSQL pour le serveur, derrière une même interface (C1a, fait). Serveur : le **VPS OVH existant** pour commencer ; sa capacité et le partage de son isolation avec les autres services restent à vérifier avant C9.
+- **Décidé ensuite (2026-11-09)** : SQLite pour l'outil local **et** PostgreSQL pour le serveur, derrière une même interface (C1a, fait). Serveur : le **VPS OVH existant** pour commencer (VPS-2 : 4 vCores, 8 Go de mémoire, 75 Go de disque, Ubuntu 26.04, région Canada, une base Elasticsearch déjà présente, aucun nom de domaine). Mesuré le 2026-11-09 : ce VPS héberge déjà rag-saas en production (3 conteneurs Docker : Caddy qui tient les ports 80, 443 et 8443, Elasticsearch 8.19 sans port publié donc non exposé, un service d'OCR). Elasticsearch prend environ 1,9 Go, il reste environ 5 Go disponibles, pas de swap. La capacité suffit pour un pilote à une ou deux personnes (2 exécutions d'agent simultanées au plus), mais mélanger du code généré par un agent et un service en production est un risque. **Décision de l'utilisateur (2026-11-09) : pilote sur ce même VPS** tant que rag-saas n'a pas de clients payants (usage personnel uniquement) ; VPS dédié dès les premiers abonnements. Garde-fous obligatoires : swap, limites de mémoire et de disque par exécution, un seul run à la fois au début, réseau Docker dédié, jamais le socket Docker dans un conteneur d'agent, utilisateur Linux dédié, `.env` en mode 600. Accès par tunnel SSH : la plateforme n'écoute que sur 127.0.0.1 et n'a pas encore de connexion, donc ne jamais l'exposer sur Internet avant C2. Un nom de domaine (ou sous-domaine) n'est nécessaire que pour ouvrir à d'autres personnes.
 - **Critères** : aucune requête ne lit ou n'écrit hors de l'espace de l'utilisateur connecté (test d'étanchéité par table), secrets chiffrés au repos et absents des journaux, CSRF et sessions sécurisées, déploiement reproductible.
 - **Risque** : migrer l'existant (une seule base locale) vers le modèle multi-espaces sans perdre les données.
 
@@ -187,7 +187,7 @@ Objectif : tenir en production : isolation renforcée, supervision, sauvegardes 
 | Décision | Bloque | À trancher par |
 |---|---|---|
 | Première vraie clé Anthropic, pour valider A3 en réel | validation de A3 | Utilisateur |
-| ~~SQLite ou PostgreSQL~~ **PostgreSQL** (2026-11-09). Reste : SQLite conservé ou non pour l'outil local, serveur et capacité, Docker rootless | C1, C9, D2 | Utilisateur |
+| ~~SQLite ou PostgreSQL~~ **PostgreSQL** (2026-11-09). SQLite conservé en local (2026-11-09), serveur : VPS OVH existant. Reste : VPS dédié ou partagé avec rag-saas, nom de domaine, Docker rootless | C1, C9, D2 | Utilisateur |
 | Forge à supporter en premier au-delà de GitLab | B | Utilisateur |
 | ~~Jeton GitHub ou application GitHub~~ **Jeton personnel à portée fine** pour l'outil local, **application GitHub** pour la plateforme (2026-11-09) | B1, C2 | décidé |
 | Validation écrite d'Anthropic pour les abonnements en conteneur hébergé | D8 (ouverture hors équipe) | Utilisateur avec Anthropic |
