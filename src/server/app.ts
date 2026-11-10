@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
 import Fastify, { type FastifyReply } from "fastify";
 import fastifyStatic from "@fastify/static";
@@ -5,9 +6,9 @@ import { ZodError } from "zod";
 import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 import type { ForgeKind } from "../connectors/types.js";
 import { registerAuth, type AuthRuntime } from "../auth/routes.js";
+import type { SessionContext } from "../auth/sessions.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
 import { currentMonth } from "../db/costs.js";
-import type { DevTaskRepo } from "../db/devTasks.js";
 import type { ReviewStatus } from "../db/reviews.js";
 import { cancelDevTask } from "../dev/pipeline.js";
 import { renderTemplate, slugify } from "../dev/templates.js";
@@ -17,23 +18,27 @@ import { readDefaultSystemPrompt } from "../prompts.js";
 import { approve, publishComment, type PipelineDeps } from "../review/pipeline.js";
 import type { Finding, ReviewResult } from "../review/schema.js";
 import { SecretError } from "../secrets/crypto.js";
-import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret, type Vault } from "../secrets/vault.js";
+import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret } from "../secrets/vault.js";
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
+import type { TenantDeps } from "../tenants/manager.js";
 
-export interface ServerDeps extends PipelineDeps {
-  tasks: DevTaskRepo;
+/** Ce que le serveur reçoit : les dépôts et connexions de l'utilisateur local (servis sans connexion), et de quoi servir les autres personnes. */
+export interface ServerDeps extends TenantDeps {
   /** Comptes, pour dire qui est connecté. */
   accounts: AccountRepo;
-  /** Utilisateur, espace et rôle servis sans connexion, et espace auquel sont liés tous les dépôts de ce serveur. */
+  /** Utilisateur, espace et rôle servis sans connexion. */
   local: AccountContext;
   /** Connexion par compte de forge. Absente : pas de connexion, l'outil sert l'utilisateur local. */
   auth?: AuthRuntime;
-  /** Coffre à secrets de l'utilisateur local (jetons et clés saisis dans le dashboard). */
-  vault: Vault;
-  enqueueReview: (reviewId: number) => void;
-  enqueueDev: (taskId: number) => void;
-  queueSize: () => number;
+  /**
+   * Retrouve les dépôts, connexions aux forges et files de la personne d'une session. Absente : toute session d'un autre espace que
+   * l'espace local est refusée (les dépôts reçus ci-dessus sont ceux de l'utilisateur local).
+   */
+  tenants?: (session: SessionContext) => Promise<TenantDeps>;
 }
+
+/** Propriétés de `ServerDeps` qui dépendent de la personne servie (le reste est commun à toutes). */
+const TENANT_KEYS = new Set<string | symbol>(["config", "forges", "costs", "reviews", "settings", "tasks", "vault", "enqueueReview", "enqueueDev", "queueSize", "reload", "runner", "forceShadow"]);
 
 type IdParams = { Params: { id: string } };
 
@@ -70,8 +75,18 @@ function forgeOf(value: unknown): ForgeKind {
  * API + dashboard local. N'écoute que sur 127.0.0.1 (accessible depuis le navigateur Windows
  * grâce au forwarding localhost de WSL2), jamais exposé sur le réseau.
  */
-export function buildServer(deps: ServerDeps) {
+export function buildServer(base: ServerDeps) {
   const app = Fastify({ logger: false });
+
+  // Chaque requête d'une personne connectée est servie avec SES dépôts, SES connexions aux forges et SES files : `deps` redirige les propriétés
+  // qui dépendent de la personne vers celles de la requête en cours (contexte asynchrone), le reste vient de `base`.
+  const requestDeps = new AsyncLocalStorage<TenantDeps>();
+  const deps = new Proxy(base, {
+    get(target, prop) {
+      const scoped = requestDeps.getStore();
+      return Reflect.get(scoped && TENANT_KEYS.has(prop) ? scoped : target, prop);
+    },
+  });
 
   app.register(fastifyStatic, { root: path.join(PROJECT_ROOT, "public") });
 
@@ -87,12 +102,24 @@ export function buildServer(deps: ServerDeps) {
   // Connexion (si configurée) : sans session valide, tout est refusé sauf la page de connexion et l'aller-retour OAuth
   if (deps.auth) {
     registerAuth(app, deps.auth);
-    // Les dépôts de ce serveur sont liés à l'espace local : une session d'un autre espace ne doit jamais être servie par eux
-    app.addHook("onRequest", async (req, reply) => {
-      if (req.session && req.session.workspaceId !== deps.local.workspaceId && req.url.startsWith("/api/")) {
-        return reply.code(403).send({ error: "Cet espace n'est pas servi par cette installation" });
-      }
-    });
+    if (base.tenants) {
+      // Les routes /api d'une session sont servies avec les dépôts et connexions de cette personne
+      const resolve = base.tenants;
+      app.addHook("onRequest", (req, reply, done) => {
+        if (!req.session || !req.url.startsWith("/api/")) return done();
+        resolve(req.session).then(
+          (tenant) => requestDeps.run(tenant, done),
+          (err: unknown) => void reply.code(500).send({ error: errorMessage(err) }),
+        );
+      });
+    } else {
+      // Les dépôts reçus sont liés à l'espace local : une session d'un autre espace ne doit jamais être servie par eux
+      app.addHook("onRequest", async (req, reply) => {
+        if (req.session && req.session.workspaceId !== deps.local.workspaceId && req.url.startsWith("/api/")) {
+          return reply.code(403).send({ error: "Cet espace n'est pas servi par cette installation" });
+        }
+      });
+    }
   }
 
   // --- Général ---------------------------------------------------------------
@@ -111,12 +138,12 @@ export function buildServer(deps: ServerDeps) {
 
   app.get("/api/stats", async () => {
     const settings = await deps.settings.get();
-    const primary = deps.forges.has(DEFAULT_FORGE) ? deps.forges.get(DEFAULT_FORGE) : deps.forges.all()[0]!;
+    const primary = deps.forges.has(DEFAULT_FORGE) ? deps.forges.get(DEFAULT_FORGE) : deps.forges.all()[0]; // aucune forge tant que la personne n'a pas enregistré de jeton
     return {
       actionMode: settings.actionMode,
       model: settings.review.model,
       devModel: settings.dev.model,
-      username: primary.username,
+      username: primary?.username ?? "",
       gitlabUrl: deps.config.gitlab?.url ?? "",
       /** Forges configurées sur cette machine (jamais leurs jetons). */
       forges: deps.forges.all().map((f) => ({ kind: f.connector.kind, username: f.username })),
@@ -145,6 +172,17 @@ export function buildServer(deps: ServerDeps) {
 
   // --- Secrets : jamais renvoyés, seulement leur présence et leur origine -------
 
+  /**
+   * Après un changement de jeton de forge, reconstruit les connexions de la personne si l'exécution le permet.
+   * @param result Résultat de l'enregistrement ou de la suppression du secret.
+   * @returns Le même résultat, avec `restartRequired` à faux si les connexions ont été reconstruites.
+   */
+  const rebuildForges = async <T extends { restartRequired: boolean }>(result: T): Promise<T> => {
+    if (!result.restartRequired || !deps.reload) return result;
+    await deps.reload();
+    return { ...result, restartRequired: false };
+  };
+
   app.get("/api/secrets", async () => ({ secrets: await describeSecrets(deps.vault) }));
 
   app.post<{ Params: { name: string }; Body: unknown }>("/api/secrets/:name", async (req, reply) => {
@@ -152,7 +190,7 @@ export function buildServer(deps: ServerDeps) {
       const name = managedName(req.params.name);
       const value = (req.body as { value?: unknown } | null)?.value;
       if (typeof value !== "string") throw new BadRequestError("Valeur manquante");
-      return await saveManagedSecret(deps.config, deps.vault, name, value);
+      return await rebuildForges(await saveManagedSecret(deps.config, deps.vault, name, value));
     } catch (err) {
       return fail(reply, err, 400);
     }
@@ -160,7 +198,7 @@ export function buildServer(deps: ServerDeps) {
 
   app.post<{ Params: { name: string } }>("/api/secrets/:name/delete", async (req, reply) => {
     try {
-      return await deleteManagedSecret(deps.config, deps.vault, managedName(req.params.name));
+      return await rebuildForges(await deleteManagedSecret(deps.config, deps.vault, managedName(req.params.name)));
     } catch (err) {
       return fail(reply, err, 400);
     }
@@ -233,7 +271,7 @@ export function buildServer(deps: ServerDeps) {
       // Une forge en panne n'empêche pas d'afficher les tickets des autres
       const results = await Promise.allSettled(deps.forges.all().map(async (f) => ({ source: f.connector.kind, tickets: await f.connector.listAssignedTickets() })));
       const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
-      if (failed.length === results.length) throw failed[0]!.reason;
+      if (results.length > 0 && failed.length === results.length) throw failed[0]!.reason;
       for (const r of failed) log.warn("issues.forge_error", { error: errorMessage(r.reason) });
       const issues = results.flatMap((r) => (r.status === "fulfilled" ? r.value.tickets.map((ticket) => ({ source: r.value.source, ticket })) : []));
 

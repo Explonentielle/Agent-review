@@ -62,6 +62,7 @@ describe("coffre : secrets du dashboard et du .env", () => {
     expect(config.anthropicApiKey).toBe("sk-ant-DU-ENV-123456");
     expect(verified).toEqual([]);
     expect((await describeSecrets(vault)).map((s) => [s.name, s.source])).toEqual([
+      ["gitlab.token", "env"],
       ["github.token", "env"],
       ["anthropic.api_key", "env"],
     ]);
@@ -98,10 +99,11 @@ describe("coffre : secrets du dashboard et du .env", () => {
 
     const status = await describeSecrets(vault);
     expect(status.map((s) => [s.name, s.source, s.live])).toEqual([
+      ["gitlab.token", "env", false],
       ["github.token", "vault", false],
       ["anthropic.api_key", "vault", true],
     ]);
-    expect(status[0]!.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2} /);
+    expect(status[1]!.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2} /);
     expect(JSON.stringify(status)).not.toContain("SAISI");
   });
 
@@ -123,11 +125,42 @@ describe("coffre : secrets du dashboard et du .env", () => {
     expect(config.anthropicApiKey).toBeNull();
     expect(await deleteManagedSecret(config, vault, "github.token")).toEqual({ deleted: true, restartRequired: true });
     expect(await deleteManagedSecret(config, vault, "github.token")).toEqual({ deleted: false, restartRequired: false });
-    expect((await describeSecrets(vault)).map((s) => s.source)).toEqual([null, null]);
+    expect((await describeSecrets(vault)).map((s) => s.source)).toEqual(["env", null, null]);
   });
 
   it("seuls les secrets prévus se gèrent depuis le dashboard", () => {
     expect(managedName("github.token")).toBe("github.token");
-    for (const bad of ["gitlab.token", "planio.api_key", "", "../x"]) expect(() => managedName(bad)).toThrow(/Secret inconnu/);
+    expect(managedName("gitlab.token")).toBe("gitlab.token");
+    for (const bad of ["planio.api_key", "gitlab.password", "", "../x"]) expect(() => managedName(bad)).toThrow(/Secret inconnu/);
+  });
+
+  it("jeton GitLab personnel : contrôlé auprès de l'instance, le compte en est déduit, refusé s'il est invalide", async () => {
+    const config = loadConfig({ GITLAB_URL: "https://gitlab.example", GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" }); // GitLab sans jeton dans le .env
+    const checked: string[] = [];
+    const local = await createAccountRepo(db).localContext();
+    const vault = createVault(config, createSecretStore(db, new Keyring([randomBytes(32)])), { workspaceId: local.workspaceId, userId: local.userId }, async () => undefined, async (url, token) => {
+      checked.push(`${url} ${token}`);
+      if (token === "glpat-REFUSE-123456") throw new Error("401 Unauthorized");
+      return "bob-gitlab";
+    });
+    expect((await describeSecrets(vault)).map((s) => [s.name, s.source])).toEqual([["gitlab.token", null], ["github.token", "env"], ["anthropic.api_key", null]]);
+
+    await expect(saveManagedSecret(config, vault, "gitlab.token", "glpat-REFUSE-123456")).rejects.toThrow(/401/);
+    expect(await vault.store.has(vault.scope, "gitlab.token")).toBe(false);
+    expect(await saveManagedSecret(config, vault, "gitlab.token", " glpat-BON-1234567 ")).toEqual({ restartRequired: true });
+    expect(checked).toEqual(["https://gitlab.example glpat-REFUSE-123456", "https://gitlab.example glpat-BON-1234567"]);
+
+    expect(config.gitlab).toBeNull();
+    await applyVaultSecrets(config, vault); // au démarrage suivant : l'identifiant du compte vient de l'instance
+    expect(config.gitlab).toEqual({ url: "https://gitlab.example", token: "glpat-BON-1234567", username: "bob-gitlab" });
+    expect(await deleteManagedSecret(config, vault, "gitlab.token")).toEqual({ deleted: true, restartRequired: true });
+  });
+
+  it("sans adresse de GitLab (GITLAB_URL), le jeton GitLab n'est pas proposé et ne peut pas être enregistré", async () => {
+    const config = loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" });
+    const local = await createAccountRepo(db).localContext();
+    const vault = createVault(config, createSecretStore(db, new Keyring([randomBytes(32)])), { workspaceId: local.workspaceId, userId: local.userId }, async () => undefined, async () => "x");
+    expect((await describeSecrets(vault)).map((s) => s.name)).toEqual(["github.token", "anthropic.api_key"]);
+    await expect(saveManagedSecret(config, vault, "gitlab.token", "glpat-1234567890")).rejects.toThrow(/GITLAB_URL/);
   });
 });

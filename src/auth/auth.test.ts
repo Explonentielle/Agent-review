@@ -12,7 +12,7 @@ import { createSessionStore } from "./sessions.js";
 
 const WRITE = { "x-review-agent": "1" };
 const GITLAB_LOGIN = { baseUrl: "https://gitlab.example", clientId: "client-gitlab", clientSecret: "secret-gitlab-a-ne-jamais-montrer" };
-const AUTH = { publicUrl: "https://review.example", gitlab: GITLAB_LOGIN, github: { clientId: "client-github", clientSecret: "secret-github-a-ne-jamais-montrer" }, owner: "gitlab:alex", allowedUsers: ["gitlab:bob", "github:carol"], sessionDays: 7 };
+const AUTH = { publicUrl: "https://review.example", gitlab: GITLAB_LOGIN, github: { clientId: "client-github", clientSecret: "secret-github-a-ne-jamais-montrer" }, owner: "gitlab:alex", allowedUsers: [] as string[], sessionDays: 7 };
 
 type Call = { url: string; init?: RequestInit };
 
@@ -351,7 +351,7 @@ describe("connexion sur le serveur", () => {
     expect(Number((await h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users"))!.n)).toBe(1);
     expect(await h.db.all("SELECT 1 FROM sessions")).toHaveLength(0);
 
-    // Un compte autorisé par la liste mais pas encore ouvert à plusieurs : refusé aussi
+    // Sans AUTH_ALLOWED_USERS l'installation reste à son propriétaire seul
     profile = { id: 2, username: "bob", name: "Bob" };
     expect((await signInThroughForge()).callback.headers.location).toBe("/login?error=refused");
   });

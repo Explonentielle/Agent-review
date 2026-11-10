@@ -47,7 +47,7 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | C5 | Serveur | Réglages par portée : équipe, utilisateur, projet | M | C4 | ⬜ |
 | C6 | Serveur | Journal d'audit des écritures sur les forges | M | C4 | ⬜ |
 | C7 | Serveur | Quotas et budgets par utilisateur | M | A6, C4 | ⬜ |
-| C8 | Serveur | File de tâches par utilisateur, limites de concurrence | M | C4 | ⬜ |
+| C8 | Serveur | File de tâches par utilisateur, limites de concurrence | M | C4 | ✅ 2026-11-10 (files par personne, limite commune) ; priorité équitable et éviction des inactifs non faites |
 | C9 | Serveur | Déploiement : image de la plateforme, TLS, sauvegardes | L | C1a | ⬜ |
 | D1 | Environnements | Modèle d'environnement et lecture de `devcontainer.json` | M | C4 | ⬜ |
 | D2 | Environnements | Orchestrateur Docker : rootless, limites, volumes, arrêt à l'inactivité | L | D1 | ⬜ |
@@ -187,9 +187,19 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - **Sessions** (`sessions.ts`) : jeton aléatoire de 256 bits, seule son empreinte SHA-256 est en base ; cookie HttpOnly, SameSite=Lax, Secure quand `PUBLIC_URL` est en https ; 7 jours (`SESSION_DAYS`). Une session ne vaut que tant qu'elle n'a pas expiré et que l'utilisateur est toujours membre de son espace. Les sessions expirées sont purgées chaque heure. Les écritures restent protégées par l'en-tête `x-review-agent`.
 - **Contrôle d'accès** : sans session valide, `/api` répond 401 et les pages renvoient vers `/login`. Seuls `/login` et `/auth/*` sont publics. `GET /api/me` dit qui est connecté (même sans connexion : l'utilisateur local). Le dashboard affiche la session dans Paramètres > Connexion avec un bouton Se déconnecter, et renvoie vers `/login` sur un 401.
 - **Comptes** (`login.ts`) : un compte de forge se reconnaît à son identifiant numérique (pas au login, qui peut changer). Le propriétaire (`AUTH_OWNER`) reprend le compte local, donc ses données, à sa première connexion. Pas de rapprochement par adresse email (une adresse non vérifiée permettrait de prendre le compte d'autrui). Les personnes de `AUTH_ALLOWED_USERS` reçoivent un nouvel utilisateur et un espace personnel.
-- **Volontairement limité au propriétaire** (`MULTI_USER_ENABLED = false`, `src/auth/runtime.ts`) : ce serveur utilise les jetons de forge de l'utilisateur local, donc ouvrir l'accès à un invité lui prêterait ton identité (approbations, MR en ton nom). Un garde-fou répond aussi 403 à toute session d'un autre espace. Le drapeau passe à vrai avec l'exécution par espace (C8) : connexions aux forges par utilisateur, pollers et files par espace.
+- **Propriétaire seul par défaut** : l'accès à d'autres personnes ne s'ouvre qu'en renseignant `AUTH_ALLOWED_USERS` (voir C8 : chaque personne a ses propres connexions aux forges, donc personne n'emprunte tes jetons). Sans exécution par personne (serveur sans `tenants`), une session d'un autre espace reçoit un 403.
 - **Pas encore fait** : connexion par GitHub Enterprise ; invitations (ajout de membres à un espace d'équipe) ; limitation du débit des tentatives de connexion ; SSO d'entreprise (OIDC). La liste d'autorisation se fait par login de forge, qui peut être repris par quelqu'un d'autre après un changement de nom : à remplacer par des invitations liées à l'identifiant numérique.
 - **Vérifié** : 24 tests (aller-retour complet avec une fausse forge, retour falsifié, rejeu, injection de code, expiration, attributs des cookies, aucun secret renvoyé), 19 mutations toutes détectées. Non vérifié : une vraie application GitLab ou GitHub, le navigateur.
+
+**C8 (2026-11-10)** : exécution par personne et par espace, `src/tenants/`.
+- **Une exécution par personne et par espace** (`manager.ts`) : SA connexion aux forges (jetons GitLab et GitHub de SON coffre), SA clé API Anthropic, SES dépôts de données liés à l'espace, SES deux files (reviews, tâches de dev) et SES pollers. Le propriétaire est le seul à utiliser les jetons et la clé du `.env` ; les autres partent d'une configuration sans aucun jeton et d'un dossier de données à part (`data/tenants/<espace>-<utilisateur>`), donc jamais de copie de dépôt partagée.
+- **Serveur** (`app.ts`) : les routes ne changent pas. Les propriétés qui dépendent de la personne (`reviews`, `tasks`, `forges`, `config`, `vault`, files...) sont redirigées par requête, d'après la session, vers l'exécution de la personne (contexte asynchrone). Une personne sans forge voit des listes vides, jamais une erreur.
+- **Limite commune** : `MAX_CONCURRENT_AGENTS` (1 par défaut) reviews et tâches de dev simultanées sur toute la machine, quelle que soit la personne ; les autres attendent leur tour dans l'ordre d'arrivée.
+- **Jetons** : nouveau jeton GitLab personnel (contrôlé auprès de l'instance, le compte en est déduit). Après un changement de jeton de forge, les connexions de la personne sont reconstruites tout de suite, sans redémarrer l'outil ; si la reconstruction échoue, l'ancienne exécution continue de servir. `GITLAB_URL` peut être renseignée seule dans le `.env` (adresse de l'instance sans jeton).
+- **Reprise après arrêt** : les reviews interrompues sont relancées et les tâches de dev passent en erreur, une fois par personne. Au lancement, le propriétaire et, si `AUTH_ALLOWED_USERS` est renseigné, toutes les personnes qui ont des jetons enregistrés repartent (leurs pollers doivent tourner même déconnectées).
+- **Risque à connaître avant d'ouvrir à quelqu'un** : tous les agents tournent sur la même machine, avec le même utilisateur système. Une personne autorisée peut, en réglant les commandes autorisées d'un projet ou par injection dans un ticket, faire lire à un agent `data/master.key` ou la base. L'isolation par conteneur (lot D) n'existe pas : n'ouvrir qu'à des personnes de confiance, jamais à un tiers.
+- **Pas encore fait** : arrêt des pollers des personnes inactives (gardés jusqu'à l'arrêt de l'outil), quotas par personne (C7), audit des écritures (C6), invitations (ajout d'un membre à un espace d'équipe), ordre équitable entre personnes (la file commune est première arrivée, première servie).
+- **Vérifié** : 14 tests (exécution du propriétaire et des autres, dépôts séparés, jetons du coffre, reconstruction, reprise, limite commune, serveur de bout en bout avec deux personnes), 14 mutations toutes détectées. Non vérifié : avec de vrais comptes et de vrais agents.
 
 ## Lot B : GitHub (jalon J2)
 
@@ -245,6 +255,6 @@ Objectif : tenir en production : isolation renforcée, supervision, sauvegardes 
 1. **A3** dès qu'une clé API de test est disponible.
 2. **Lot B** (GitHub) : fait (2026-11-10). Il reste à le valider sur un vrai dépôt : jeton à portée fine dans le `.env`, un dépôt de test avec quelques tickets.
 3. **A6** : coûts par utilisateur et budget en mode API (dépend d'A3).
-4. **C2** (connexion OAuth, l'espace déduit de la connexion) puis **C8** (files et pollers par espace). C1b, C3 et C4 sont faits (2026-11-10).
+4. **C9** (déploiement sur le VPS : image, compose, sauvegardes). C1b à C4, C8 sont faits (2026-11-10) ; D (conteneurs par personne) conditionne l'ouverture à des personnes autres que de confiance.
 
 A1, A2, A4 et A5 sont faits (2026-11-09).

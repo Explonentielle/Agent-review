@@ -16,13 +16,18 @@ export interface Forge {
 export class ForgeRegistry {
   private readonly byKind = new Map<ForgeKind, Forge>();
 
-  constructor(forges: Forge[]) {
+  /**
+   * @param forges Forges configurées, au plus une par genre.
+   * @param options `allowEmpty` : accepte un registre vide (une personne qui n'a pas encore enregistré de jeton).
+   * @throws Error Si une forge est déclarée deux fois, ou si le registre est vide sans `allowEmpty`.
+   */
+  constructor(forges: Forge[], options: { allowEmpty?: boolean } = {}) {
     for (const forge of forges) {
       const kind = forge.connector.kind;
       if (this.byKind.has(kind)) throw new Error(`La forge « ${kind} » est déclarée deux fois`);
       this.byKind.set(kind, forge);
     }
-    if (this.byKind.size === 0) throw new Error("Aucune forge configurée");
+    if (this.byKind.size === 0 && !options.allowEmpty) throw new Error("Aucune forge configurée");
   }
 
   /** Lève une erreur lisible si la forge n'est pas configurée (jeton absent du .env). */

@@ -6,13 +6,6 @@ import type { AuthRuntime } from "./routes.js";
 import { createSessionStore } from "./sessions.js";
 
 /**
- * Accès de plusieurs personnes. Faux tant que chaque personne n'a pas ses propres connexions aux forges, ses files et ses pollers :
- * ce serveur utilise les jetons de l'utilisateur local, les ouvrir à d'autres reviendrait à leur prêter ton identité sur les forges.
- * À passer à vrai avec l'exécution par espace (roadmap-plateforme, C8).
- */
-export const MULTI_USER_ENABLED = false;
-
-/**
  * Assemble la connexion à partir de la configuration.
  * @param config Connexion configurée dans le `.env`.
  * @param db Base de données (sessions).
@@ -28,7 +21,8 @@ export function createAuthRuntime(config: AuthConfig, db: Db, accounts: AccountR
     providers,
     sessions: createSessionStore(db, config.sessionDays),
     accounts,
-    policy: { owner: config.owner, allowedUsers: config.allowedUsers, multiUser: MULTI_USER_ENABLED },
+    // L'accès à d'autres personnes s'ouvre en renseignant AUTH_ALLOWED_USERS : chacune a ses propres connexions aux forges (tenants/manager.ts)
+    policy: { owner: config.owner, allowedUsers: config.allowedUsers, multiUser: config.allowedUsers.length > 0 },
     publicUrl: config.publicUrl,
     sessionDays: config.sessionDays,
   };

@@ -144,6 +144,16 @@ export function createSecretStore(db: Db, keyring: Keyring) {
     },
 
     /**
+     * Personnes qui ont au moins un secret personnel enregistré, pour démarrer leurs connexions aux forges au lancement de l'outil.
+     * Ne livre aucune valeur : seulement des identifiants.
+     * @returns Les couples (espace, utilisateur).
+     */
+    async listOwners(): Promise<{ workspaceId: number; userId: number }[]> {
+      const rows = await db.all<{ workspace_id: number; user_id: number }>("SELECT DISTINCT workspace_id, user_id FROM secrets WHERE user_id IS NOT NULL ORDER BY workspace_id, user_id");
+      return rows.map((r) => ({ workspaceId: r.workspace_id, userId: r.user_id }));
+    },
+
+    /**
      * Rechiffre avec la clé courante les secrets chiffrés par une ancienne clé (après une rotation de la clé maître).
      * @returns Le nombre de secrets rechiffrés.
      * @throws SecretError Si un secret est illisible : l'opération s'arrête là, les secrets déjà rechiffrés le restent.

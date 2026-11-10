@@ -21,6 +21,8 @@ const EnvSchema = z
     GITHUB_TOKEN: z.preprocess(blankIsMissing, z.string().trim().min(1).optional()),
     GITHUB_API_URL: z.preprocess(blankIsMissing, z.string().url().default("https://api.github.com")),
     POLL_INTERVAL_SEC: z.coerce.number().int().min(30).default(90),
+    /** Nombre maximum de reviews, et de tâches de dev, qui tournent en même temps sur la machine, toutes personnes confondues. */
+    MAX_CONCURRENT_AGENTS: z.coerce.number().int().min(1).max(8).default(1),
 
     CLAUDE_BIN: z.string().optional(),
     /** Seulement utilisée si le mode « clé API » est choisi dans les réglages. Jamais affichée ni journalisée. */
@@ -81,13 +83,14 @@ const EnvSchema = z
       }
     }
     const gitlab = { GITLAB_URL: e.GITLAB_URL, GITLAB_TOKEN: e.GITLAB_TOKEN, GITLAB_USERNAME: e.GITLAB_USERNAME };
-    const present = Object.values(gitlab).filter(Boolean).length;
-    if (present > 0 && present < 3) {
+    // GITLAB_URL seule est permise (adresse de l'instance, jetons personnels saisis dans le dashboard) ; un jeton ou un nom d'utilisateur exige les trois
+    const personal = Boolean(e.GITLAB_TOKEN || e.GITLAB_USERNAME);
+    if (personal) {
       for (const [name, value] of Object.entries(gitlab)) {
         if (!value) ctx.addIssue({ code: "custom", path: [name], message: `${name} manquant (GitLab demande GITLAB_URL, GITLAB_TOKEN et GITLAB_USERNAME ensemble)` });
       }
     }
-    if (present === 0 && !e.GITHUB_TOKEN) {
+    if (!personal && !e.GITHUB_TOKEN) {
       ctx.addIssue({ code: "custom", path: ["GITLAB_TOKEN"], message: "aucune forge configurée : renseigne GITLAB_URL, GITLAB_TOKEN et GITLAB_USERNAME, et/ou GITHUB_TOKEN" });
     }
   });
@@ -115,6 +118,8 @@ export interface Config {
   auth: AuthConfig | null;
   /** Null si GitLab n'est pas configuré. */
   gitlab: { url: string; token: string; username: string } | null;
+  /** Adresse de l'instance GitLab (GITLAB_URL), même quand le jeton vient du coffre ou n'est pas renseigné. */
+  gitlabUrl: string | null;
   /** Null si GitHub n'est pas configuré. `apiUrl` : https://api.github.com sauf GitHub Enterprise. */
   github: { apiUrl: string; token: string } | null;
   /** Adresse de l'API GitHub, même quand le jeton vient du coffre et non du .env (https://api.github.com sauf GitHub Enterprise). */
@@ -123,6 +128,8 @@ export interface Config {
   secrets: { masterKey: string | null; previousKeys: string[] };
   /** Intervalle de détection des demandes de fusion à reviewer, pour chaque forge. */
   pollIntervalMs: number;
+  /** Nombre maximum de reviews, et de tâches de dev, simultanées sur la machine. */
+  maxConcurrentAgents: number;
   claudeBin: string;
   /** Clé API Anthropic, ou null. Utilisée uniquement quand les réglages demandent le mode clé API. */
   anthropicApiKey: string | null;
@@ -161,6 +168,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
             sessionDays: e.SESSION_DAYS,
           }
         : null,
+    gitlabUrl: e.GITLAB_URL ?? null,
     gitlab: e.GITLAB_URL && e.GITLAB_TOKEN && e.GITLAB_USERNAME ? { url: e.GITLAB_URL, token: e.GITLAB_TOKEN, username: e.GITLAB_USERNAME } : null,
     github: e.GITHUB_TOKEN ? { apiUrl: e.GITHUB_API_URL, token: e.GITHUB_TOKEN } : null,
     githubApiUrl: e.GITHUB_API_URL,
@@ -169,6 +177,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       previousKeys: (e.SECRETS_MASTER_KEY_PREVIOUS ?? "").split(",").map((k) => k.trim()).filter(Boolean),
     },
     pollIntervalMs: e.POLL_INTERVAL_SEC * 1000,
+    maxConcurrentAgents: e.MAX_CONCURRENT_AGENTS,
     claudeBin: e.CLAUDE_BIN ?? defaultClaudeBin(),
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
     server: { host: e.HOST, port: e.PORT },

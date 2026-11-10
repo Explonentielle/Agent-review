@@ -37,7 +37,8 @@ describe("configuration de la machine : forges", () => {
   });
 
   it("GitLab à moitié renseigné : chaque variable manquante est signalée, sans afficher les valeurs", () => {
-    expect(() => loadConfig({ ...machine, GITLAB_URL: "https://gitlab.example", ...github })).toThrow(/GITLAB_TOKEN manquant[\s\S]*GITLAB_USERNAME manquant/);
+    expect(() => loadConfig({ ...machine, GITLAB_URL: "https://gitlab.example", GITLAB_TOKEN: "jeton", ...github })).toThrow(/GITLAB_USERNAME manquant/);
+    expect(() => loadConfig({ ...machine, GITLAB_URL: "https://gitlab.example", GITLAB_USERNAME: "alex", ...github })).toThrow(/GITLAB_TOKEN manquant/);
     const error = (() => {
       try {
         loadConfig({ ...machine, GITLAB_TOKEN: "jeton-gitlab-secret" });
@@ -48,6 +49,15 @@ describe("configuration de la machine : forges", () => {
     })();
     expect(error).toContain("GITLAB_URL manquant");
     expect(error).not.toContain("jeton-gitlab-secret");
+  });
+
+  it("GITLAB_URL seule : adresse de l'instance pour les jetons personnels, mais elle ne suffit pas comme forge", () => {
+    const config = loadConfig({ ...machine, GITLAB_URL: "https://gitlab.example/", ...github });
+    expect(config.gitlab).toBeNull();
+    expect(config.gitlabUrl).toBe("https://gitlab.example");
+    expect(loadConfig({ ...machine, ...gitlab }).gitlabUrl).toBe("https://gitlab.example");
+    expect(loadConfig({ ...machine, ...github }).gitlabUrl).toBeNull();
+    expect(() => loadConfig({ ...machine, GITLAB_URL: "https://gitlab.example" })).toThrow(/aucune forge configurée/);
   });
 
   it("aucune forge : message explicite", () => {

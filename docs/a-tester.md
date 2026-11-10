@@ -58,7 +58,19 @@ Dormante par défaut : sans les variables `AUTH_*` dans le `.env`, rien ne chang
 - [ ] Une URL de retour mal saisie dans GitLab donne une erreur côté GitLab, pas une session.
 - [ ] Revenir au mode sans connexion : retirer les variables `AUTH_*` du `.env` et redémarrer.
 
-## 6. Pas testé du tout
+## 6. Plusieurs personnes (seulement si tu ouvres à ton collègue)
+
+Fermé par défaut : sans `AUTH_ALLOWED_USERS`, tu es seul. À n'essayer qu'avec la connexion OAuth (section 5) et une personne de confiance : les agents partagent la machine et l'utilisateur système (voir le risque dans `docs/roadmap-plateforme.md`, C8).
+
+- [ ] Ajouter `AUTH_ALLOWED_USERS=gitlab:<identifiant GitLab du collègue>` dans le `.env` (tu le fais toi-même), redémarrer. Le journal affiche `auth.enabled` avec `multiUser: true`.
+- [ ] Le collègue ouvre l'adresse de l'outil et se connecte avec GitLab : il arrive sur un dashboard **vide** (aucune de tes reviews, tâches ou projets), son nom en haut, aucune forge (« Non configuré »).
+- [ ] Il enregistre **son** jeton GitLab dans Paramètres > Connexion : message « Enregistré, chiffré et appliqué » **sans redémarrage**, ses tickets apparaissent dans l'onglet Tickets, avec son identifiant GitLab (pas le tien).
+- [ ] De ton côté, rien ne change : tes tickets, tes reviews, ton identifiant ; ton jeton n'est pas utilisé pour lui (vérifier qu'une action faite par lui est à son nom sur GitLab).
+- [ ] Il configure un projet et lance l'agent : la branche et la MR sont à son nom, dans son espace ; tu ne les vois pas dans ton onglet Agent dev.
+- [ ] Lancer une review chez toi et une chez lui en même temps : l'une attend l'autre (`MAX_CONCURRENT_AGENTS=1`).
+- [ ] Retirer son identifiant d'`AUTH_ALLOWED_USERS` et redémarrer : il est refusé à sa prochaine connexion.
+
+## 7. Pas testé du tout
 
 - Un vrai serveur PostgreSQL (pilote `pg`) : seuls SQLite et PostgreSQL embarqué (PGlite) sont testés. Lancer avec `TEST_DATABASE_URL` pour la suite complète.
 - Le dashboard dans plusieurs navigateurs.

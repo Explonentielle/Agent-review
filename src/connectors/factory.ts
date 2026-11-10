@@ -17,8 +17,12 @@ function workspaceFor(connector: ForgeConnector, reposDir: string): RepoWorkspac
  * Construit les forges déclarées dans le .env. GitLab garde le dossier `repos` d'origine (les copies et
  * les dossiers de travail existants restent valides) ; GitHub a `repos/github`.
  * Le compte GitHub est lu auprès de l'API : un jeton invalide arrête le démarrage avec un message clair.
+ * @param config Configuration (jetons et dossier de données).
+ * @param options `allowEmpty` : accepte de ne construire aucune forge (personne sans jeton enregistré).
+ * @returns Le registre des forges.
+ * @throws Error Si aucune forge n'est configurée sans `allowEmpty`, ou si le jeton GitHub est refusé.
  */
-export async function createForges(config: Config): Promise<ForgeRegistry> {
+export async function createForges(config: Config, options: { allowEmpty?: boolean } = {}): Promise<ForgeRegistry> {
   const reposDir = path.join(config.dataDir, "repos");
   const forges: Forge[] = [];
 
@@ -38,5 +42,5 @@ export async function createForges(config: Config): Promise<ForgeRegistry> {
     forges.push({ connector, workspace: workspaceFor(connector, path.join(reposDir, "github")), username });
   }
 
-  return new ForgeRegistry(forges);
+  return new ForgeRegistry(forges, options);
 }

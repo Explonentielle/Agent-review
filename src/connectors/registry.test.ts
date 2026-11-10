@@ -29,4 +29,11 @@ describe("registre des forges", () => {
     expect(() => new ForgeRegistry([forge("gitlab", "a"), forge("gitlab", "b")])).toThrow("déclarée deux fois");
     expect(() => new ForgeRegistry([])).toThrow("Aucune forge configurée");
   });
+
+  it("un registre vide est permis sur demande (personne qui n'a pas encore enregistré de jeton)", () => {
+    const registry = new ForgeRegistry([], { allowEmpty: true });
+    expect(registry.all()).toEqual([]);
+    expect(registry.has("gitlab")).toBe(false);
+    expect(() => registry.get("gitlab")).toThrow("n'est pas configurée");
+  });
 });

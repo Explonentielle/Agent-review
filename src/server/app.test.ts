@@ -113,13 +113,14 @@ describe("API du dashboard sur le connecteur", () => {
     const initial = await app.inject({ method: "GET", url: "/api/secrets" });
     expect(initial.json()).toEqual({
       secrets: [
+        { name: "gitlab.token", label: "Jeton GitLab", source: "env", updatedAt: null, live: false },
         { name: "github.token", label: "Jeton GitHub", source: null, updatedAt: null, live: false },
         { name: "anthropic.api_key", label: "Clé API Anthropic", source: null, updatedAt: null, live: true },
       ],
     });
 
     expect((await save("github.token", { value: "github_pat_X" }, {})).statusCode).toBe(403); // sans l'en-tête
-    expect((await save("gitlab.token", { value: "x".repeat(20) })).statusCode).toBe(400); // secret non géré ici
+    expect((await save("planio.api_key", { value: "x".repeat(20) })).statusCode).toBe(400); // secret non géré ici
     expect((await save("github.token", {})).statusCode).toBe(400); // valeur manquante
     expect((await save("github.token", { value: 42 })).statusCode).toBe(400);
     expect((await save("github.token", { value: "   " })).statusCode).toBe(400); // vide après nettoyage
@@ -131,6 +132,7 @@ describe("API du dashboard sur le connecteur", () => {
 
     const listed = await app.inject({ method: "GET", url: "/api/secrets" });
     expect(listed.json<{ secrets: { name: string; source: string | null }[] }>().secrets.map((s) => [s.name, s.source])).toEqual([
+      ["gitlab.token", "env"],
       ["github.token", "vault"],
       ["anthropic.api_key", null],
     ]);
