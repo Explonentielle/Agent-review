@@ -1,6 +1,8 @@
 # À tester en rentrant
 
-Mis à jour le 2026-11-10. Chaque ligne dit quoi faire et ce qu'on doit voir. Les cases à cocher sont pour toi. Tout ce qui est écrit ici a des tests automatiques, mais **aucun n'a été essayé sur un vrai compte ni dans un vrai navigateur** : c'est ce qu'il reste à vérifier.
+Mis à jour le 2026-11-11. Chaque ligne dit quoi faire et ce qu'on doit voir. Les cases à cocher sont pour toi. Tout ce qui est écrit ici a des tests automatiques (339), mais **aucun n'a été essayé sur un vrai compte ni dans un vrai navigateur** : c'est ce qu'il reste à vérifier.
+
+**Ordre conseillé ce soir** : sections 0, puis 7 (les agents tournent-ils encore ? c'est le seul vrai risque de régression), puis 1 et 2 (GitHub), 3, 9. Les sections 5, 6 et 8 sont facultatives : elles ne changent rien tant que tu ne mets pas les variables `AUTH_*` ou que tu ne déploies pas.
 
 ## 0. Avant tout
 
@@ -12,13 +14,13 @@ Mis à jour le 2026-11-10. Chaque ligne dit quoi faire et ce qu'on doit voir. Le
 
 Paramètres > Connexion > « Jetons enregistrés dans l'outil ».
 
-- [ ] La section s'affiche : deux lignes (Jeton GitHub, Clé API Anthropic) avec une pastille « non défini » (orange), un champ mot de passe et un bouton Enregistrer. Aucun style cassé.
+- [ ] La section s'affiche : trois lignes (Jeton GitLab « défini dans le .env (prioritaire) » sans champ, Jeton GitHub et Clé API Anthropic avec une pastille « non défini » orange, un champ mot de passe et un bouton Enregistrer). Aucun style cassé.
 - [ ] Coller un jeton GitHub invalide puis Enregistrer : un message d'erreur rouge de GitHub s'affiche et **rien n'est enregistré** (la pastille reste « non défini »).
-- [ ] Coller un jeton GitHub valide (voir section 2) : message « Enregistré, chiffré. Redémarre l'outil… », pastille verte « enregistré, chiffré le <date> », bouton Supprimer apparu. La valeur n'est affichée nulle part.
+- [ ] Coller un jeton GitHub valide (voir section 2) : message « Enregistré, chiffré et appliqué » **sans redémarrage**, pastille verte « enregistré, chiffré le <date> », bouton Supprimer apparu. La valeur n'est affichée nulle part.
 - [ ] Appuyer sur Entrée dans le champ du jeton **n'enregistre pas** le formulaire des paramètres (seulement le jeton).
 - [ ] Modifier un champ des paramètres (par exemple le budget) **sans l'enregistrer**, puis enregistrer un jeton : ta modification en cours n'est pas perdue.
-- [ ] Redémarrer l'outil : la forge GitHub apparaît (étiquettes « GitLab » et « GitHub » sur les cartes, sélecteur de forge dans l'éditeur de projet). Dans `data/logs/<date>.jsonl`, aucune ligne ne contient le jeton (chercher quelques caractères du jeton avec `grep`).
-- [ ] Supprimer le jeton : confirmation, pastille « non défini ». GitHub disparaît au redémarrage suivant.
+- [ ] La forge GitHub apparaît tout de suite (étiquettes « GitLab » et « GitHub » sur les cartes après rechargement de l'onglet Tickets, sélecteur de forge dans l'éditeur de projet). Dans `data/logs/<date>.jsonl`, aucune ligne ne contient le jeton (chercher quelques caractères du jeton avec `grep`).
+- [ ] Supprimer le jeton : confirmation, pastille « non défini », GitHub disparaît tout de suite.
 - [ ] Si `GITHUB_TOKEN` est dans le `.env`, la ligne affiche « défini dans le .env (prioritaire) » et n'a pas de champ de saisie.
 - [ ] Clé API Anthropic : l'enregistrer, la pastille de Paramètres > Modèles passe à « clé définie » **sans redémarrage**. Passer en mode « Clé API Anthropic », lancer une review : elle démarre (validation réelle de A3, jamais faite). Vérifier le coût affiché et le budget mensuel.
 

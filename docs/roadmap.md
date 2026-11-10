@@ -43,7 +43,7 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 33 | Paramétrage | Aucune info d'entreprise dans le code : consignes des agents dans le dashboard | Faible | ✅ Fait (2026-11-06) |
 | 34 | Paramétrage | Prompts de base remplaçables dans le dashboard, garde-fous verrouillés | Faible | ✅ Fait (2026-11-09) |
 | 35 | Agent dev | Dépôts en ISO-8859-1 (sra-moteur) : l'édition de l'agent corrompt les accents | Moyen | Détection faite (2026-11-09, `src/dev/fileGuard.ts`) : un fichier corrompu est refusé avant le push. Réparation non faite : ne pas activer l'agent dev sur ces dépôts |
-| 36 | Plateforme | Plateforme hébergée : conteneur par utilisateur, GitLab / GitHub / tickets internes, abonnement ou clé API | Très élevé | Spec, parcours et roadmap détaillée écrits (2026-11-09) ; lot A fait sauf A3 (attend une clé API de test) et A6 : A1, A2, A4 et A5 faits (2026-11-09), voir `docs/roadmap-plateforme.md` ; lot B (GitHub à côté de GitLab) fait le 2026-11-10, à valider sur un vrai dépôt |
+| 36 | Plateforme | Plateforme hébergée : conteneur par utilisateur, GitLab / GitHub / tickets internes, abonnement ou clé API | Très élevé | Spec, parcours et roadmap détaillée écrits (2026-11-09) ; lot A fait sauf A3 (attend une clé API de test) et A6 : A1, A2, A4 et A5 faits (2026-11-09), voir `docs/roadmap-plateforme.md` ; lot B (GitHub à côté de GitLab) fait le 2026-11-10, à valider sur un vrai dépôt ; lot C (serveur) fait le 2026-11-10 et 11 sauf l'ouverture réelle à d'autres personnes : comptes, secrets chiffrés, données par espace, connexion OAuth, exécution par personne, audit, déploiement préparé (jamais essayé), voir docs/a-tester.md |
 
 ---
 
