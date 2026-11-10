@@ -287,6 +287,9 @@
   .kv dd { margin: 0; word-break: break-all; }
   .note { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
   .secret-list { display: grid; gap: 14px; margin-top: 4px; }
+  .audit-list { display: grid; font-size: 13px; }
+  .audit-row { display: grid; grid-template-columns: 110px 80px 1fr auto; gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .audit-row small { color: var(--muted); }
   .secret-form { display: flex; gap: 8px; flex-wrap: wrap; }
   .secret-form input { flex: 1; min-width: 220px; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; }
   .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: calc(100vw - 40px); }
@@ -983,9 +986,10 @@ async function loadSettings() {
   state.prefillProject = null;
   state.prefillSource = null;
   try {
-    const [s, projects, costs, secrets, me] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), api("/api/me").catch(() => null), refreshHeader()]);
+    const [s, projects, costs, secrets, me, audit] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), api("/api/me").catch(() => null), api("/api/audit?limit=30").catch(() => null), refreshHeader()]);
     settingsData = s;
     state.me = me;
+    state.audit = audit;
     state.secrets = secrets ? secrets.secrets : null;
     state.settingsCache = s.settings;
     state.costs = costs;
@@ -1010,6 +1014,28 @@ function agentFields(prefix, a, title, hint) {
 /** Pastille de la clé API Anthropic : définie (.env ou saisie) ou absente. */
 function apiKeyPill() {
   return state.stats?.apiKeyConfigured ? pill("green", "clé définie") : pill("orange", "clé absente");
+}
+
+/** Libellés des écritures du journal d'audit. */
+const AUDIT_ACTIONS = {
+  push_branch: "Branche poussée",
+  ticket_labels: "Labels du ticket",
+  change_request_create: "Demande de fusion créée",
+  change_request_comment: "Commentaire posté",
+  change_request_approve: "Approbation",
+};
+
+/** Section « Journal des actions » : les dernières écritures de l'outil sur les forges, en ton nom. */
+function auditSection() {
+  const rows = state.audit;
+  const body = !rows ? `<p class="note">Le journal est indisponible.</p>`
+    : rows.length === 0 ? `<p class="note">Aucune écriture sur une forge pour l'instant.</p>`
+    : `<div class="audit-list">${rows.map((e) => `<div class="audit-row"><small>${esc(ago(e.created_at))}</small><span>${esc(forgeName(e.source))}</span><span>${esc(AUDIT_ACTIONS[e.action] ?? e.action)} <code>${esc(e.target)}</code></span>${e.outcome === "ok" ? pill("green", "ok") : `<span title="${esc(e.error ?? "")}">${pill("red", "échec")}</span>`}</div>`).join("")}</div>`;
+  return `<section class="card-section">
+        <h2>Journal des actions</h2>
+        <p class="desc">Tout ce que l'outil écrit sur tes forges en ton nom (commentaires, approbations, demandes de fusion, labels, branches poussées) : quand, où, avec quel résultat. Les lectures n'y figurent pas.</p>
+        ${body}
+      </section>`;
 }
 
 /** Session de connexion : qui est connecté et bouton de déconnexion. Vide quand l'outil tourne sans connexion (mode local). */
@@ -1160,6 +1186,8 @@ function renderSettings() {
           </label>`).join("")}
         </div>
       </section>
+
+      ${auditSection()}
 
       <div class="save-bar"><button type="button" class="btn ghost" data-act="settings-reset">Valeurs par défaut</button><button type="submit" class="btn primary">Enregistrer les paramètres</button></div>
     </form>
