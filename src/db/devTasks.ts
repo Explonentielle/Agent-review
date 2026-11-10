@@ -13,6 +13,8 @@ export type DevTaskStatus =
 
 export interface DevTaskRow {
   id: number;
+  /** Espace auquel appartient la tâche. */
+  workspace_id: number;
   /** Forge d'où vient le ticket. */
   source: ForgeKind;
   project_id: number;
@@ -79,8 +81,21 @@ export type DevTaskRepo = ReturnType<typeof createDevTaskRepo>;
 
 const ACTIVE = "('queued', 'running')";
 
-export function createDevTaskRepo(db: Db) {
+/**
+ * Tâches de dev d'UN espace : toute requête est limitée à `workspaceId`, une tâche d'un autre espace est introuvable
+ * (lecture, modification, journal d'événements). Aucune méthode ne permet de sortir de l'espace.
+ * @param db Base de données.
+ * @param workspaceId Espace auquel le dépôt est lié.
+ * @returns Les opérations sur les tâches de cet espace.
+ */
+export function createDevTaskRepo(db: Db, workspaceId: number) {
   return {
+    /**
+     * Crée une tâche de dev dans l'espace.
+     * @param t Ticket traité, consignes, et origine si c'est la reprise d'une MR.
+     * @returns L'id de la tâche créée.
+     * @throws Error Si la tâche d'origine d'une reprise n'est pas dans l'espace.
+     */
     async insert(t: {
       /** Forge d'où vient le ticket (GitLab par défaut). */
       source?: ForgeKind;
@@ -93,13 +108,16 @@ export function createDevTaskRepo(db: Db) {
       followup?: FollowupOrigin;
     }): Promise<number> {
       const f = t.followup;
+      if (f && !(await db.get("SELECT 1 AS found FROM dev_tasks WHERE id = ? AND workspace_id = ?", [f.parentId, workspaceId]))) {
+        throw new Error(`Tâche d'origine ${f.parentId} introuvable dans cet espace`);
+      }
       const row = await db.get<{ id: number }>(
-        `INSERT INTO dev_tasks (source, project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
+        `INSERT INTO dev_tasks (workspace_id, source, project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
                                 mode, parent_id, branch, base_branch, target_branch, mr_iid, mr_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING id`,
         [
-          t.source ?? DEFAULT_FORGE, t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions,
+          workspaceId, t.source ?? DEFAULT_FORGE, t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions,
           f ? "followup" : "new", f?.parentId ?? null, f?.branch ?? null, f?.baseBranch ?? null,
           f?.targetBranch ?? null, f?.mrIid ?? null, f?.mrUrl ?? null,
         ],
@@ -107,42 +125,101 @@ export function createDevTaskRepo(db: Db) {
       return row!.id;
     },
 
+    /**
+     * Lit une tâche de l'espace.
+     * @param id Identifiant de la tâche.
+     * @returns La tâche, ou undefined si elle n'existe pas dans cet espace.
+     */
     get(id: number): Promise<DevTaskRow | undefined> {
-      return db.get<DevTaskRow>("SELECT * FROM dev_tasks WHERE id = ?", [id]);
+      return db.get<DevTaskRow>("SELECT * FROM dev_tasks WHERE id = ? AND workspace_id = ?", [id, workspaceId]);
     },
 
+    /**
+     * Tâches de l'espace, les plus récentes d'abord.
+     * @param limit Nombre maximum de tâches.
+     * @returns Les tâches.
+     */
     list(limit = 100): Promise<DevTaskRow[]> {
-      return db.all<DevTaskRow>("SELECT * FROM dev_tasks ORDER BY id DESC LIMIT ?", [limit]);
+      return db.all<DevTaskRow>("SELECT * FROM dev_tasks WHERE workspace_id = ? ORDER BY id DESC LIMIT ?", [workspaceId, limit]);
     },
 
-    /** Tâche en cours ou en attente pour ce ticket (empêche de lancer deux agents dessus). */
+    /**
+     * Tâche en cours ou en attente pour ce ticket (empêche de lancer deux agents dessus).
+     * @param source Forge du ticket.
+     * @param projectId Identifiant du projet chez la forge.
+     * @param issueIid Numéro du ticket.
+     * @returns La tâche active de l'espace, ou undefined.
+     */
     findActive(source: ForgeKind, projectId: number, issueIid: number): Promise<DevTaskRow | undefined> {
-      return db.get<DevTaskRow>(`SELECT * FROM dev_tasks WHERE source = ? AND project_id = ? AND issue_iid = ? AND status IN ${ACTIVE} LIMIT 1`, [source, projectId, issueIid]);
+      return db.get<DevTaskRow>(`SELECT * FROM dev_tasks WHERE workspace_id = ? AND source = ? AND project_id = ? AND issue_iid = ? AND status IN ${ACTIVE} LIMIT 1`, [
+        workspaceId,
+        source,
+        projectId,
+        issueIid,
+      ]);
     },
 
-    /** Dernière tâche par ticket, pour l'affichage dans l'onglet Tickets. Clé : `source#projet#ticket`. */
+    /**
+     * Dernière tâche de l'espace par ticket, pour l'affichage dans l'onglet Tickets.
+     * @returns Les tâches, par clé `source#projet#ticket`.
+     */
     async latestByIssue(): Promise<Map<string, DevTaskRow>> {
-      const rows = await db.all<DevTaskRow>("SELECT * FROM dev_tasks WHERE id IN (SELECT MAX(id) FROM dev_tasks GROUP BY source, project_id, issue_iid)");
+      const rows = await db.all<DevTaskRow>(
+        "SELECT * FROM dev_tasks WHERE id IN (SELECT MAX(id) FROM dev_tasks WHERE workspace_id = ? GROUP BY source, project_id, issue_iid)",
+        [workspaceId],
+      );
       return new Map(rows.map((r) => [`${r.source}#${r.project_id}#${r.issue_iid}`, r]));
     },
 
+    /**
+     * Tâches de l'espace interrompues par un arrêt du process.
+     * @returns Les tâches en attente ou en cours.
+     */
     listInterrupted(): Promise<DevTaskRow[]> {
-      return db.all<DevTaskRow>(`SELECT * FROM dev_tasks WHERE status IN ${ACTIVE}`);
+      return db.all<DevTaskRow>(`SELECT * FROM dev_tasks WHERE workspace_id = ? AND status IN ${ACTIVE}`, [workspaceId]);
     },
 
+    /**
+     * Met à jour certains champs d'une tâche de l'espace.
+     * @param id Identifiant de la tâche.
+     * @param fields Champs à modifier (ceux qui sont `undefined` sont ignorés).
+     * @returns Rien (sans effet si la tâche n'est pas dans l'espace).
+     */
     async update(id: number, fields: Partial<Pick<DevTaskRow, UpdatableField>>): Promise<void> {
       const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
       if (entries.length === 0) return;
       const set = entries.map(([k]) => `${k} = ?`).join(", ");
-      await db.run(`UPDATE dev_tasks SET ${set}, updated_at = ${db.sql.now} WHERE id = ?`, [...entries.map(([, v]) => v), id]);
+      await db.run(`UPDATE dev_tasks SET ${set}, updated_at = ${db.sql.now} WHERE id = ? AND workspace_id = ?`, [...entries.map(([, v]) => v), id, workspaceId]);
     },
 
+    /**
+     * Ajoute un événement au journal d'une tâche de l'espace.
+     * @param taskId Identifiant de la tâche.
+     * @param kind Type d'événement.
+     * @param text Texte (tronqué à 4000 caractères).
+     * @returns Rien.
+     * @throws Error Si la tâche n'est pas dans l'espace : rien n'est écrit.
+     */
     async addEvent(taskId: number, kind: DevTaskEvent["kind"], text: string): Promise<void> {
-      await db.run("INSERT INTO dev_task_events (task_id, kind, text) VALUES (?, ?, ?)", [taskId, kind, text.slice(0, 4000)]);
+      const res = await db.run(
+        "INSERT INTO dev_task_events (task_id, kind, text) SELECT id, CAST(? AS TEXT), CAST(? AS TEXT) FROM dev_tasks WHERE id = ? AND workspace_id = ?",
+        [kind, text.slice(0, 4000), taskId, workspaceId],
+      );
+      if (res.changes === 0) throw new Error(`Tâche ${taskId} introuvable dans cet espace`);
     },
 
+    /**
+     * Événements du journal d'une tâche de l'espace.
+     * @param taskId Identifiant de la tâche.
+     * @param afterId Ne renvoyer que les événements postérieurs à cet identifiant.
+     * @returns Jusqu'à 500 événements, dans l'ordre (vide si la tâche n'est pas dans l'espace).
+     */
     events(taskId: number, afterId = 0): Promise<DevTaskEvent[]> {
-      return db.all<DevTaskEvent>("SELECT * FROM dev_task_events WHERE task_id = ? AND id > ? ORDER BY id LIMIT 500", [taskId, afterId]);
+      return db.all<DevTaskEvent>(
+        `SELECT e.* FROM dev_task_events e JOIN dev_tasks t ON t.id = e.task_id
+          WHERE e.task_id = ? AND e.id > ? AND t.workspace_id = ? ORDER BY e.id LIMIT 500`,
+        [taskId, afterId, workspaceId],
+      );
     },
   };
 }

@@ -33,9 +33,11 @@ async function main(): Promise<void> {
   registerEnvSecrets(config);
 
   const db = await openDb({ dataDir: config.dataDir, databaseUrl: config.databaseUrl });
-  const reviews = createReviewRepo(db);
-  const tasks = createDevTaskRepo(db);
-  const settings = createSettingsStore(db);
+  // Sans connexion, tout se passe dans l'espace de l'utilisateur local : les dépôts de données y sont liés
+  const local = await createAccountRepo(db).localContext();
+  const reviews = createReviewRepo(db, local.workspaceId);
+  const tasks = createDevTaskRepo(db, local.workspaceId);
+  const settings = createSettingsStore(db, local.workspaceId);
 
   // Coffre à secrets : jeton GitHub et clé API saisis dans le dashboard, complètent ceux du .env (qui reste prioritaire)
   const keyring = await resolveKeyring({
@@ -45,7 +47,6 @@ async function main(): Promise<void> {
     serverMode: config.databaseUrl !== null,
     hasSecrets: () => hasAnySecret(db),
   });
-  const local = await createAccountRepo(db).localContext();
   const vault = createVault(config, createSecretStore(db, keyring), { workspaceId: local.workspaceId, userId: local.userId });
   try {
     // Après une rotation de la clé maître, les secrets chiffrés par une ancienne clé passent à la nouvelle (sinon : rien à faire)
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
 
   const forges = await createForges(config);
 
-  const costs = createCostRepo(db);
+  const costs = createCostRepo(db, local.workspaceId);
 
   const deps: PipelineDeps = { config, forges, costs, reviews, settings };
   // Deux files séparées : une review n'attend pas la fin d'une tâche de dev (et inversement)

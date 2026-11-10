@@ -41,7 +41,7 @@ if (testUrl) {
   });
 }
 
-const TABLES_IN_DELETE_ORDER = ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "memberships", "workspaces", "users"];
+const TABLES_IN_DELETE_ORDER = ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "memberships", "workspaces", "users"];
 const DATE_FORMAT = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 describe("conversion des paramètres", () => {
@@ -53,6 +53,8 @@ describe("conversion des paramètres", () => {
 
 describe.each(backends)("base de données : $name", ({ open }) => {
   let db: Db;
+  /** Espace des dépôts de données, recréé avant chaque test. */
+  let ws: number;
   beforeAll(async () => {
     db = await open();
     await migrate(db);
@@ -62,6 +64,8 @@ describe.each(backends)("base de données : $name", ({ open }) => {
   });
   beforeEach(async () => {
     for (const table of TABLES_IN_DELETE_ORDER) await db.run(`DELETE FROM ${table}`);
+    const accounts = createAccountRepo(db);
+    ws = await accounts.createWorkspace({ name: "Espace de test", kind: "team", adminUserId: await accounts.createUser({ name: "Test" }) });
   });
 
   it("migrations : appliquées une seule fois, version de schéma suivie, relançables", async () => {
@@ -74,20 +78,20 @@ describe.each(backends)("base de données : $name", ({ open }) => {
   it("transaction : tout ou rien", async () => {
     await expect(
       db.transaction(async (tx) => {
-        await tx.run("INSERT INTO settings (key, value) VALUES ('a', '1')");
+        await tx.run("INSERT INTO settings (workspace_id, key, value) VALUES (?, 'a', '1')", [ws]);
         throw new Error("échec au milieu");
       }),
     ).rejects.toThrow("échec au milieu");
     expect(await db.get("SELECT * FROM settings WHERE key = 'a'")).toBeUndefined();
 
     await db.transaction(async (tx) => {
-      await tx.run("INSERT INTO settings (key, value) VALUES ('b', '2')");
+      await tx.run("INSERT INTO settings (workspace_id, key, value) VALUES (?, 'b', '2')", [ws]);
     });
     expect(await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'b'")).toEqual({ value: "2" });
   });
 
   it("reviews : déduplication par commit, statuts, résultat, taux d'accord", async () => {
-    const reviews = createReviewRepo(db);
+    const reviews = createReviewRepo(db, ws);
     const base = { projectId: 1, projectPath: "g/p", mrIid: 7, mrTitle: "t", mrUrl: "u", author: "a", headSha: "a".repeat(40) };
 
     const id = await reviews.insertIfNew(base);
@@ -122,7 +126,7 @@ describe.each(backends)("base de données : $name", ({ open }) => {
   });
 
   it("tâches de dev : création, reprise, mise à jour partielle, journal paginé", async () => {
-    const tasks = createDevTaskRepo(db);
+    const tasks = createDevTaskRepo(db, ws);
     const id = await tasks.insert({ projectId: 1, projectPath: "g/p", issueIid: 609, issueTitle: "Import", issueUrl: "u", extraInstructions: null });
     expect(typeof id).toBe("number");
     expect(await tasks.get(id)).toMatchObject({ status: "queued", mode: "new", parent_id: null, branch: null });
@@ -155,7 +159,7 @@ describe.each(backends)("base de données : $name", ({ open }) => {
   });
 
   it("réglages : valeurs par défaut, enregistrement validé, projets", async () => {
-    const settings = createSettingsStore(db);
+    const settings = createSettingsStore(db, ws);
     const defaults = await settings.get();
     expect(defaults.actionMode).toBe("shadow");
 
@@ -177,7 +181,7 @@ describe.each(backends)("base de données : $name", ({ open }) => {
   });
 
   it("deux forges, même numéro de projet : tout reste séparé", async () => {
-    const settings = createSettingsStore(db);
+    const settings = createSettingsStore(db, ws);
     const project = { projectId: 5, path: "g/b", devEnabled: true, baseBranch: "develop", targetBranch: "develop", allowedCommands: [], instructions: "" };
     await settings.saveProject({ ...project, instructions: "côté GitLab" }); // sans « source » : GitLab, comme avant
     await settings.saveProject({ ...project, source: "github", path: "acme/b", instructions: "côté GitHub" });
@@ -194,7 +198,7 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     expect(await settings.getProject("gitlab", 5)).not.toBeNull();
     await expect(settings.saveProject({ ...project, source: "gitea" })).rejects.toThrow();
 
-    const tasks = createDevTaskRepo(db);
+    const tasks = createDevTaskRepo(db, ws);
     const base = { projectId: 1, projectPath: "g/p", issueIid: 609, issueTitle: "t", issueUrl: "u", extraInstructions: null };
     const onGitlab = await tasks.insert(base);
     const onGithub = await tasks.insert({ ...base, source: "github", projectPath: "acme/p" });
@@ -208,7 +212,7 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     const latest = await tasks.latestByIssue();
     expect([latest.get("gitlab#1#609")?.id, latest.get("github#1#609")?.id]).toEqual([onGitlab, onGithub]);
 
-    const reviews = createReviewRepo(db);
+    const reviews = createReviewRepo(db, ws);
     const mr = { projectId: 1, projectPath: "g/p", mrIid: 7, mrTitle: "t", mrUrl: "u", author: "a", headSha: "d".repeat(40) };
     const review = (await reviews.insertIfNew(mr))!;
     const reviewOnGithub = (await reviews.insertIfNew({ ...mr, source: "github", headSha: "e".repeat(40) }))!;
@@ -321,10 +325,10 @@ describe.each(backends)("base de données : $name", ({ open }) => {
   });
 
   it("coûts : nombres (jamais du texte), mois courant", async () => {
-    const reviews = createReviewRepo(db);
+    const reviews = createReviewRepo(db, ws);
     const id = (await reviews.insertIfNew({ projectId: 1, projectPath: "g/p", mrIid: 1, mrTitle: "t", mrUrl: "u", author: "a", headSha: "c".repeat(40) }))!;
     await reviews.saveResult(id, { status: "auto_ok", decisionReasons: [], resultJson: "{}", changedLines: 1, costUsd: 1.25, numTurns: 1 });
-    const costs = createCostRepo(db);
+    const costs = createCostRepo(db, ws);
     const lines = await costs.breakdown(currentMonth());
     expect(lines).toEqual([{ kind: "review", projectPath: "g/p", usd: 1.25, count: 1 }]);
     expect(typeof lines[0]!.usd).toBe("number");
@@ -357,12 +361,14 @@ describe.each(backends.filter((b) => b.fresh))("migration « plusieurs forges »
       expect(await db.get("SELECT source, project_id, mr_iid FROM reviews")).toEqual({ source: "gitlab", project_id: 29, mr_iid: 716 });
       expect(await db.get("SELECT source, project_id, issue_iid FROM dev_tasks")).toEqual({ source: "gitlab", project_id: 29, issue_iid: 609 });
       expect(await db.get("SELECT source, project_id, path FROM projects")).toEqual({ source: "gitlab", project_id: 29, path: "g/bo" });
-      expect(await createSettingsStore(db).getProject("gitlab", 29)).toMatchObject({ source: "gitlab", path: "g/bo", devEnabled: true, instructions: "FuelPHP" });
-      expect(await createSettingsStore(db).getProject("github", 29)).toBeNull();
+      const local = await createAccountRepo(db).localContext();
+      expect(await db.get("SELECT workspace_id FROM reviews")).toEqual({ workspace_id: local.workspaceId }); // les données existantes passent dans l'espace local
+      expect(await createSettingsStore(db, local.workspaceId).getProject("gitlab", 29)).toMatchObject({ source: "gitlab", path: "g/bo", devEnabled: true, instructions: "FuelPHP" });
+      expect(await createSettingsStore(db, local.workspaceId).getProject("github", 29)).toBeNull();
 
       // La clé des projets inclut maintenant la forge : le même numéro chez GitHub est un autre projet
-      await createSettingsStore(db).saveProject({ ...config, source: "github", path: "acme/bo" });
-      expect((await createSettingsStore(db).listProjects()).map((p) => `${p.source}:${p.path}`)).toEqual(["github:acme/bo", "gitlab:g/bo"]);
+      await createSettingsStore(db, local.workspaceId).saveProject({ ...config, source: "github", path: "acme/bo" });
+      expect((await createSettingsStore(db, local.workspaceId).listProjects()).map((p) => `${p.source}:${p.path}`)).toEqual(["github:acme/bo", "gitlab:g/bo"]);
     } finally {
       await db.close();
     }

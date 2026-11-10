@@ -9,6 +9,7 @@ import { loadConfig } from "../config.js";
 import { createForges } from "../connectors/factory.js";
 import { DEFAULT_FORGE } from "../connectors/forges.js";
 import type { Forge } from "../connectors/registry.js";
+import { createAccountRepo } from "../db/accounts.js";
 import { createCostRepo } from "../db/costs.js";
 import { openDb } from "../db/index.js";
 import { createReviewRepo } from "../db/reviews.js";
@@ -20,8 +21,9 @@ const usage = "Usage : npm run review:once -- <url de la MR ou de la PR>   (ou <
 
 const config = loadConfig();
 const db = await openDb({ dataDir: config.dataDir, databaseUrl: config.databaseUrl });
-const reviews = createReviewRepo(db);
-const settings = createSettingsStore(db);
+const local = await createAccountRepo(db).localContext(); // sans connexion : l'espace de l'utilisateur local
+const reviews = createReviewRepo(db, local.workspaceId);
+const settings = createSettingsStore(db, local.workspaceId);
 const forges = await createForges(config);
 
 async function resolveTarget(): Promise<{ forge: Forge; projectId: number; mrIid: number }> {
@@ -60,7 +62,7 @@ const id =
 if (id === undefined) throw new Error("Impossible de créer la review");
 
 console.log(`Review de ${project.path} !${mr.iid} en cours (quelques minutes)...`);
-await runReview(id, { config, forges, costs: createCostRepo(db), reviews, settings, forceShadow: true });
+await runReview(id, { config, forges, costs: createCostRepo(db, local.workspaceId), reviews, settings, forceShadow: true });
 
 const row = await reviews.get(id);
 console.log(JSON.stringify({ status: row?.status, reasons: row?.decision_reasons ? JSON.parse(row.decision_reasons) : [], cost: row?.cost_usd, error: row?.error }, null, 2));

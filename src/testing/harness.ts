@@ -91,11 +91,11 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
   } else {
     db = await openDb({ dataDir, databaseUrl: null });
   }
-  const settings = createSettingsStore(db);
+  const local = await createAccountRepo(db).localContext();
+  const settings = createSettingsStore(db, local.workspaceId);
   await settings.saveProject({ projectId: 1, path: "groupe/projet", devEnabled: true, baseBranch: "develop", targetBranch: "develop", allowedCommands: [], instructions: "" });
   const connector = new FakeConnector({ cloneUrl: remoteUrl });
   const workspace = new RepoWorkspace(path.join(root, "repos"), "token-factice");
-  const local = await createAccountRepo(db).localContext();
   const vault = createVault(config, createSecretStore(db, new Keyring([randomBytes(32)])), { workspaceId: local.workspaceId, userId: local.userId }, async () => undefined);
 
   const remoteBranchSha = (branch: string) => execFileSync("git", ["ls-remote", remoteUrl, `refs/heads/${branch}`]).toString().split(/\s/)[0] ?? "";
@@ -107,9 +107,9 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
     config,
     db,
     settings,
-    tasks: createDevTaskRepo(db),
-    reviews: createReviewRepo(db),
-    costs: createCostRepo(db),
+    tasks: createDevTaskRepo(db, local.workspaceId),
+    reviews: createReviewRepo(db, local.workspaceId),
+    costs: createCostRepo(db, local.workspaceId),
     workspace,
     connector,
     forges: new ForgeRegistry([{ connector, workspace, username: "alex" }]),

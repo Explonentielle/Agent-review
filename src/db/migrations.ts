@@ -1,4 +1,5 @@
 import type { Db, Sql } from "./db.js";
+import { workspaceScopeMigration } from "./workspaceScopeMigration.js";
 
 /**
  * Migrations appliquées dans l'ordre, une seule fois chacune (version de schéma suivie par le moteur :
@@ -158,6 +159,8 @@ export function migrationsFor(s: Sql): string[] {
   CREATE UNIQUE INDEX idx_secrets_workspace ON secrets(workspace_id, name) WHERE user_id IS NULL;
   CREATE UNIQUE INDEX idx_secrets_user ON secrets(workspace_id, user_id, name) WHERE user_id IS NOT NULL;
   `,
+    // Données rattachées à un espace (roadmap-plateforme, C4) : voir workspaceScopeMigration.ts
+    workspaceScopeMigration(s),
   ];
 }
 

@@ -43,7 +43,7 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | C1b | Serveur | Modèle multi-espaces : utilisateurs, espaces, appartenances (la colonne « source » est faite avec le lot B) | M | C1a | ✅ 2026-11-10 pour le modèle ; le rattachement des données à un espace est en C4 |
 | C2 | Serveur | Connexion OAuth GitLab et GitHub | M | C1b | ⬜ |
 | C3 | Serveur | Secrets chiffrés (AES-256-GCM, clé maître hors base) | M | C1b | ✅ 2026-11-10 pour le jeton GitHub et la clé API Anthropic ; jetons GitLab et Planio non gérés |
-| C4 | Serveur | Isolation des données par espace, tests d'étanchéité | L | C1b | ⬜ |
+| C4 | Serveur | Isolation des données par espace, tests d'étanchéité | L | C1b | ✅ 2026-11-10 pour la couche de données ; l'exécution multi-espaces vient avec C2 et C8 |
 | C5 | Serveur | Réglages par portée : équipe, utilisateur, projet | M | C4 | ⬜ |
 | C6 | Serveur | Journal d'audit des écritures sur les forges | M | C4 | ⬜ |
 | C7 | Serveur | Quotas et budgets par utilisateur | M | A6, C4 | ⬜ |
@@ -173,6 +173,15 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - **Limite** : la clé maître en fichier local est à côté de la base : elle protège d'une fuite de la base seule (sauvegarde, export), pas d'un accès au dossier de données. Pour le serveur, la clé vient du `.env`, hors du dossier de la base.
 - **Vérifié** : 54 tests de plus (264 au total) ; 16 mutations (contexte authentifié, étiquette, déclaration au journal, étanchéité utilisateur, priorité du .env, contrôle du jeton, clé perdue, mode serveur, masquage, valeur renvoyée par la liste) toutes détectées. Non vérifié : le dashboard dans un navigateur (syntaxe seulement), un jeton GitHub réel.
 
+**C4 (2026-11-10)** : isolation des données par espace, migration 7 et dépôts liés à un espace.
+- **Rattachement** : reviews, tâches de dev, projets et réglages portent un `workspace_id` obligatoire (clé étrangère). Les journaux `actions` et `dev_task_events` suivent leur review ou leur tâche. Les clés d'unicité incluent l'espace : deux espaces peuvent reviewer la même demande de fusion, lancer un agent sur le même ticket ou configurer le même projet. Les secrets l'étaient déjà (C3).
+- **Dépôts liés à un espace** : `createReviewRepo(db, workspaceId)`, `createDevTaskRepo`, `createCostRepo` et `createSettingsStore` : toute requête porte l'espace, aucune méthode ne permet d'en sortir. Une review ou une tâche d'un autre espace est introuvable (lecture, mise à jour) ; écrire dans son journal ou accrocher une reprise à la tâche d'un autre espace est refusé avec une erreur. Les coûts d'un espace n'incluent jamais ceux d'un autre.
+- **Mode local inchangé** : tout reste dans l'espace de l'utilisateur local (`localContext()`), qui reçoit les données existantes.
+- **Migration** (`workspaceScopeMigration.ts`) : SQLite ne sait pas modifier une clé, les tables sont reconstruites avec leurs tables filles ; PostgreSQL passe par des ALTER. Un premier essai a échoué sur la copie de ta vraie base (SQLite réécrit les clés étrangères quand on renomme une table parente) : la méthode a été changée avant tout passage sur la vraie base. Essai final sur la copie : effectifs identiques, contrôle des clés étrangères vide, intégrité ok, lignes identiques. Ta vraie base est en version 7 sans perte (5 reviews, 5 actions, 2 tâches, 137 événements, 2 projets, 1 réglage). Copie de sécurité d'avant : `data/backup-avant-c4.sqlite` (non versionnée, à supprimer quand tu es serein).
+- **Garde-fou durable** : un test lit le code des dépôts et échoue si une requête sur une table d'espace ne nomme pas `workspace_id` (hors deux requêtes de maintenance de la clé maître, listées dans le test), ou si du SQL sur ces tables apparaît hors des dépôts (serveur, pipelines, poller, CLI).
+- **Pas encore fait** : l'exécution multi-espaces. Un seul espace est servi par processus (celui de l'utilisateur local). Restent : un poller par espace et par forge, des files par espace avec limites de concurrence (C8), l'espace déduit de la connexion (C2), les réglages par portée équipe, utilisateur et projet (C5), l'audit des écritures sur les forges (C6). La limite de C1b sur le dernier admin en écriture simultanée reste ouverte : un verrou sera utile quand plusieurs personnes écriront en même temps (C8).
+- **Vérifié** : 19 tests de plus (283 au total) sur SQLite et PostgreSQL embarqué ; 26 mutations (un filtre d'espace retiré à la fois : reviews, tâches, coûts, réglages) toutes détectées. Non vérifié : un serveur PostgreSQL réel (pilote `pg`).
+
 ## Lot B : GitHub (jalon J2)
 
 Objectif : traiter un ticket GitHub et reviewer une PR, comme aujourd'hui pour GitLab.
@@ -227,6 +236,6 @@ Objectif : tenir en production : isolation renforcée, supervision, sauvegardes 
 1. **A3** dès qu'une clé API de test est disponible.
 2. **Lot B** (GitHub) : fait (2026-11-10). Il reste à le valider sur un vrai dépôt : jeton à portée fine dans le `.env`, un dépôt de test avec quelques tickets.
 3. **A6** : coûts par utilisateur et budget en mode API (dépend d'A3).
-4. **C4** (données rattachées à un espace, tests d'étanchéité). C1b et C3 sont faits (2026-11-10).
+4. **C2** (connexion OAuth, l'espace déduit de la connexion) puis **C8** (files et pollers par espace). C1b, C3 et C4 sont faits (2026-11-10).
 
 A1, A2, A4 et A5 sont faits (2026-11-09).

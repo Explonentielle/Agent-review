@@ -38,45 +38,87 @@ export function mergeWithDefaults(stored: unknown): Settings {
   return DEFAULT_SETTINGS;
 }
 
-export function createSettingsStore(db: Db) {
+/**
+ * Réglages et projets d'UN espace : chaque requête est limitée à `workspaceId`, les réglages d'un autre espace
+ * ne sont ni lus, ni écrasés, ni supprimés.
+ * @param db Base de données.
+ * @param workspaceId Espace auquel le magasin est lié.
+ * @returns Les opérations sur les réglages et les projets de cet espace.
+ */
+export function createSettingsStore(db: Db, workspaceId: number) {
   return {
+    /**
+     * Réglages de l'espace, complétés par les valeurs par défaut.
+     * @returns Les réglages.
+     */
     async get(): Promise<Settings> {
-      const row = await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'settings'");
+      const row = await db.get<{ value: string }>("SELECT value FROM settings WHERE workspace_id = ? AND key = 'settings'", [workspaceId]);
       return mergeWithDefaults(row ? JSON.parse(row.value) : null);
     },
 
-    /** Valide puis enregistre. Lève une erreur lisible si invalide. */
+    /**
+     * Valide puis enregistre les réglages de l'espace.
+     * @param input Réglages à enregistrer.
+     * @returns Les réglages validés.
+     * @throws ZodError Si les réglages sont invalides.
+     */
     async save(input: unknown): Promise<Settings> {
       const settings = SettingsSchema.parse(input);
-      await db.run("INSERT INTO settings (key, value) VALUES ('settings', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [JSON.stringify(settings)]);
+      await db.run("INSERT INTO settings (workspace_id, key, value) VALUES (?, 'settings', ?) ON CONFLICT (workspace_id, key) DO UPDATE SET value = excluded.value", [
+        workspaceId,
+        JSON.stringify(settings),
+      ]);
       return settings;
     },
 
+    /**
+     * Projets configurés dans l'espace.
+     * @returns Les projets, classés par chemin.
+     */
     async listProjects(): Promise<ProjectSettings[]> {
-      const rows = await db.all<{ config: string }>("SELECT config FROM projects ORDER BY path");
+      const rows = await db.all<{ config: string }>("SELECT config FROM projects WHERE workspace_id = ? ORDER BY path", [workspaceId]);
       return rows.map((r) => ProjectSettingsSchema.parse(JSON.parse(r.config)));
     },
 
+    /**
+     * Réglages d'un projet de l'espace.
+     * @param source Forge du projet.
+     * @param projectId Identifiant du projet chez la forge.
+     * @returns Le projet, ou null s'il n'est pas configuré dans cet espace.
+     */
     async getProject(source: ForgeKind, projectId: number): Promise<ProjectSettings | null> {
-      const row = await db.get<{ config: string }>("SELECT config FROM projects WHERE source = ? AND project_id = ?", [source, projectId]);
+      const row = await db.get<{ config: string }>("SELECT config FROM projects WHERE workspace_id = ? AND source = ? AND project_id = ?", [workspaceId, source, projectId]);
       return row ? ProjectSettingsSchema.parse({ ...JSON.parse(row.config), source }) : null;
     },
 
+    /**
+     * Enregistre (ou remplace) un projet de l'espace.
+     * @param input Réglages du projet.
+     * @returns Le projet validé.
+     * @throws ZodError Si les réglages sont invalides.
+     * @throws Error Si l'agent dev est activé sans branche de départ ou sans branche cible.
+     */
     async saveProject(input: unknown): Promise<ProjectSettings> {
       const project = ProjectSettingsSchema.parse(input);
       if (project.devEnabled && (!project.baseBranch || !project.targetBranch)) {
         throw new Error("Branche de départ et branche cible obligatoires pour activer l'agent dev");
       }
       await db.run(
-        `INSERT INTO projects (source, project_id, path, config) VALUES (?, ?, ?, ?)
-         ON CONFLICT (source, project_id) DO UPDATE SET path = excluded.path, config = excluded.config`,
-        [project.source, project.projectId, project.path, JSON.stringify(project)],
+        `INSERT INTO projects (workspace_id, source, project_id, path, config) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (workspace_id, source, project_id) DO UPDATE SET path = excluded.path, config = excluded.config`,
+        [workspaceId, project.source, project.projectId, project.path, JSON.stringify(project)],
       );
       return project;
     },
 
+    /**
+     * Supprime un projet de l'espace.
+     * @param source Forge du projet.
+     * @param projectId Identifiant du projet chez la forge.
+     * @returns Rien (sans effet si le projet n'est pas dans l'espace).
+     */
     async deleteProject(source: ForgeKind, projectId: number): Promise<void> {
-      await db.run("DELETE FROM projects WHERE source = ? AND project_id = ?", [source, projectId]);
+      await db.run("DELETE FROM projects WHERE workspace_id = ? AND source = ? AND project_id = ?", [workspaceId, source, projectId]);
     },
   };
 }
