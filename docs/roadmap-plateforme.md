@@ -40,7 +40,7 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | B5 | GitHub | Tests sur réponses enregistrées | S | B2 | ✅ 2026-11-10 sur des réponses construites d'après la documentation, à enregistrer sur un vrai compte |
 | B6 | GitHub | Écran Connecteurs : choisir la forge par projet | M | B2 | ✅ 2026-11-10, à essayer dans un navigateur |
 | C1a | Serveur | Couche de données asynchrone : SQLite (local) et PostgreSQL (serveur), migrations communes | L | | ✅ 2026-11-09 |
-| C1b | Serveur | Modèle multi-espaces : utilisateurs, espaces, appartenances (la colonne « source » est faite avec le lot B) | M | C1a | ⬜ |
+| C1b | Serveur | Modèle multi-espaces : utilisateurs, espaces, appartenances (la colonne « source » est faite avec le lot B) | M | C1a | ✅ 2026-11-10 pour le modèle ; le rattachement des données à un espace est en C4 |
 | C2 | Serveur | Connexion OAuth GitLab et GitHub | M | C1b | ⬜ |
 | C3 | Serveur | Secrets chiffrés (AES-256-GCM, clé maître hors base) | M | C1b | ⬜ |
 | C4 | Serveur | Isolation des données par espace, tests d'étanchéité | L | C1b | ⬜ |
@@ -155,6 +155,14 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - **Vérifié** : 46 tests du client et du connecteur (mutations sur le contrôle de la tête et sur le lien de pagination), 7 tests de routage de bout en bout avec deux faux connecteurs aux mêmes numéros (mutations vérifiées), la migration sur des données de la version 3 (SQLite et PostgreSQL), la configuration. Ta vraie base est passée en version 4 sans perte (projets, reviews et tâches conservés, tous GitLab).
 - **Limites connues** : réponses GitHub construites d'après la documentation, pas enregistrées sur un vrai compte, rien validé contre un vrai dépôt (jeton à portée fine sur `GET /issues`, recherche, push avec `x-access-token`). Une PR n'apparaît dans « à reviewer » que tant que l'avis est demandé : GitHub retire la demande une fois la review soumise, un nouveau commit ne relance donc une review que si l'avis est redemandé. L'état « résolu » des fils de discussion n'est pas dans l'API REST : il est laissé inconnu. Branches protégées par nom exact seulement (pas les règles d'ensemble). `removeSourceBranch` n'a pas d'effet (réglage par dépôt chez GitHub). Les « projets » GitHub pour les statuts ne sont pas gérés (labels seuls). L'unicité des reviews garde la contrainte d'origine (projet, demande, commit) sans la source : elle ne se heurterait que pour un même commit. L'écran n'a été vérifié qu'en syntaxe, pas dans un navigateur.
 
+**C1b (2026-11-10)** : modèle de comptes, `src/db/accounts.ts` et migration 5.
+- **Tables** : `users` (nom, email unique et facultatif), `workspaces` (nom, type `personal` ou `team`), `memberships` (espace, utilisateur, rôle `admin`, `member` ou `viewer`). Types, rôles et clés étrangères sont aussi contrôlés par la base (`CHECK`), pas seulement par le code.
+- **Mode local inchangé à l'usage** : la migration crée « Utilisateur local » et « Espace local » (personnel) dont il est admin ; `localContext()` les retrouve. Ta vraie base est passée en version 5 au rechargement du serveur, sans perte (5 reviews, 2 tâches, 2 projets conservés).
+- **Règles dans le dépôt** : un espace personnel n'a qu'un membre ; un utilisateur n'a qu'un espace personnel ; un espace garde toujours au moins un admin (le contrôle et l'écriture tiennent en une seule instruction SQL) ; une adresse email n'est utilisée qu'une fois (stockée en minuscules).
+- **Pas encore fait** : les reviews, tâches et réglages ne sont pas rattachés à un espace (C4, avec les tests d'étanchéité) ; aucun contrôle de droits sur qui peut inviter ou changer un rôle (il faut un utilisateur connecté, C2) ; aucun écran.
+- **Limite connue** : sur PostgreSQL, deux rétrogradations simultanées des deux seuls admins pourraient chacune voir l'autre encore admin et laisser l'espace sans admin (les transactions sont réservées aux migrations). Impossible sur SQLite (une seule connexion). À fermer en C4 avec un verrou.
+- **Vérifié** : 10 tests de plus (220 au total) sur SQLite et PostgreSQL embarqué, dont la migration d'une base en version 4 avec données ; 5 mutations (garde du dernier admin, garde de l'espace personnel, email en minuscules, doublon de membre, un seul espace personnel) toutes détectées. Non testé sur un vrai serveur PostgreSQL via le pilote `pg`.
+
 ## Lot B : GitHub (jalon J2)
 
 Objectif : traiter un ticket GitHub et reviewer une PR, comme aujourd'hui pour GitLab.
@@ -209,5 +217,6 @@ Objectif : tenir en production : isolation renforcée, supervision, sauvegardes 
 1. **A3** dès qu'une clé API de test est disponible.
 2. **Lot B** (GitHub) : fait (2026-11-10). Il reste à le valider sur un vrai dépôt : jeton à portée fine dans le `.env`, un dépôt de test avec quelques tickets.
 3. **A6** : coûts par utilisateur et budget en mode API (dépend d'A3).
+4. **C3** (secrets chiffrés, jetons saisis dans l'interface) puis **C4** (données rattachées à un espace, tests d'étanchéité). C1b est fait (2026-11-10).
 
 A1, A2, A4 et A5 sont faits (2026-11-09).

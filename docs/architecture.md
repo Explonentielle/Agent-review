@@ -95,7 +95,7 @@ Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le do
 | `src/index.ts` | Point d'entrée : config, BDD, deux files (review, dev), poller, serveur |
 | `src/config.ts` | Lecture du `.env` (secrets et machine uniquement) |
 | `src/settings/` | Schéma, valeurs par défaut et stockage des réglages et projets |
-| `src/db/` | Accès à la base indépendant du moteur : interface `Db` asynchrone, adaptateurs SQLite (`node:sqlite`, local) et PostgreSQL (`pg`, serveur), migrations communes ; dépôts `reviews`, `devTasks` et `costs` |
+| `src/db/` | Accès à la base indépendant du moteur : interface `Db` asynchrone, adaptateurs SQLite (`node:sqlite`, local) et PostgreSQL (`pg`, serveur), migrations communes ; dépôts `reviews`, `devTasks`, `costs` et `accounts` (utilisateurs, espaces, appartenances : un espace garde un admin, un espace personnel n'a qu'un membre) |
 | `src/connectors/` | Interface `ForgeConnector` et vocabulaire neutre (ticket, demande de fusion, commentaire...). `gitlab.ts` et `github.ts` : un connecteur par forge, les seuls à connaître l'API et les types de leur forge. `registry.ts` : registre des forges configurées (connecteur, copies locales de dépôts, identité de l'utilisateur), retrouvées par la colonne « source ». Les pipelines, le poller, le serveur et la CLI n'utilisent que l'interface |
 | `src/gitlab/client.ts` | Client API GitLab v4 (fetch natif, pagination), utilisé par le connecteur GitLab uniquement |
 | `src/github/` | Client REST GitHub (fetch natif, pagination par `Link` limitée au même serveur) et types de ses réponses, utilisés par le connecteur GitHub uniquement |

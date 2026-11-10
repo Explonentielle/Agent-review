@@ -113,6 +113,36 @@ export function migrationsFor(s: Sql): string[] {
   DROP TABLE projects;
   ALTER TABLE projects_by_source RENAME TO projects;
   `,
+    // Comptes : utilisateurs, espaces et appartenances (roadmap-plateforme, C1b). Les données existantes ne sont pas encore
+    // rattachées à un espace (lot C4) ; l'outil local reçoit un utilisateur et un espace personnel dont il est l'admin.
+    `
+  CREATE TABLE users (
+    id         ${s.pk},
+    name       TEXT NOT NULL,
+    email      TEXT UNIQUE,
+    created_at TEXT NOT NULL ${s.nowDefault}
+  );
+
+  CREATE TABLE workspaces (
+    id         ${s.pk},
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('personal', 'team')),
+    created_at TEXT NOT NULL ${s.nowDefault}
+  );
+
+  CREATE TABLE memberships (
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    role         TEXT    NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
+    created_at   TEXT    NOT NULL ${s.nowDefault},
+    PRIMARY KEY (workspace_id, user_id)
+  );
+  CREATE INDEX idx_memberships_user ON memberships(user_id);
+
+  INSERT INTO users (name) VALUES ('Utilisateur local');
+  INSERT INTO workspaces (name, kind) VALUES ('Espace local', 'personal');
+  INSERT INTO memberships (workspace_id, user_id, role) SELECT w.id, u.id, 'admin' FROM workspaces w, users u;
+  `,
   ];
 }
 
