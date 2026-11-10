@@ -184,6 +184,22 @@ export function migrationsFor(s: Sql): string[] {
   );
   CREATE INDEX idx_sessions_user ON sessions(user_id);
   `,
+    // Journal d'audit des écritures sur les forges (roadmap-plateforme, C6) : qui, quand, quoi, sur quelle cible, avec quel résultat
+    `
+  CREATE TABLE audit_log (
+    id           ${s.pk},
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    user_id      INTEGER REFERENCES users(id),
+    source       TEXT    NOT NULL,
+    action       TEXT    NOT NULL,
+    target       TEXT    NOT NULL,
+    detail       TEXT,
+    outcome      TEXT    NOT NULL CHECK (outcome IN ('ok', 'error')),
+    error        TEXT,
+    created_at   TEXT    NOT NULL ${s.nowDefault}
+  );
+  CREATE INDEX idx_audit_workspace ON audit_log(workspace_id, id);
+  `,
   ];
 }
 

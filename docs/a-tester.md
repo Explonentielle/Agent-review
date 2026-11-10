@@ -86,7 +86,14 @@ Suivre `docs/deploiement.md`. À noter ce qui se passe réellement :
 - [ ] `bash scripts/backup.sh` produit un fichier non vide ; `bash scripts/restore.sh <fichier> --yes` le recharge sur une pile d'essai.
 - [ ] `free -h` avant et après : combien de mémoire reste-t-il avec rag-saas et la pile en marche ?
 
-## 9. Pas testé du tout
+## 9. Journal des actions (C6)
+
+- [ ] Paramètres > Journal des actions : la section s'affiche (vide au départ : « Aucune écriture sur une forge pour l'instant »).
+- [ ] Après une vraie action de l'agent dev (branche poussée, MR créée, label posé) ou une publication de review (commentaire, approbation) : les lignes apparaissent avec la forge, la cible (`projet/numéro`) et « ok » en vert.
+- [ ] Provoquer un échec (par exemple retirer un droit du jeton puis publier) : la ligne est en rouge « échec », le message d'erreur s'affiche au survol, et ne contient aucun jeton.
+- [ ] Le texte des commentaires n'apparaît nulle part dans le journal (seulement leur longueur dans le détail de l'API).
+
+## 10. Pas testé du tout
 
 - Un vrai serveur PostgreSQL (pilote `pg`) : seuls SQLite et PostgreSQL embarqué (PGlite) sont testés. Lancer avec `TEST_DATABASE_URL` pour la suite complète.
 - Le dashboard dans plusieurs navigateurs.

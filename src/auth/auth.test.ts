@@ -221,7 +221,7 @@ describe("connexion sur le serveur", () => {
     calls = [];
     const auth = createAuthRuntime(AUTH, h.db, h.accounts, fakeForge(() => profile, calls));
     app = buildServer({
-      config: h.config, forges: h.forges, costs: h.costs, reviews: h.reviews, settings: h.settings, tasks: h.tasks, vault: h.vault, accounts: h.accounts, local: h.local,
+      config: h.config, forges: h.forges, costs: h.costs, reviews: h.reviews, settings: h.settings, tasks: h.tasks, vault: h.vault, audit: h.audit, accounts: h.accounts, local: h.local,
       auth, enqueueReview: () => undefined, enqueueDev: () => undefined, queueSize: () => 0,
     });
     await app.ready();

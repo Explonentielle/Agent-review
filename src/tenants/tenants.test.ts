@@ -261,8 +261,9 @@ describe("serveur pour plusieurs personnes", () => {
       hooks: {
         createForges: async (config, options) => {
           const forges: Forge[] = [];
-          if (config.gitlab) forges.push({ connector: new FakeConnector({ cloneUrl: "file:///x" }, "gitlab"), workspace: {} as RepoWorkspace, username: config.gitlab.username });
-          if (config.github) forges.push({ connector: new FakeConnector({ cloneUrl: "file:///x" }, "github"), workspace: {} as RepoWorkspace, username: "bob-github" });
+          const workspace = { pushBranch: async () => undefined } as unknown as RepoWorkspace;
+          if (config.gitlab) forges.push({ connector: new FakeConnector({ cloneUrl: "file:///x" }, "gitlab"), workspace, username: config.gitlab.username });
+          if (config.github) forges.push({ connector: new FakeConnector({ cloneUrl: "file:///x" }, "github"), workspace, username: "bob-github" });
           return new ForgeRegistry(forges, options);
         },
         startPoller: () => () => undefined,
@@ -331,6 +332,30 @@ describe("serveur pour plusieurs personnes", () => {
     // Le propriétaire ne peut pas lui retirer son jeton, ni l'inverse : chaque coffre est personnel
     expect((await post(owner, "/api/secrets/github.token/delete")).json()).toEqual({ deleted: false, restartRequired: false });
     expect((await get(other, "/api/secrets")).json<{ secrets: { name: string; source: string | null }[] }>().secrets.find((s) => s.name === "github.token")?.source).toBe("vault");
+  });
+
+  it("le journal d'audit de chaque personne ne contient que ses propres écritures sur les forges", async () => {
+    const ownerTenant = await manager.get(h.local);
+    await ownerTenant.deps.forges.get("gitlab").connector.addTicketLabels(1, 5, ["Statut::En cours"]);
+    await ownerTenant.deps.forges.get("gitlab").workspace.pushBranch("/travail", "feature/5-x");
+
+    await post(other, "/api/secrets/github.token", { value: "github_pat_DE_BOB_1234" });
+    const bobTenant = await manager.get(other.ctx);
+    await bobTenant.deps.forges.get("github").connector.commentOnChangeRequest(2, 3, "bonjour", "note");
+
+    const mine = (await get(owner, "/api/audit")).json<{ action: string; source: string; target: string; outcome: string; detail: unknown }[]>();
+    expect(mine.map((e) => [e.source, e.action, e.target, e.outcome])).toEqual([
+      ["gitlab", "push_branch", "feature/5-x", "ok"],
+      ["gitlab", "ticket_labels", "1/5", "ok"],
+    ]);
+    expect(mine[1]!.detail).toEqual({ labels: ["Statut::En cours"] });
+    const theirs = (await get(other, "/api/audit")).json<{ action: string; source: string; target: string }[]>();
+    expect(theirs.map((e) => [e.source, e.action, e.target])).toEqual([["github", "change_request_comment", "2/3"]]);
+
+    // L'API ne montre ni l'espace ni l'identifiant interne de la personne
+    expect(Object.keys(mine[0]!).sort()).toEqual(["action", "created_at", "detail", "error", "id", "outcome", "source", "target"]);
+    // Et la base, elle, sait qui a agi
+    expect(await h.db.all("SELECT user_id FROM audit_log ORDER BY id")).toEqual([{ user_id: h.local.userId }, { user_id: h.local.userId }, { user_id: other.ctx.userId }]);
   });
 
   it("une session sans cookie valide n'obtient rien, même avec l'identifiant d'une autre personne", async () => {

@@ -8,6 +8,7 @@ import { createSecretStore } from "../secrets/store.js";
 import { createSettingsStore } from "../settings/store.js";
 import { PROJECT_ROOT } from "../paths.js";
 import { createAccountRepo } from "./accounts.js";
+import { createAuditRepo } from "./audit.js";
 import { createCostRepo, currentMonth } from "./costs.js";
 import type { Db } from "./db.js";
 import { createDevTaskRepo } from "./devTasks.js";
@@ -43,7 +44,7 @@ describe.each(backends)("étanchéité entre espaces : $name", ({ open }) => {
     await db.close();
   });
   beforeEach(async () => {
-    for (const table of ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "memberships", "workspaces", "users"]) await db.run(`DELETE FROM ${table}`);
+    for (const table of ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "memberships", "workspaces", "users"]) await db.run(`DELETE FROM ${table}`);
     const accounts = createAccountRepo(db);
     const alice = await accounts.createUser({ name: "Alice" });
     const bob = await accounts.createUser({ name: "Bob" });
@@ -162,6 +163,20 @@ describe.each(backends)("étanchéité entre espaces : $name", ({ open }) => {
     expect(await createCostRepo(db, (await createAccountRepo(db).createWorkspace({ name: "Vide", kind: "team", adminUserId: (await createAccountRepo(db).createUser({ name: "Zoé" })) })) ).monthTotal(month)).toBe(0);
   });
 
+  it("journal d'audit : chaque espace ne lit que ses lignes, pagination comprise", async () => {
+    const auditA = createAuditRepo(db, a, null);
+    const auditB = createAuditRepo(db, b, null);
+    await auditA.record({ source: "gitlab", action: "ticket_labels", target: "1/1" });
+    await auditB.record({ source: "gitlab", action: "change_request_approve", target: "2/2", error: "403" });
+    await auditA.record({ source: "github", action: "push_branch", target: "feature/1" });
+
+    expect((await auditA.list()).map((e) => e.action)).toEqual(["push_branch", "ticket_labels"]);
+    expect((await auditB.list()).map((e) => [e.action, e.outcome])).toEqual([["change_request_approve", "error"]]);
+    const newestOfB = (await auditB.list())[0]!.id;
+    expect(await auditA.list(10, newestOfB + 100)).toHaveLength(2); // la pagination ne fait pas sortir de l'espace
+    expect((await auditB.list(10, newestOfB + 100)).map((e) => e.action)).toEqual(["change_request_approve"]);
+  });
+
   it("secrets : un secret d'un espace n'est lisible ni listé depuis l'autre", async () => {
     const store = createSecretStore(db, new Keyring([randomBytes(32)]));
     await store.put({ workspaceId: a, userId: null }, "github.token", "secret-de-l-espace-a-1");
@@ -182,8 +197,8 @@ describe.each(backends)("étanchéité entre espaces : $name", ({ open }) => {
 });
 
 describe("audit : toute requête sur une table d'un espace nomme workspace_id", () => {
-  const SCOPED_TABLES = ["reviews", "dev_tasks", "projects", "settings", "secrets", "actions", "dev_task_events"];
-  const FILES = ["src/db/reviews.ts", "src/db/devTasks.ts", "src/db/costs.ts", "src/settings/store.ts", "src/secrets/store.ts"];
+  const SCOPED_TABLES = ["reviews", "dev_tasks", "projects", "settings", "secrets", "actions", "dev_task_events", "audit_log"];
+  const FILES = ["src/db/reviews.ts", "src/db/devTasks.ts", "src/db/costs.ts", "src/db/audit.ts", "src/settings/store.ts", "src/secrets/store.ts"];
   const SQL_ON_SCOPED = new RegExp(`\\b(FROM|INTO|UPDATE|JOIN)\\s+(${SCOPED_TABLES.join("|")})\\b`, "i");
 
   /** Chaînes entre guillemets ou apostrophes inverses d'un fichier source. */

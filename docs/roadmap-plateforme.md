@@ -45,7 +45,7 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | C3 | Serveur | Secrets chiffrés (AES-256-GCM, clé maître hors base) | M | C1b | ✅ 2026-11-10 pour le jeton GitHub et la clé API Anthropic ; jetons GitLab et Planio non gérés |
 | C4 | Serveur | Isolation des données par espace, tests d'étanchéité | L | C1b | ✅ 2026-11-10 pour la couche de données ; l'exécution multi-espaces vient avec C2 et C8 |
 | C5 | Serveur | Réglages par portée : équipe, utilisateur, projet | M | C4 | ⬜ |
-| C6 | Serveur | Journal d'audit des écritures sur les forges | M | C4 | ⬜ |
+| C6 | Serveur | Journal d'audit des écritures sur les forges | M | C4 | ✅ 2026-11-11 |
 | C7 | Serveur | Quotas et budgets par utilisateur | M | A6, C4 | ⬜ |
 | C8 | Serveur | File de tâches par utilisateur, limites de concurrence | M | C4 | ✅ 2026-11-10 (files par personne, limite commune) ; priorité équitable et éviction des inactifs non faites |
 | C9 | Serveur | Déploiement : image de la plateforme, TLS, sauvegardes | L | C1a | 🟡 2026-11-10 préparé (image, compose, sauvegardes), jamais construit ni lancé ; TLS non fait |
@@ -208,6 +208,14 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - **Vérifié** : syntaxe du fichier compose (`docker compose config` sur un `.env` factice), syntaxe des scripts, compilation de production et chargement des 68 modules sans erreur. **Non vérifié** : `docker build`, le démarrage, la coexistence avec rag-saas, la mémoire réelle, une sauvegarde et une restauration réelles.
 - **Pas fait** : TLS (inutile avec le tunnel), import de la base SQLite locale vers PostgreSQL, rotation des journaux, supervision (G2), restauration testée automatiquement (G3).
 - **Environnement des agents filtré** (`src/claude/process.ts`) : l'agent ne reçoit plus que PATH, HOME, la langue, les proxys et certificats, `XDG_*`, `CLAUDE_*` et `ANTHROPIC_*` (hors noms qui ressemblent à des secrets). Les jetons de forge, la clé maître, l'adresse de la base et les secrets OAuth du `.env` n'y sont plus. Ce n'est **pas** une isolation : un processus du même utilisateur lit l'environnement de son parent (`/proc`) ; seuls des conteneurs par personne (lot D) l'empêchent. 4 tests, 4 mutations détectées. Risque de régression : une commande de projet qui dépendrait d'une variable d'environnement non listée ne la verrait plus (à constater lors d'une vraie exécution, voir `docs/a-tester.md`).
+
+**C6 (2026-11-11)** : journal d'audit des écritures sur les forges, migration 9.
+- **Ce qui est tracé** : labels posés sur un ticket, demande de fusion créée, commentaire posté, approbation, branche poussée. Pour chacune : qui (personne), quand, forge, cible (`projet/numéro` ou nom de branche), précisions utiles, résultat (réussie ou en échec avec son message d'erreur, secrets masqués). Les lectures ne sont pas tracées. Le texte d'un commentaire n'est jamais gardé, seulement sa longueur.
+- **Comment** (`src/connectors/audited.ts`) : chaque connecteur et chaque copie de dépôts est enveloppé au moment où l'exécution d'une personne se construit (`tenants/manager.ts`). Les pipelines n'ont rien à faire : toute écriture passe par là. Un journal en panne ne bloque jamais l'action. Une nouvelle méthode d'écriture d'un connecteur s'ajoute à `CONNECTOR_WRITES`.
+- **Où le voir** : Paramètres > Journal des actions (30 dernières lignes), ou `GET /api/audit?limit=&before=`. Chaque personne ne voit que son journal, dans son espace.
+- **Bug trouvé par ce test** : `deps.audit` n'était pas dans la liste des propriétés propres à une personne, donc la seconde personne lisait le journal du propriétaire. La règle est maintenant inversée (`SHARED_KEYS` dans `server/app.ts`) : une propriété ajoutée est propre à la personne par défaut.
+- **Pas encore fait** : purge automatique (E10), vue d'ensemble pour un admin d'équipe, journal des actions de l'agent sur le disque ou des changements de réglages.
+- **Vérifié** : 9 tests (écritures, lectures, échecs avec secret masqué, journal en panne, pushs, pagination, étanchéité entre espaces, bout en bout avec deux personnes) et 5 mutations détectées. Non vérifié : sur une vraie forge.
 
 ## Lot B : GitHub (jalon J2)
 

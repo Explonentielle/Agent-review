@@ -37,8 +37,11 @@ export interface ServerDeps extends TenantDeps {
   tenants?: (session: SessionContext) => Promise<TenantDeps>;
 }
 
-/** Propriétés de `ServerDeps` qui dépendent de la personne servie (le reste est commun à toutes). */
-const TENANT_KEYS = new Set<string | symbol>(["config", "forges", "costs", "reviews", "settings", "tasks", "vault", "enqueueReview", "enqueueDev", "queueSize", "reload", "runner", "forceShadow"]);
+/**
+ * Propriétés de `ServerDeps` communes à toutes les personnes. Toutes les autres sont celles de la personne servie : une propriété ajoutée
+ * plus tard est donc propre à la personne par défaut, jamais partagée par oubli.
+ */
+const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants"]);
 
 type IdParams = { Params: { id: string } };
 
@@ -84,7 +87,7 @@ export function buildServer(base: ServerDeps) {
   const deps = new Proxy(base, {
     get(target, prop) {
       const scoped = requestDeps.getStore();
-      return Reflect.get(scoped && TENANT_KEYS.has(prop) ? scoped : target, prop);
+      return Reflect.get(scoped && !SHARED_KEYS.has(prop) ? scoped : target, prop);
     },
   });
 
@@ -157,6 +160,13 @@ export function buildServer(base: ServerDeps) {
   });
 
   /** Consommation du mois : sur l'abonnement un équivalent API, en mode clé API le montant facturé. */
+  /** Journal des écritures de la personne sur les forges, les plus récentes d'abord. */
+  app.get<{ Querystring: { limit?: string; before?: string } }>("/api/audit", async (req) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const before = Number(req.query.before) || undefined;
+    return (await deps.audit.list(limit, before)).map(({ workspace_id: _w, user_id: _u, ...entry }) => ({ ...entry, detail: entry.detail ? JSON.parse(entry.detail) : null }));
+  });
+
   app.get("/api/costs", async () => {
     const settings = await deps.settings.get();
     const month = currentMonth();

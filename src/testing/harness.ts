@@ -7,6 +7,7 @@ import { loadConfig, type Config } from "../config.js";
 import { ForgeRegistry } from "../connectors/registry.js";
 import type { Ticket } from "../connectors/types.js";
 import { createAccountRepo, type AccountContext, type AccountRepo } from "../db/accounts.js";
+import { createAuditRepo, type AuditRepo } from "../db/audit.js";
 import { createCostRepo, type CostRepo } from "../db/costs.js";
 import { createDevTaskRepo, type DevTaskRepo } from "../db/devTasks.js";
 import type { Db } from "../db/db.js";
@@ -42,6 +43,8 @@ export interface Harness {
   forges: ForgeRegistry;
   /** Coffre à secrets de l'utilisateur local, clé maître aléatoire ; le contrôle d'un jeton GitHub accepte tout (remplaçable). */
   vault: Vault;
+  /** Journal d'audit de l'utilisateur local. */
+  audit: AuditRepo;
   /** Dépôt des comptes de la base de test. */
   accounts: AccountRepo;
   /** Utilisateur, espace et rôle locaux : l'espace auquel sont liés les dépôts du harnais. */
@@ -119,6 +122,7 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
     connector,
     forges: new ForgeRegistry([{ connector, workspace, username: "alex" }]),
     vault,
+    audit: createAuditRepo(db, local.workspaceId, local.userId),
     accounts,
     local,
     remoteBranchSha,

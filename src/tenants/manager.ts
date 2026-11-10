@@ -1,7 +1,9 @@
 import path from "node:path";
 import type { Config } from "../config.js";
+import { auditConnector, auditWorkspace } from "../connectors/audited.js";
 import { createForges } from "../connectors/factory.js";
-import type { ForgeRegistry } from "../connectors/registry.js";
+import { ForgeRegistry } from "../connectors/registry.js";
+import { createAuditRepo, type AuditRepo } from "../db/audit.js";
 import { createCostRepo } from "../db/costs.js";
 import type { Db } from "../db/db.js";
 import { createDevTaskRepo, type DevTaskRepo } from "../db/devTasks.js";
@@ -19,6 +21,8 @@ import type { ConcurrencyLimiter } from "./limiter.js";
 /** Tout ce que les routes du serveur utilisent pour servir UNE personne dans UN espace. */
 export interface TenantDeps extends PipelineDeps {
   tasks: DevTaskRepo;
+  /** Journal des écritures de cette personne sur les forges. */
+  audit: AuditRepo;
   vault: Vault;
   enqueueReview: (reviewId: number) => void;
   enqueueDev: (taskId: number) => void;
@@ -157,6 +161,13 @@ export class TenantManager {
       forges = await (hooks.createForges ?? createForges)({ ...config, gitlab: null, github: null }, { allowEmpty: true });
     }
 
+    // Toute écriture sur une forge (MR, commentaire, approbation, label, branche poussée) laisse une trace au nom de cette personne
+    const audit = createAuditRepo(db, ctx.workspaceId, ctx.userId);
+    forges = new ForgeRegistry(
+      forges.all().map((forge) => ({ ...forge, connector: auditConnector(forge.connector, audit), workspace: auditWorkspace(forge.workspace, audit, forge.connector.kind) })),
+      { allowEmpty: true },
+    );
+
     const reviews = createReviewRepo(db, ctx.workspaceId);
     const tasks = createDevTaskRepo(db, ctx.workspaceId);
     const settings = createSettingsStore(db, ctx.workspaceId);
@@ -198,6 +209,7 @@ export class TenantManager {
       deps: {
         ...reviewDeps,
         tasks,
+        audit,
         vault,
         enqueueReview: (id) => reviewQueue.push(id),
         enqueueDev: (id) => devQueue.push(id),

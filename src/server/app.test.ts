@@ -23,6 +23,7 @@ describe("API du dashboard sur le connecteur", () => {
       settings: h.settings,
       tasks: h.tasks,
       vault: h.vault,
+      audit: h.audit,
       accounts: h.accounts,
       local: h.local,
       enqueueReview: () => undefined,
