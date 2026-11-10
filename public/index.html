@@ -286,6 +286,9 @@
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; word-break: break-all; }
   .note { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+  .secret-list { display: grid; gap: 14px; margin-top: 4px; }
+  .secret-form { display: flex; gap: 8px; flex-wrap: wrap; }
+  .secret-form input { flex: 1; min-width: 220px; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; }
   .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: calc(100vw - 40px); }
   .toast { padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); box-shadow: var(--shadow-lg); max-width: 440px; animation: slide .18s ease-out; }
   .toast.error { background: var(--red); color: #fff; }
@@ -976,8 +979,9 @@ async function loadSettings() {
   state.prefillProject = null;
   state.prefillSource = null;
   try {
-    const [s, projects, costs] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), refreshHeader()]);
+    const [s, projects, costs, secrets] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), refreshHeader()]);
     settingsData = s;
+    state.secrets = secrets ? secrets.secrets : null;
     state.settingsCache = s.settings;
     state.costs = costs;
     projectsData = projects;
@@ -998,6 +1002,46 @@ function agentFields(prefix, a, title, hint) {
   </div><small class="note">${hint}</small></div>`;
 }
 
+/** Pastille de la clé API Anthropic : définie (.env ou saisie) ou absente. */
+function apiKeyPill() {
+  return state.stats?.apiKeyConfigured ? pill("green", "clé définie") : pill("orange", "clé absente");
+}
+
+/** Jetons enregistrables dans l'outil (chiffrés en base) : origine, saisie et suppression. Le serveur ne renvoie jamais leur valeur. */
+function secretsBlock() {
+  const list = state.secrets;
+  if (!list) return `<p class="note">L'enregistrement des jetons est indisponible.</p>`;
+  const origin = (x) => x.source === "env" ? pill("gray", "défini dans le .env (prioritaire)")
+    : x.source === "vault" ? pill("green", `enregistré, chiffré${x.updatedAt ? ` le ${esc(x.updatedAt.slice(0, 10))}` : ""}`)
+    : pill("orange", "non défini");
+  return `<div class="sub-title">Jetons enregistrés dans l'outil</div>
+    <div class="secret-list">${list.map((x) => `
+      <div class="field"><span>${esc(x.label)} ${origin(x)}</span>
+        ${x.source === "env" ? "" : `<div class="secret-form"><input type="password" autocomplete="new-password" placeholder="${x.source === "vault" ? "Nouvelle valeur (remplace l'actuelle)" : "Coller la valeur"}" data-secret-input="${esc(x.name)}"><button type="button" class="btn sm primary" data-act="secret-save" data-name="${esc(x.name)}">Enregistrer</button>${x.source === "vault" ? `<button type="button" class="btn sm ghost" data-act="secret-delete" data-name="${esc(x.name)}">Supprimer</button>` : ""}</div>`}
+        <small>${x.live ? "Appliqué tout de suite." : "Pris en compte au prochain démarrage de l'outil."}</small></div>`).join("")}</div>`;
+}
+
+/** Enregistre ou supprime un jeton de l'outil, puis met à jour son bloc sans toucher aux autres champs du formulaire. */
+async function secretAction(act, name) {
+  const input = document.querySelector(`[data-secret-input="${name}"]`);
+  try {
+    if (act === "secret-save") {
+      const value = input?.value.trim();
+      if (!value) return toast("Colle d'abord la valeur.", true);
+      const res = await api(`/api/secrets/${encodeURIComponent(name)}`, { value });
+      toast(res.restartRequired ? "Enregistré, chiffré. Redémarre l'outil pour le prendre en compte." : "Enregistré, chiffré et appliqué.");
+    } else {
+      if (!(await ask({ title: "Supprimer ce jeton ?", html: "<p>Il est effacé de la base de l'outil. Rien n'est révoqué chez GitLab, GitHub ou Anthropic : fais-le là-bas si le jeton a fuité.</p>", okLabel: "Supprimer" }))) return;
+      const res = await api(`/api/secrets/${encodeURIComponent(name)}/delete`, {});
+      toast(res.restartRequired ? "Supprimé. Redémarre l'outil pour que la forge cesse de l'utiliser." : "Supprimé.");
+    }
+    await refreshHeader();
+    state.secrets = (await api("/api/secrets")).secrets;
+    document.getElementById("secrets-block").innerHTML = secretsBlock();
+    document.getElementById("api-key-state").innerHTML = apiKeyPill();
+  } catch (err) { toast(err.message, true); }
+}
+
 function renderSettings() {
   const s = settingsData.settings;
   const st = state.stats || {};
@@ -1014,10 +1058,11 @@ function renderSettings() {
     <form id="settings-form" autocomplete="off">
       <section class="card-section">
         <h2>Connexion</h2>
-        <p class="desc">Lu dans le fichier <code>.env</code> (jetons, adresse GitLab) : à modifier là-bas, puis redémarrer l'outil. GitLab et GitHub peuvent être configurés ensemble.</p>
+        <p class="desc">Les comptes GitLab et GitHub se lisent dans le fichier <code>.env</code> : à modifier là-bas, puis redémarrer l'outil. GitLab et GitHub peuvent être configurés ensemble. Le jeton GitHub et la clé API Anthropic peuvent aussi s'enregistrer ci-dessous, chiffrés en base.</p>
         <dl class="kv">${(st.forges || []).map((f) => `<dt>${forgeName(f.kind)}</dt><dd>@${esc(f.username)}${f.kind === "gitlab" && st.gitlabUrl ? ` · ${esc(st.gitlabUrl)}` : ""}</dd>`).join("")}
           ${(st.forges || []).some((f) => f.kind === "github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : ajoute <code>GITHUB_TOKEN</code> dans le .env.</dd>`}
           ${(st.forges || []).some((f) => f.kind === "gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : ajoute <code>GITLAB_URL</code>, <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env.</dd>`}</dl>
+        <div id="secrets-block">${secretsBlock()}</div>
       </section>
 
       <section class="card-section">
@@ -1033,7 +1078,7 @@ function renderSettings() {
         <div class="sub-title">Connexion à Claude</div>
         <div class="radios">
           <label class="radio"><input type="radio" name="agentAuth" value="subscription" ${s.agentAuth === "subscription" ? "checked" : ""}><span><b>Abonnement Claude</b><small>La CLI utilise ton abonnement (Pro, Max...), sans facturation à l'usage. Une clé API présente dans ton shell est ignorée.</small></span></label>
-          <label class="radio"><input type="radio" name="agentAuth" value="api" ${s.agentAuth === "api" ? "checked" : ""}><span><b>Clé API Anthropic</b><small>Facturation à l'usage, avec la clé <code>ANTHROPIC_API_KEY</code> de ton fichier .env. ${st.apiKeyConfigured ? pill("green", "clé définie dans .env") : pill("orange", "clé absente du .env")}</small></span></label>
+          <label class="radio"><input type="radio" name="agentAuth" value="api" ${s.agentAuth === "api" ? "checked" : ""}><span><b>Clé API Anthropic</b><small>Facturation à l'usage, avec la clé API Anthropic (fichier .env ou section Connexion ci-dessus). <span id="api-key-state">${apiKeyPill()}</span></small></span></label>
         </div>
         <div class="grid2" style="margin-top:14px">
           <label class="field"><span>Budget mensuel en mode clé API ($)</span><input type="number" min="0" step="1" name="budget.monthlyUsd" value="${s.budget.monthlyUsd}"><small>0 = aucune limite. Une fois le budget atteint, les nouvelles reviews et tâches de dev sont refusées jusqu'au mois suivant.</small></label>
@@ -1346,6 +1391,7 @@ document.addEventListener("click", async (e) => {
     area.value = act === "prompt-load-default" ? settingsData.defaultSystemPrompts[t.dataset.kind] : "";
     return toast(act === "prompt-load-default" ? "Prompt d'origine affiché : modifie-le puis enregistre." : "Champ vidé : le prompt d'origine sera utilisé après enregistrement.");
   }
+  if (act === "secret-save" || act === "secret-delete") return secretAction(act, t.dataset.name);
   if (act === "settings-reset") {
     if (!(await ask({ title: "Revenir aux valeurs par défaut ?", html: "<p>Le formulaire est réinitialisé. Rien n'est enregistré tant que tu ne cliques pas sur Enregistrer. Les projets ne sont pas touchés.</p>", okLabel: "Réinitialiser" }))) return;
     settingsData.settings = settingsData.defaults;
@@ -1376,6 +1422,10 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.matches?.("[data-secret-input]")) {
+    e.preventDefault();
+    return document.querySelector(`[data-act="secret-save"][data-name="${e.target.dataset.secretInput}"]`)?.click();
+  }
   const card = e.target.closest?.(".card[data-task], .card[data-review]");
   if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); card.click(); }
 });
