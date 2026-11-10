@@ -330,7 +330,7 @@
 <aside class="sidebar">
   <div class="brand">
     <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M9 16.5l4.5 4.5L23 11.5" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <div>Review Agent<small>GitLab + Claude Code</small></div>
+    <div>Review Agent<small id="brand-sub">GitLab + Claude Code</small></div>
   </div>
   <button class="collapse-btn" data-act="toggle-sidebar" title="Réduire le menu">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg>
@@ -364,7 +364,7 @@
   <div class="crumb" id="crumb"></div>
   <div class="top-right">
     <span class="chip" id="mode" data-tab="settings"><span class="dot"></span><span>…</span></span>
-    <span class="chip userchip" title="Compte GitLab utilisé (fichier .env)"><span class="avatar" id="avatar">?</span><b id="user">…</b><small id="host"></small></span>
+    <span class="chip userchip" title="Comptes utilisés (fichier .env)"><span class="avatar" id="avatar">?</span><b id="user">…</b><small id="host"></small></span>
   </div>
 </div>
 <div class="view" id="view-tickets" hidden></div>
@@ -440,11 +440,19 @@ const COLUMNS = [
 const SEV = { blocking: { label: "Bloquant", pill: "red" }, important: { label: "Important", pill: "orange" }, suggestion: { label: "Suggestion", pill: "yellow" } };
 const VERDICT = { approve: { label: "Approve", pill: "green" }, approve_with_reservations: { label: "Approve avec réserves", pill: "orange" }, request_changes: { label: "Request changes", pill: "red" } };
 const MODE = {
-  shadow: ["Mode ombre", "Rien n'est posté sur GitLab sans ton clic."],
+  shadow: ["Mode ombre", "Rien n'est posté sur la forge sans ton clic."],
   comment: ["Mode commentaire", "Les reviews « mineur / OK » sont commentées automatiquement, jamais approuvées."],
   auto: ["Mode auto", "Les reviews « mineur / OK » sont commentées ET approuvées automatiquement."],
 };
 const EFFORT_LABEL = { low: "Faible", medium: "Moyen", high: "Élevé (plafond)" };
+const FORGE_NAME = { gitlab: "GitLab", github: "GitHub" };
+const forgeName = (source) => FORGE_NAME[source] || source || "GitLab";
+/** Numéro d'une demande de fusion : !12 chez GitLab, #12 chez GitHub. */
+const mrPrefix = (source) => (source === "github" ? "#" : "!");
+/** Clé d'un projet configuré : le même numéro peut exister chez deux forges. */
+const projectKey = (p) => `${p.source}:${p.projectId}`;
+/** Plusieurs forges configurées : la forge est indiquée sur les cartes, avec une seule elle serait du bruit. */
+const forgePill = (source) => ((state.stats?.forges?.length || 0) > 1 ? `<span class="pill gray">${esc(forgeName(source))}</span>` : "");
 const ICON = {
   warn: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
   ok: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/></svg>',
@@ -577,7 +585,13 @@ async function refreshHeader() {
     mode.lastElementChild.textContent = label;
     document.getElementById("user").textContent = `@${stats.username}`;
     document.getElementById("avatar").textContent = (stats.username || "?").slice(0, 1).toUpperCase();
-    try { document.getElementById("host").textContent = new URL(stats.gitlabUrl).host; } catch { /* URL absente */ }
+    const forges = stats.forges || [];
+    const names = forges.map((f) => forgeName(f.kind));
+    let host = "";
+    try { host = new URL(stats.gitlabUrl).host; } catch { /* pas de GitLab */ }
+    document.getElementById("host").textContent = host || names.join(" + ");
+    if (names.length) document.getElementById("brand-sub").textContent = `${names.join(" + ")} + Claude Code`;
+    document.querySelector(".userchip").title = forges.map((f) => `${forgeName(f.kind)} : @${f.username}`).join("\n") || "Compte utilisé (fichier .env)";
 
     const needs = stats.counts.needs_human || 0;
     const br = document.getElementById("badge-reviews");
@@ -593,13 +607,14 @@ async function refreshHeader() {
    ===================================================================== */
 async function loadTickets(force) {
   const root = document.getElementById("view-tickets");
+  if (!state.stats) await refreshHeader(); // pour savoir si plusieurs forges sont configurées
   if (!state.issues || force) {
-    if (!state.issues) root.innerHTML = `<div class="page"><div class="page-inner"><div class="empty">Chargement des tickets depuis GitLab…</div></div></div>`;
+    if (!state.issues) root.innerHTML = `<div class="page"><div class="page-inner"><div class="empty">Chargement des tickets…</div></div></div>`;
     try {
       state.issues = await api("/api/issues");
       state.issuesAt = new Date();
     } catch (err) {
-      root.innerHTML = `<div class="page"><div class="page-inner"><div class="callout err">${ICON.err}<h3>Impossible de lire tes tickets GitLab</h3><pre>${esc(err.message)}</pre><p>Vérifie le token GitLab dans le fichier .env.</p></div></div></div>`;
+      root.innerHTML = `<div class="page"><div class="page-inner"><div class="callout err">${ICON.err}<h3>Impossible de lire tes tickets</h3><pre>${esc(err.message)}</pre><p>Vérifie les jetons de tes forges dans le fichier .env.</p></div></div></div>`;
       return;
     }
   }
@@ -622,10 +637,10 @@ function renderTickets() {
     const action = i.devReady
       ? (active ? "" : hasMr
         ? `<a class="btn sm" href="#dev/${i.task.id}" title="Ajouter un commit sur la MR existante, avec tes consignes">Reprendre la MR</a>`
-        : `<button class="btn primary sm" data-launch="${i.projectId}:${i.iid}">${i.task ? "Relancer l'agent" : "Traiter avec l'agent"}</button>`)
-      : `<button class="muted-link" data-configure="${esc(i.projectPath)}">Configurer le projet</button>`;
+        : `<button class="btn primary sm" data-launch="${i.source}:${i.projectId}:${i.iid}">${i.task ? "Relancer l'agent" : "Traiter avec l'agent"}</button>`)
+      : `<button class="muted-link" data-configure="${esc(i.projectPath)}" data-configure-source="${esc(i.source)}">Configurer le projet</button>`;
     return `<div class="ticket">
-      <div class="card-top"><span class="proj">${esc(i.projectPath)}</span><span>·</span><span>#${i.iid}</span><span class="time">${ago(i.updatedAt)}</span></div>
+      <div class="card-top">${forgePill(i.source)}<span class="proj">${esc(i.projectPath)}</span><span>·</span><span>#${i.iid}</span><span class="time">${ago(i.updatedAt)}</span></div>
       <div class="card-title"><a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a></div>
       ${i.labels.length ? `<div class="labels">${i.labels.slice(0, 4).map((l) => `<span class="pill label">${esc(l)}</span>`).join("")}${i.labels.length > 4 ? `<span class="pill label">+${i.labels.length - 4}</span>` : ""}</div>` : ""}
       <div class="ticket-foot">${taskBadge || `<span class="note" style="margin:0">${i.milestone ? esc(i.milestone) : ""}</span>`}${action}</div>
@@ -651,8 +666,8 @@ function renderTickets() {
   </div></div>`;
 }
 
-async function launchAgent(projectId, iid) {
-  const i = state.issues.find((x) => x.projectId === projectId && x.iid === iid);
+async function launchAgent(source, projectId, iid) {
+  const i = state.issues.find((x) => x.source === source && x.projectId === projectId && x.iid === iid);
   if (!i) return;
   const answer = await ask({
     title: `Lancer l'agent sur #${i.iid}`,
@@ -670,7 +685,7 @@ async function launchAgent(projectId, iid) {
   });
   if (!answer) return;
   try {
-    const { id } = await api("/api/tasks", { projectId, issueIid: iid, extraInstructions: answer.value });
+    const { id } = await api("/api/tasks", { source, projectId, issueIid: iid, extraInstructions: answer.value });
     toast("Agent lancé.");
     state.issues = null;
     go(`#dev/${id}`);
@@ -689,7 +704,7 @@ async function refreshTasks() {
   document.getElementById("dev-list").innerHTML = tasks.length
     ? tasks.map((t) => `
       <div class="card ${t.id === state.taskId ? "selected" : ""}" data-task="${t.id}" tabindex="0">
-        <div class="card-top"><span class="proj">${esc(t.project_path)}</span><span>·</span><span>#${t.issue_iid}</span><span class="time">${ago(t.updated_at)}</span></div>
+        <div class="card-top">${forgePill(t.source)}<span class="proj">${esc(t.project_path)}</span><span>·</span><span>#${t.issue_iid}</span><span class="time">${ago(t.updated_at)}</span></div>
         <div class="card-title">${esc(t.issue_title)}</div>
         <div class="card-bottom"><span class="grow mono">${esc(t.branch || "")}</span>
           ${t.mode === "followup" ? `<span class="pill gray" title="Reprise de la tâche #${t.parent_id}">Reprise</span>` : ""}
@@ -711,10 +726,10 @@ function taskCallout(t) {
     case "queued":
       return `<div class="callout info">${ICON.info}<h3>En attente</h3><p>L'agent démarre dès que la tâche précédente est terminée.</p></div>`;
     case "mr_created":
-      return `<div class="callout ok">${ICON.ok}<h3>MR Draft !${t.mr_iid} créée</h3><p>Contrôle-la, puis passe-la en Ready : le ticket passera en Validation technique. Des corrections à faire ? Utilise « Reprendre avec des consignes » plus bas.</p>
+      return `<div class="callout ok">${ICON.ok}<h3>MR Draft ${mrPrefix(t.source)}${t.mr_iid} créée</h3><p>Contrôle-la, puis passe-la en Ready : le ticket passera en Validation technique. Des corrections à faire ? Utilise « Reprendre avec des consignes » plus bas.</p>
         <div class="actions-inline"><a class="btn primary sm" href="${esc(t.mr_url)}" target="_blank" rel="noopener">Ouvrir la MR ${ICON.ext}</a></div></div>`;
     case "mr_updated":
-      return `<div class="callout ok">${ICON.ok}<h3>Nouveau commit poussé sur la MR !${t.mr_iid}</h3><p>Le rapport de la reprise a été ajouté en commentaire sur la MR. Contrôle le nouveau commit avant de passer la MR en Ready.</p>
+      return `<div class="callout ok">${ICON.ok}<h3>Nouveau commit poussé sur la MR ${mrPrefix(t.source)}${t.mr_iid}</h3><p>Le rapport de la reprise a été ajouté en commentaire sur la MR. Contrôle le nouveau commit avant de passer la MR en Ready.</p>
         <div class="actions-inline"><a class="btn primary sm" href="${esc(t.mr_url)}" target="_blank" rel="noopener">Ouvrir la MR ${ICON.ext}</a></div></div>`;
     case "blocked":
       return `<div class="callout warn">${ICON.warn}<h3>L'agent a besoin d'informations</h3><p>Rien n'a été poussé. Complète le ticket (ou donne des consignes) puis relance.</p>
@@ -745,9 +760,9 @@ async function showTask(id) {
     <div class="detail">
       <button class="btn ghost back" data-act="dev-back">← Retour aux tâches</button>
       <div class="crumbs">
-        <span>${esc(t.project_path)}</span><span>·</span><a href="${esc(t.issue_url)}" target="_blank" rel="noopener">Ticket #${t.issue_iid}</a>
+        ${forgePill(t.source)}<span>${esc(t.project_path)}</span><span>·</span><a href="${esc(t.issue_url)}" target="_blank" rel="noopener">Ticket #${t.issue_iid}</a>
         ${pill(TASK_STATUS[t.status].pill, TASK_STATUS[t.status].label)}
-        ${t.mr_url ? `<a class="btn-link" href="${esc(t.mr_url)}" target="_blank" rel="noopener">MR !${t.mr_iid} ${ICON.ext}</a>` : ""}
+        ${t.mr_url ? `<a class="btn-link" href="${esc(t.mr_url)}" target="_blank" rel="noopener">MR ${mrPrefix(t.source)}${t.mr_iid} ${ICON.ext}</a>` : ""}
       </div>
       <h1>${esc(t.issue_title)}</h1>
       <div class="meta">
@@ -773,7 +788,7 @@ async function showTask(id) {
       ${res && res.status === "blocked" ? `<section class="block"><h2>Ce que l'agent a compris</h2><div class="panel md">${md(res.summary)}</div></section>` : ""}
 
       ${t.mr_iid && t.branch && !live ? `<section class="block"><h2>Reprendre avec des consignes</h2><div class="panel">
-        <p>L'agent repart de la branche <code>${esc(t.branch)}</code> telle qu'elle est sur GitLab (tes commits manuels compris), lit les commentaires de la MR, applique tes consignes, puis l'outil pousse <b>un nouveau commit</b> sur la même MR (jamais de --force) et y ajoute son rapport en commentaire. S'il se bloque, rien n'est poussé.</p>
+        <p>L'agent repart de la branche <code>${esc(t.branch)}</code> telle qu'elle est sur la forge (tes commits manuels compris), lit les commentaires de la MR, applique tes consignes, puis l'outil pousse <b>un nouveau commit</b> sur la même MR (jamais de --force) et y ajoute son rapport en commentaire. S'il se bloque, rien n'est poussé.</p>
         <textarea class="area" id="followup-text" placeholder="Ex. : ajoute les docblocks complets sur toutes les méthodes créées, aligne le style des accolades sur Model_Price_Rule, et contrôle réellement les plages annoncées dans la feuille Aide (adultes 0-99, stock max ≥ stock min)."></textarea>
         <div class="actions-inline" style="margin-top:10px"><button class="btn primary" data-act="task-followup">Lancer la reprise</button></div></div></section>` : ""}
 
@@ -784,7 +799,7 @@ async function showTask(id) {
       <a class="btn" href="${esc(t.issue_url)}" target="_blank" rel="noopener">Ouvrir le ticket ${ICON.ext}</a>
       ${live ? `<button class="btn danger" data-act="task-cancel">Arrêter l'agent</button>` : ""}
       <span class="spacer"></span>
-      ${t.worktree_path && !live ? `<button class="btn ghost" data-act="task-cleanup" title="Supprime le dossier de travail local. La branche poussée sur GitLab n'est pas touchée.">Nettoyer le dossier local</button>` : ""}
+      ${t.worktree_path && !live ? `<button class="btn ghost" data-act="task-cleanup" title="Supprime le dossier de travail local. La branche poussée sur la forge n'est pas touchée.">Nettoyer le dossier local</button>` : ""}
     </div>`;
 
   if (changed) document.getElementById("dev-detail").scrollTop = 0;
@@ -849,7 +864,7 @@ async function refreshReviews() {
   document.getElementById("rev-list").innerHTML = rows.length
     ? rows.map((r) => `
       <div class="card ${r.id === state.reviewId ? "selected" : ""}" data-review="${r.id}" tabindex="0">
-        <div class="card-top"><span class="proj">${esc(r.project_path)}</span><span>·</span><span>!${r.mr_iid}</span><span class="time">${ago(r.updated_at)}</span></div>
+        <div class="card-top">${forgePill(r.source)}<span class="proj">${esc(r.project_path)}</span><span>·</span><span>${mrPrefix(r.source)}${r.mr_iid}</span><span class="time">${ago(r.updated_at)}</span></div>
         <div class="card-title">${esc(r.mr_title)}</div>
         <div class="card-bottom"><span class="grow">${esc(r.author)}</span>${cardBadges(r)}</div>
       </div>`).join("")
@@ -892,8 +907,8 @@ async function showReview(id) {
   document.getElementById("rev-detail").innerHTML = `
     <div class="detail">
       <button class="btn ghost back" data-act="rev-back">← Retour à la liste</button>
-      <div class="crumbs"><span>${esc(r.project_path)}</span><span>·</span><span>!${r.mr_iid}</span>${pill(REVIEW_STATUS[r.status].pill, REVIEW_STATUS[r.status].label)}
-        <a class="btn-link" href="${esc(r.mr_url)}" target="_blank" rel="noopener">Ouvrir dans GitLab ${ICON.ext}</a></div>
+      <div class="crumbs">${forgePill(r.source)}<span>${esc(r.project_path)}</span><span>·</span><span>${mrPrefix(r.source)}${r.mr_iid}</span>${pill(REVIEW_STATUS[r.status].pill, REVIEW_STATUS[r.status].label)}
+        <a class="btn-link" href="${esc(r.mr_url)}" target="_blank" rel="noopener">Ouvrir dans ${forgeName(r.source)} ${ICON.ext}</a></div>
       <h1>${esc(r.mr_title)}</h1>
       <div class="meta">
         <span>par <b>${esc(r.author)}</b></span><span>commit <code>${esc(r.head_sha.slice(0, 8))}</code></span>
@@ -957,7 +972,9 @@ let editingProject = null;
 
 async function loadSettings() {
   const prefillSearch = state.prefillProject;
+  const prefillSource = state.prefillSource;
   state.prefillProject = null;
+  state.prefillSource = null;
   try {
     const [s, projects, costs] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), refreshHeader()]);
     settingsData = s;
@@ -965,7 +982,7 @@ async function loadSettings() {
     state.costs = costs;
     projectsData = projects;
     renderSettings();
-    if (prefillSearch) openProjectEditor(null, prefillSearch);
+    if (prefillSearch) openProjectEditor(null, prefillSearch, prefillSource);
   } catch (err) {
     document.getElementById("settings").innerHTML = `<div class="callout err">${ICON.err}<h3>Impossible de charger les paramètres</h3><pre>${esc(err.message)}</pre></div>`;
   }
@@ -997,8 +1014,10 @@ function renderSettings() {
     <form id="settings-form" autocomplete="off">
       <section class="card-section">
         <h2>Connexion</h2>
-        <p class="desc">Lu dans le fichier <code>.env</code> (token GitLab, URL, utilisateur) : à modifier là-bas, puis redémarrer l'outil.</p>
-        <dl class="kv"><dt>GitLab</dt><dd>${esc(st.gitlabUrl || "")}</dd><dt>Utilisateur</dt><dd>@${esc(st.username || "")}</dd></dl>
+        <p class="desc">Lu dans le fichier <code>.env</code> (jetons, adresse GitLab) : à modifier là-bas, puis redémarrer l'outil. GitLab et GitHub peuvent être configurés ensemble.</p>
+        <dl class="kv">${(st.forges || []).map((f) => `<dt>${forgeName(f.kind)}</dt><dd>@${esc(f.username)}${f.kind === "gitlab" && st.gitlabUrl ? ` · ${esc(st.gitlabUrl)}` : ""}</dd>`).join("")}
+          ${(st.forges || []).some((f) => f.kind === "github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : ajoute <code>GITHUB_TOKEN</code> dans le .env.</dd>`}
+          ${(st.forges || []).some((f) => f.kind === "gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : ajoute <code>GITLAB_URL</code>, <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env.</dd>`}</dl>
       </section>
 
       <section class="card-section">
@@ -1036,8 +1055,8 @@ function renderSettings() {
       </section>
 
       <section class="card-section">
-        <h2>Workflow GitLab</h2>
-        <p class="desc">Labels qui rangent tes tickets dans l'onglet Tickets. Un label par ligne, nom exact (ex. <code>Statut::A faire</code>).</p>
+        <h2>Workflow des tickets</h2>
+        <p class="desc">Labels qui rangent tes tickets dans l'onglet Tickets. Un label par ligne, nom exact (ex. <code>Statut::A faire</code>). Sur GitHub, ce sont les labels du ticket : un label « Portée::valeur » remplace les autres labels de la même portée, comme sur GitLab.</p>
         <div class="grid2">
           <label class="field"><span>À traiter</span><textarea name="workflow.todoLabels" data-labels>${esc(s.workflow.todoLabels.join("\n"))}</textarea></label>
           <label class="field"><span>En cours</span><textarea name="workflow.inProgressLabels" data-labels>${esc(s.workflow.inProgressLabels.join("\n"))}</textarea></label>
@@ -1086,13 +1105,13 @@ function renderSettings() {
 
     <section class="card-section" id="projects-section">
       <h2>Projets de l'agent dev</h2>
-      <p class="desc">L'agent ne peut traiter que les tickets des projets configurés ici. Il crée sa branche depuis la branche de départ et ouvre une MR Draft vers la branche cible. Il ne pousse jamais ailleurs que sur sa branche : base, cible et branches protégées GitLab sont refusées par le code.</p>
+      <p class="desc">L'agent ne peut traiter que les tickets des projets configurés ici. Il crée sa branche depuis la branche de départ et ouvre une MR Draft vers la branche cible. Il ne pousse jamais ailleurs que sur sa branche : base, cible et branches protégées de la forge sont refusées par le code.</p>
       <div id="projects-list">${projectsData.length ? projectsData.map((p) => `
         <div class="project-row">
-          <div class="grow"><div><b>${esc(p.path)}</b> ${p.devEnabled ? pill("green", "Agent activé") : pill("gray", "Désactivé")}</div>
+          <div class="grow"><div>${forgePill(p.source)}<b>${esc(p.path)}</b> ${p.devEnabled ? pill("green", "Agent activé") : pill("gray", "Désactivé")}</div>
             <div><code>${esc(p.baseBranch || "?")}</code> → MR vers <code>${esc(p.targetBranch || "?")}</code> · ${p.allowedCommands.length} commande(s) autorisée(s)</div></div>
-          <button class="btn sm" data-editproject="${p.projectId}">Modifier</button>
-          <button class="btn sm ghost" data-delproject="${p.projectId}">Supprimer</button>
+          <button class="btn sm" data-editproject="${projectKey(p)}">Modifier</button>
+          <button class="btn sm ghost" data-delproject="${projectKey(p)}">Supprimer</button>
         </div>`).join("") : `<p class="note">Aucun projet configuré.</p>`}</div>
       <div id="project-editor"></div>
       <div style="margin-top:12px"><button class="btn" data-act="project-add">+ Ajouter un projet</button></div>
@@ -1184,18 +1203,25 @@ async function saveSettings() {
   } catch (err) { toast(err.message, true); }
 }
 
-function openProjectEditor(projectId, search = "") {
-  editingProject = projectId ? { ...projectsData.find((p) => p.projectId === projectId) } : null;
+function openProjectEditor(key, search = "", source = null) {
+  editingProject = key ? { ...projectsData.find((p) => projectKey(p) === key) } : null;
   const box = document.getElementById("project-editor");
   if (!editingProject) {
+    const kinds = (state.stats?.forges || []).map((f) => f.kind);
+    const current = kinds.includes(source) ? source : kinds[0] || "gitlab";
+    const forgeField = kinds.length > 1
+      ? `<label class="field"><span>Forge</span><select id="project-forge">${kinds.map((k) => `<option value="${k}" ${k === current ? "selected" : ""}>${forgeName(k)}</option>`).join("")}</select></label>`
+      : `<input type="hidden" id="project-forge" value="${current}">`;
     box.innerHTML = `<div class="panel" style="margin-top:12px">
-      <label class="field"><span>Rechercher un projet GitLab</span><input id="project-search" placeholder="Nom du projet" value="${esc(search)}"></label>
+      ${forgeField}
+      <label class="field"><span>Rechercher un projet</span><input id="project-search" placeholder="Nom du projet" value="${esc(search)}"></label>
       <div class="results" id="project-results" hidden></div></div>`;
     const input = document.getElementById("project-search");
     input.focus();
     let timer;
     const run = () => { clearTimeout(timer); timer = setTimeout(() => searchProjects(input.value), 300); };
     input.addEventListener("input", run);
+    document.getElementById("project-forge").addEventListener("change", () => searchProjects(input.value));
     if (search) searchProjects(search.split("/").pop());
     return;
   }
@@ -1207,9 +1233,10 @@ async function searchProjects(q) {
   if (!box) return;
   if (!q.trim()) { box.hidden = true; return; }
   try {
-    const results = await api(`/api/gitlab/projects?search=${encodeURIComponent(q.trim())}`);
+    const source = document.getElementById("project-forge")?.value || "gitlab";
+    const results = await api(`/api/gitlab/projects?source=${source}&search=${encodeURIComponent(q.trim())}`);
     box.hidden = false;
-    box.innerHTML = results.length ? results.map((p) => `<button type="button" data-pickproject='${esc(JSON.stringify({ id: p.id, path: p.path }))}'>${esc(p.path)}</button>`).join("") : `<div class="note" style="padding:8px 12px">Aucun projet trouvé.</div>`;
+    box.innerHTML = results.length ? results.map((p) => `<button type="button" data-pickproject='${esc(JSON.stringify({ id: p.id, path: p.path, source }))}'>${esc(p.path)}</button>`).join("") : `<div class="note" style="padding:8px 12px">Aucun projet trouvé.</div>`;
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1217,7 +1244,7 @@ async function renderProjectForm() {
   const p = editingProject;
   const box = document.getElementById("project-editor");
   box.innerHTML = `<form class="panel" id="project-form" style="margin-top:12px">
-    <div class="sub-title">${esc(p.path)}</div>
+    <div class="sub-title">${forgePill(p.source)} ${esc(p.path)}</div>
     <label class="check"><input type="checkbox" name="devEnabled" ${p.devEnabled ? "checked" : ""}> Autoriser l'agent dev sur ce projet</label>
     <div class="grid2" style="margin-top:14px">
       <label class="field"><span>Branche de départ</span><input name="baseBranch" list="branch-list" value="${esc(p.baseBranch)}" placeholder="ex. develop"><small>La branche du ticket est créée depuis celle-ci.</small></label>
@@ -1232,7 +1259,7 @@ async function renderProjectForm() {
     </div>
   </form>`;
   try {
-    const branches = await api(`/api/gitlab/projects/${p.projectId}/branches`);
+    const branches = await api(`/api/gitlab/projects/${p.projectId}/branches?source=${p.source}`);
     document.getElementById("branch-list").innerHTML = branches.map((b) => `<option value="${esc(b.name)}">${b.protected ? "protégée" : ""}</option>`).join("");
   } catch { /* la saisie libre reste possible */ }
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1241,6 +1268,7 @@ async function renderProjectForm() {
 async function saveProject() {
   const f = document.getElementById("project-form").elements;
   const data = {
+    source: editingProject.source,
     projectId: editingProject.projectId,
     path: editingProject.path,
     devEnabled: f.devEnabled.checked,
@@ -1280,8 +1308,8 @@ document.addEventListener("click", async (e) => {
   if ((t = el("[data-task]"))) return go(`#dev/${t.dataset.task}`);
   if ((t = el("[data-review]"))) return go(`#reviews/${t.dataset.review}`);
   if ((t = el("[data-rfilter]"))) { state.reviewFilter = t.dataset.rfilter; return refreshReviews(); }
-  if ((t = el("[data-launch]"))) { const [p, i] = t.dataset.launch.split(":").map(Number); return launchAgent(p, i); }
-  if ((t = el("[data-configure]"))) { state.prefillProject = t.dataset.configure; return go("#settings"); }
+  if ((t = el("[data-launch]"))) { const [source, p, i] = t.dataset.launch.split(":"); return launchAgent(source, Number(p), Number(i)); }
+  if ((t = el("[data-configure]"))) { state.prefillProject = t.dataset.configure; state.prefillSource = t.dataset.configureSource; return go("#settings"); }
   if ((t = el("[data-copy]"))) return copy(t.dataset.copy);
   if ((t = el("[data-addlabel]"))) {
     const field = lastLabelField || document.querySelector("[name='workflow.todoLabels']");
@@ -1289,17 +1317,18 @@ document.addEventListener("click", async (e) => {
     if (!current.includes(t.dataset.addlabel)) field.value = [...current, t.dataset.addlabel].join("\n");
     return;
   }
-  if ((t = el("[data-editproject]"))) return openProjectEditor(Number(t.dataset.editproject));
+  if ((t = el("[data-editproject]"))) return openProjectEditor(t.dataset.editproject);
   if ((t = el("[data-delproject]"))) {
-    const p = projectsData.find((x) => x.projectId === Number(t.dataset.delproject));
-    if (!(await ask({ title: "Supprimer ce projet ?", html: `<p>${esc(p?.path)} ne sera plus traitable par l'agent. Rien n'est supprimé sur GitLab.</p>`, okLabel: "Supprimer" }))) return;
-    await api(`/api/projects/${t.dataset.delproject}/delete`, {}).catch((err) => toast(err.message, true));
+    const p = projectsData.find((x) => projectKey(x) === t.dataset.delproject);
+    if (!(await ask({ title: "Supprimer ce projet ?", html: `<p>${esc(p?.path)} ne sera plus traitable par l'agent. Rien n'est supprimé sur la forge.</p>`, okLabel: "Supprimer" }))) return;
+    const [forge, projectId] = t.dataset.delproject.split(":");
+    await api(`/api/projects/${projectId}/delete?source=${forge}`, {}).catch((err) => toast(err.message, true));
     return loadSettings();
   }
   if ((t = el("[data-pickproject]"))) {
     const picked = JSON.parse(t.dataset.pickproject);
-    const existing = projectsData.find((p) => p.projectId === picked.id);
-    editingProject = existing ? { ...existing } : { projectId: picked.id, path: picked.path, devEnabled: true, baseBranch: "", targetBranch: "", allowedCommands: [], instructions: "" };
+    const existing = projectsData.find((p) => p.source === picked.source && p.projectId === picked.id);
+    editingProject = existing ? { ...existing } : { source: picked.source, projectId: picked.id, path: picked.path, devEnabled: true, baseBranch: "", targetBranch: "", allowedCommands: [], instructions: "" };
     return renderProjectForm();
   }
 
@@ -1331,7 +1360,7 @@ document.addEventListener("click", async (e) => {
   if (act === "task-followup") {
     const instructions = document.getElementById("followup-text").value.trim();
     if (!instructions) return toast("Écris d'abord les consignes de la reprise.", true);
-    if (!(await ask({ title: "Lancer la reprise ?", html: "<p>L'agent repart de la branche telle qu'elle est sur GitLab. Si tout est bon, l'outil pousse un nouveau commit sur la MR et y ajoute un commentaire. S'il se bloque, rien n'est poussé.</p>", okLabel: "Lancer" }))) return;
+    if (!(await ask({ title: "Lancer la reprise ?", html: "<p>L'agent repart de la branche telle qu'elle est sur la forge. Si tout est bon, l'outil pousse un nouveau commit sur la MR et y ajoute un commentaire. S'il se bloque, rien n'est poussé.</p>", okLabel: "Lancer" }))) return;
     const res = await api(`/api/tasks/${state.taskId}/followup`, { instructions }).catch((err) => { toast(err.message, true); return null; });
     if (!res) return;
     toast("Reprise lancée.");
@@ -1339,7 +1368,7 @@ document.addEventListener("click", async (e) => {
     return go(`#dev/${res.id}`);
   }
   if (act === "task-cleanup") {
-    if (!(await ask({ title: "Nettoyer le dossier local ?", html: "<p>Le dossier de travail de l'agent est supprimé de ta machine. La branche et la MR sur GitLab ne sont pas touchées, mais tu ne pourras plus reprendre la session de l'agent.</p>", okLabel: "Nettoyer" }))) return;
+    if (!(await ask({ title: "Nettoyer le dossier local ?", html: "<p>Le dossier de travail de l'agent est supprimé de ta machine. La branche et la MR sur la forge ne sont pas touchées, mais tu ne pourras plus reprendre la session de l'agent.</p>", okLabel: "Nettoyer" }))) return;
     await api(`/api/tasks/${state.taskId}/cleanup`, {}).then(() => toast("Dossier supprimé.")).catch((err) => toast(err.message, true));
     return showTask(state.taskId);
   }
