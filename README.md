@@ -1,6 +1,6 @@
 # review-agent
 
-Outil local qui pilote Claude Code sur tes tickets GitLab :
+Outil local qui pilote Claude Code sur tes tickets GitLab ou GitHub :
 
 - **Tickets** : tes tickets assignés, rangés par statut (à traiter, en cours, validation technique).
 - **Agent dev** : sur un clic, un agent lit le ticket, crée la branche, code, puis l'outil pousse la branche et ouvre une **MR Draft**. Tu la contrôles avant de la passer en Ready.
@@ -12,7 +12,7 @@ Pour aller plus loin :
 
 ## Installation (WSL / Linux)
 
-Prérequis : Node 24, git, un abonnement Claude (Pro ou Max) et un accès GitLab.
+Prérequis : Node 24, git, un abonnement Claude (Pro ou Max) et un accès GitLab et/ou GitHub.
 
 ```bash
 # 1. Node 24 (si absent)
@@ -30,11 +30,11 @@ npm install
 npm test
 
 # 4. Configuration de la machine
-cp .env.example .env         # remplir GITLAB_TOKEN et GITLAB_USERNAME
+cp .env.example .env         # remplir GITLAB_URL, GITLAB_TOKEN, GITLAB_USERNAME et/ou GITHUB_TOKEN
 ```
 
 Ensuite, lance `npm run dev` et ouvre **http://localhost:4321/#settings** pour configurer :
-1. **Workflow GitLab** : les labels de tes statuts (les labels de tes tickets sont proposés en un clic).
+1. **Workflow des tickets** : les labels de tes statuts (les labels de tes tickets sont proposés en un clic).
 2. **Projets de l'agent dev** : pour chaque projet, branche de départ, branche cible de la MR, commandes de test autorisées et consignes propres au projet.
 3. **Conventions** : formats de branche, de commit et de MR (avec un aperçu).
 4. **Mode d'action** des reviews : garde le mode ombre au début.

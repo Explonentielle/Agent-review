@@ -96,8 +96,9 @@ Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le do
 | `src/config.ts` | Lecture du `.env` (secrets et machine uniquement) |
 | `src/settings/` | Schéma, valeurs par défaut et stockage des réglages et projets |
 | `src/db/` | Accès à la base indépendant du moteur : interface `Db` asynchrone, adaptateurs SQLite (`node:sqlite`, local) et PostgreSQL (`pg`, serveur), migrations communes ; dépôts `reviews`, `devTasks` et `costs` |
-| `src/connectors/` | Interface `ForgeConnector` et vocabulaire neutre (ticket, demande de fusion, commentaire...). `gitlab.ts` : connecteur GitLab, le seul qui connaisse l'API et les types GitLab. Les pipelines, le poller, le serveur et la CLI n'utilisent que l'interface |
+| `src/connectors/` | Interface `ForgeConnector` et vocabulaire neutre (ticket, demande de fusion, commentaire...). `gitlab.ts` et `github.ts` : un connecteur par forge, les seuls à connaître l'API et les types de leur forge. `registry.ts` : registre des forges configurées (connecteur, copies locales de dépôts, identité de l'utilisateur), retrouvées par la colonne « source ». Les pipelines, le poller, le serveur et la CLI n'utilisent que l'interface |
 | `src/gitlab/client.ts` | Client API GitLab v4 (fetch natif, pagination), utilisé par le connecteur GitLab uniquement |
+| `src/github/` | Client REST GitHub (fetch natif, pagination par `Link` limitée au même serveur) et types de ses réponses, utilisés par le connecteur GitHub uniquement |
 | `src/testing/` | Faux connecteur et environnement de test (dépôt git local, base temporaire). Réservé aux tests |
 | `src/agent/` | Exécuteur d'agent : interface `AgentRunner`, `CliRunner` (CLI Claude Code sur l'abonnement), événements du journal. Les protections d'isolation (`--safe-mode`, aucun MCP, `dontAsk`) y sont écrites, hors de portée des appelants |
 | `src/budget.ts`, `src/db/costs.ts` | Consommation des agents par mois, projet et type de tâche. Budget mensuel appliqué en mode clé API : une review ou une tâche de dev n'est pas lancée une fois le budget atteint |

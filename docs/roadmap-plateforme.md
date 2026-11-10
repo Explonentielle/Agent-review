@@ -33,14 +33,14 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | A5 | Socle | Interface de connecteur de tickets, adaptateur GitLab, pipelines migrés | L | | ✅ 2026-11-09 |
 | A6 | Socle | Coûts par projet et par type de tâche, budget en mode API | S | A3 | ✅ 2026-11-09, par utilisateur avec le lot C |
 | A7 | Socle | Exécuteur multi-fournisseur (OpenAI...) : boucle d'agent et outils propres | XL | A1 | 💡 idée, non planifiée |
-| B1 | GitHub | Client REST GitHub (tickets, PR, branches, vérifications, reviews) | M | | ⬜ |
-| B2 | GitHub | Connecteur GitHub sur l'interface A5 | M | A5, B1 | ⬜ |
-| B3 | GitHub | Correspondance des statuts (labels, projets GitHub) | S | B2 | ⬜ |
-| B4 | GitHub | Review de PR et création de PR Draft | M | B2 | ⬜ |
-| B5 | GitHub | Tests sur réponses enregistrées | S | B2 | ⬜ |
-| B6 | GitHub | Écran Connecteurs : choisir la forge par projet | M | B2 | ⬜ |
+| B1 | GitHub | Client REST GitHub (tickets, PR, branches, vérifications, reviews) | M | | ✅ 2026-11-10, à valider sur un vrai dépôt GitHub |
+| B2 | GitHub | Connecteur GitHub sur l'interface A5 | M | A5, B1 | ✅ 2026-11-10, à valider sur un vrai dépôt GitHub |
+| B3 | GitHub | Correspondance des statuts (labels, projets GitHub) | S | B2 | ✅ 2026-11-10 pour les labels (portée émulée) ; « projets » GitHub non faits |
+| B4 | GitHub | Review de PR et création de PR Draft | M | B2 | ✅ 2026-11-10, à valider sur un vrai dépôt GitHub |
+| B5 | GitHub | Tests sur réponses enregistrées | S | B2 | ✅ 2026-11-10 sur des réponses construites d'après la documentation, à enregistrer sur un vrai compte |
+| B6 | GitHub | Écran Connecteurs : choisir la forge par projet | M | B2 | ✅ 2026-11-10, à essayer dans un navigateur |
 | C1a | Serveur | Couche de données asynchrone : SQLite (local) et PostgreSQL (serveur), migrations communes | L | | ✅ 2026-11-09 |
-| C1b | Serveur | Modèle multi-espaces : utilisateurs, espaces, appartenances, colonne « source » des forges | M | C1a | ⬜ |
+| C1b | Serveur | Modèle multi-espaces : utilisateurs, espaces, appartenances (la colonne « source » est faite avec le lot B) | M | C1a | ⬜ |
 | C2 | Serveur | Connexion OAuth GitLab et GitHub | M | C1b | ⬜ |
 | C3 | Serveur | Secrets chiffrés (AES-256-GCM, clé maître hors base) | M | C1b | ⬜ |
 | C4 | Serveur | Isolation des données par espace, tests d'étanchéité | L | C1b | ⬜ |
@@ -146,6 +146,15 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - **Piège trouvé** : TypeScript accepte `{ ...promesse }` sans erreur, ce qui a fait échouer deux tests avant correction. À surveiller dans tout nouveau code.
 - **Limites** : un seul processus à la fois (pas de verrou de migration entre plusieurs instances). Les tests PostgreSQL embarqués créent une base par test, ce qui rallonge la suite (environ 20 s). L'outil n'a pas encore tourné de bout en bout sur un serveur PostgreSQL avec ton GitLab : seuls les tests le couvrent.
 
+**Lot B (2026-11-10)** : GitHub à côté de GitLab, B1 à B6.
+- **Client et connecteur** : `src/github/` (types et client REST sans dépendance : jeton en `Authorization: Bearer`, version d'API, pagination par `Link` limitée au même serveur, noms de dépôt et identifiants validés avant tout appel) et `src/connectors/github.ts`. L'identifiant de projet neutre est l'identifiant numérique du dépôt ; son nom complet est retrouvé puis mis en cache.
+- **Équivalences avec GitLab** : labels « Portée::valeur » émulés (l'ajout passe avant le retrait des autres labels de la même portée, pour ne jamais perdre le statut) ; vérifications (jobs et statuts classiques) ramenées aux mots de GitLab ; un titre « Draft: » donne une PR en brouillon ; assignation de la PR en simple confort (un échec est journalisé, la PR est gardée) ; approbation refusée si la tête de la PR a changé depuis la review, car GitHub ne le refuse pas de lui-même ; PR à reviewer trouvées par la recherche « avis demandé », brouillons écartés.
+- **Plusieurs forges** : colonne « source » (`gitlab` ou `github`) sur les reviews, les tâches de dev et les réglages de projet (migration 4 : les données existantes deviennent GitLab, les réglages de projet sont recréés avec la clé source + numéro). `ForgeRegistry` : pour chaque forge, son connecteur, ses copies locales de dépôts (`repos` pour GitLab, `repos/github` pour GitHub) et l'identité de l'utilisateur chez elle. Un poller par forge, `/api/issues` réunit les forges (une forge en panne n'empêche pas d'afficher l'autre), les routes acceptent `?source=` (GitLab par défaut). Une review ou une tâche passe toujours par la forge qui l'a créée ; une forge absente donne une erreur claire.
+- **Configuration** : `GITHUB_TOKEN` (jeton à portée fine) et `GITHUB_API_URL` (GitHub Enterprise seulement). GitLab devient facultatif (ses trois variables ensemble), avec au moins une forge. Un jeton GitHub invalide arrête le démarrage avec un message clair ; le compte GitHub est lu auprès de l'API.
+- **Dashboard** : étiquette de forge sur les cartes quand plusieurs sont configurées, numéro de demande adapté (!12 chez GitLab, #12 chez GitHub), section Connexion des Paramètres qui liste les forges, projets identifiés par forge et numéro avec choix de la forge pour la recherche.
+- **Vérifié** : 46 tests du client et du connecteur (mutations sur le contrôle de la tête et sur le lien de pagination), 7 tests de routage de bout en bout avec deux faux connecteurs aux mêmes numéros (mutations vérifiées), la migration sur des données de la version 3 (SQLite et PostgreSQL), la configuration. Ta vraie base est passée en version 4 sans perte (projets, reviews et tâches conservés, tous GitLab).
+- **Limites connues** : réponses GitHub construites d'après la documentation, pas enregistrées sur un vrai compte, rien validé contre un vrai dépôt (jeton à portée fine sur `GET /issues`, recherche, push avec `x-access-token`). Une PR n'apparaît dans « à reviewer » que tant que l'avis est demandé : GitHub retire la demande une fois la review soumise, un nouveau commit ne relance donc une review que si l'avis est redemandé. L'état « résolu » des fils de discussion n'est pas dans l'API REST : il est laissé inconnu. Branches protégées par nom exact seulement (pas les règles d'ensemble). `removeSourceBranch` n'a pas d'effet (réglage par dépôt chez GitHub). Les « projets » GitHub pour les statuts ne sont pas gérés (labels seuls). L'unicité des reviews garde la contrainte d'origine (projet, demande, commit) sans la source : elle ne se heurterait que pour un même commit. L'écran n'a été vérifié qu'en syntaxe, pas dans un navigateur.
+
 ## Lot B : GitHub (jalon J2)
 
 Objectif : traiter un ticket GitHub et reviewer une PR, comme aujourd'hui pour GitLab.
@@ -198,7 +207,7 @@ Objectif : tenir en production : isolation renforcée, supervision, sauvegardes 
 ## Prochain lot
 
 1. **A3** dès qu'une clé API de test est disponible.
-2. **Lot B** (GitHub) : l'interface existe, il reste le client REST GitHub, le connecteur et la colonne « source » en base.
+2. **Lot B** (GitHub) : fait (2026-11-10). Il reste à le valider sur un vrai dépôt : jeton à portée fine dans le `.env`, un dépôt de test avec quelques tickets.
 3. **A6** : coûts par utilisateur et budget en mode API (dépend d'A3).
 
 A1, A2, A4 et A5 sont faits (2026-11-09).
