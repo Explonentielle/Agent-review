@@ -52,6 +52,21 @@ docker compose logs -f app
 ```
 `build` construit l'image (plusieurs minutes la première fois), `up -d` démarre la pile en arrière-plan, `ps` doit montrer `app` et `postgres` en bonne santé (`healthy`), `logs -f` suit le journal ; on y lit `app.started`. Les migrations de la base s'appliquent toutes seules au démarrage. Pour figer la version de la CLI Claude Code : `CLAUDE_CODE_VERSION=<version> docker compose build`.
 
+## 5 bis. Importer ta base locale (facultatif, une seule fois)
+
+Pour retrouver sur le serveur tes reviews, tâches, projets, réglages et jetons enregistrés. À faire **avant** de configurer quoi que ce soit sur le serveur : la base du serveur doit être vide (l'import refuse sinon, sans rien effacer).
+
+1. Arrête l'outil local (Ctrl+C dans le terminal de `npm run dev`) pour que le fichier soit complet, puis copie `~/review-agent/data/review-agent.sqlite` sur le serveur (`scp`).
+2. **Clé maître** : les jetons enregistrés sont chiffrés avec la clé de ton fichier `data/master.key`. Pour qu'ils restent lisibles sur le serveur, mets le contenu de ce fichier (une ligne) dans `SECRETS_MASTER_KEY` du `.env` du serveur. Avec une autre clé, l'import marche mais les jetons sont ignorés au démarrage (tu les ressaisis dans le dashboard).
+3. Sur le serveur, base démarrée mais application arrêtée :
+   ```
+   docker compose stop app
+   docker compose run --rm -v "$PWD/review-agent.sqlite:/app/data/import.sqlite:ro" app node dist/cli/importSqlite.js /app/data/import.sqlite
+   docker compose up -d app
+   ```
+   `stop` coupe l'application, `run --rm` lance l'outil d'import dans un conteneur jetable (démarrant la base au besoin), `-v ...:ro` y monte ton fichier en lecture seule (l'import travaille sur une copie), `up -d` redémarre l'application.
+4. L'import affiche le nombre de lignes copiées par table et vérifie qu'il n'en manque aucune. Tout est fait dans une transaction : en cas d'erreur, la base du serveur reste intacte. Les identifiants sont conservés. Les chemins de dossiers de travail locaux des tâches de dev sont vidés (ils n'existent pas sur le serveur) ; les sessions de connexion ne suivent pas.
+
 ## 6. Y accéder
 
 Depuis ton poste, un tunnel SSH vers le serveur :
@@ -79,7 +94,7 @@ Sauvegarde d'abord : les migrations de base ne se défont pas. Retour arrière :
 
 ## 9. Limites connues, à lire
 
-- **Les données de ta base locale (SQLite) ne sont pas importées** dans PostgreSQL : il n'existe pas d'outil de transfert. Le serveur repart de zéro ; tu y recrées tes projets et réglages.
+- **L'import de ta base locale (SQLite) est possible une seule fois**, dans une base vide (section 5 bis). Il n'existe pas de synchronisation continue entre ta machine et le serveur : ce sont deux installations séparées.
 - **Tous les agents tournent dans le même conteneur**, avec le même utilisateur système que l'application. Les secrets du `.env` sont retirés de l'environnement des agents (jetons, clé maître, adresse de la base, secrets OAuth) : une commande qui affiche son environnement ne les voit pas. **Ce n'est pas une isolation** : un processus du même utilisateur peut lire l'environnement de son processus parent (`/proc`) et les fichiers du volume de données, dont les copies de dépôts des autres personnes. Tant que les conteneurs par personne (lot D) n'existent pas : **personnes de confiance seulement**.
 - Pas de limite de mémoire par agent (seulement celle du conteneur entier) ni d'isolation réseau des agents.
 - Les journaux sont dans le volume (`/app/data/logs`), sans rotation. À surveiller si le disque se remplit.

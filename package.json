@@ -12,6 +12,7 @@
     "start": "tsx --env-file=.env src/index.ts",
     "review:once": "tsx --env-file=.env src/cli/reviewOnce.ts",
     "typecheck": "tsc --noEmit",
+    "db:import": "tsx src/cli/importSqlite.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

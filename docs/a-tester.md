@@ -87,6 +87,7 @@ Suivre `docs/deploiement.md`. À noter ce qui se passe réellement :
 - [ ] Le tunnel SSH ouvre le dashboard ; `ss -tlnp | grep 4321` ne montre que `127.0.0.1`.
 - [ ] `bash scripts/backup.sh` produit un fichier non vide ; `bash scripts/restore.sh <fichier> --yes` le recharge sur une pile d'essai.
 - [ ] `free -h` avant et après : combien de mémoire reste-t-il avec rag-saas et la pile en marche ?
+- [ ] Import de ta base locale (section 5 bis de `docs/deploiement.md`) : la commande affiche les effectifs (ex. 5 reviews, 2 tâches, 2 projets), le dashboard du serveur montre tes données, tes jetons enregistrés restent lisibles si `SECRETS_MASTER_KEY` est la clé de `data/master.key`, et un second import est refusé (« base cible pas vide »).
 
 ## 9. Journal des actions (C6)
 
