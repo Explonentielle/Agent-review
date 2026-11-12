@@ -60,7 +60,16 @@ export class ProcessCancelledError extends Error {
   }
 }
 
-/** Lance un process, lui passe `stdin`, et notifie chaque ligne de stdout au fil de l'eau. */
+/**
+ * Lance un process, lui passe `stdin`, et notifie chaque ligne de stdout au fil de l'eau.
+ * @param bin Programme à lancer.
+ * @param args Arguments du programme.
+ * @param stdin Texte écrit sur l'entrée du programme, puis fermée. Un programme qui se termine sans le lire n'est pas une erreur ici.
+ * @param opts Dossier courant, environnement, délai maximum, notification des lignes de sortie et signal d'annulation.
+ * @returns Sortie standard, sortie d'erreur et code de sortie.
+ * @throws ProcessCancelledError Si la tâche est annulée.
+ * @throws Error Si le programme ne peut pas être lancé ou dépasse le délai maximum.
+ */
 export function runProcess(
   bin: string,
   args: string[],
@@ -123,6 +132,8 @@ export function runProcess(
       else resolve({ stdout, stderr, exitCode });
     });
 
+    // Un programme qui se termine sans lire son entrée (docker qui échoue tout de suite) fait échouer l'écriture : l'échec se lit dans son code et son stderr
+    child.stdin.on("error", () => undefined);
     child.stdin.end(stdin);
   });
 }

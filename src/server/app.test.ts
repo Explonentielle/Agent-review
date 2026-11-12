@@ -179,7 +179,7 @@ describe("API du dashboard sur le connecteur", () => {
 
   it("agents en conteneur : réglages sans secret, diagnostic protégé par l'en-tête anti-CSRF, vide hors du mode conteneur", async () => {
     const info = await app.inject({ method: "GET", url: "/api/agent-runtime" });
-    expect(info.json()).toEqual({ mode: "host", image: "review-agent-sandbox:local", memory: "1536m", cpus: 1, pids: 256, network: null, containerUser: "auto" });
+    expect(info.json()).toEqual({ mode: "host", image: "review-agent-sandbox:local", images: ["review-agent-sandbox:local"], memory: "1536m", cpus: 1, pids: 256, network: null, containerUser: "auto" });
 
     expect((await app.inject({ method: "POST", url: "/api/agent-runtime/check" })).statusCode).toBe(403);
     const res = await app.inject({ method: "POST", url: "/api/agent-runtime/check", headers: WRITE });
@@ -194,7 +194,8 @@ describe("API du dashboard sur le connecteur", () => {
       writeFileSync(bin, '#!/bin/sh\necho x >> "$(dirname "$0")/calls.txt"\nsleep 0.4\necho "Cannot connect" >&2\nexit 1\n');
       chmodSync(bin, 0o755);
       h.config.agentRuntime = { ...h.config.agentRuntime, mode: "docker", dockerBin: bin };
-      const post = () => app.inject({ method: "POST", url: "/api/agent-runtime/check", headers: WRITE });
+      h.config.agentRuntime = { ...h.config.agentRuntime, extraImages: ["autre:1"] };
+      const post = (payload: object = {}) => app.inject({ method: "POST", url: "/api/agent-runtime/check", headers: WRITE, payload });
       const calls = () => readFileSync(path.join(dir, "calls.txt"), "utf8").trim().split("\n").length;
 
       const [a, b] = await Promise.all([post(), post()]);
@@ -205,9 +206,38 @@ describe("API du dashboard sur le connecteur", () => {
 
       await post(); // l'essai précédent est terminé : un nouveau clic en relance un
       expect(calls()).toBe(2);
+
+      // Deux images différentes ne partagent pas leur essai ; une image inconnue est refusée sans lancer docker
+      await Promise.all([post({ image: "autre:1" }), post({ image: "" })]);
+      expect(calls()).toBe(4);
+      const refused = await post({ image: "intrus:1" });
+      expect(refused.statusCode).toBe(400);
+      expect(refused.json<{ error: string }>().error).toMatch(/non autorisée/);
+      expect(calls()).toBe(4);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("projets : l'image d'agent doit être autorisée par le .env, l'API la liste", async () => {
+    h.config.agentRuntime = { ...h.config.agentRuntime, extraImages: ["agent-php73:1"] };
+    const save = (agentImage: unknown) =>
+      app.inject({ method: "POST", url: "/api/projects", headers: WRITE, payload: { projectId: 5, path: "g/p5", devEnabled: false, baseBranch: "", targetBranch: "", allowedCommands: [], instructions: "", agentImage } });
+
+    expect((await app.inject({ method: "GET", url: "/api/agent-runtime" })).json<{ images: string[] }>().images).toEqual(["review-agent-sandbox:local", "agent-php73:1"]);
+
+    expect((await save("agent-php73:1")).json()).toMatchObject({ projectId: 5, agentImage: "agent-php73:1" });
+    const listed = (await app.inject({ method: "GET", url: "/api/projects" })).json<{ projectId: number; agentImage: string }[]>();
+    expect(listed.find((p) => p.projectId === 5)?.agentImage).toBe("agent-php73:1");
+    expect((await save("review-agent-sandbox:local")).statusCode).toBe(200); // l'image par défaut est toujours permise
+    expect((await save("")).json()).toMatchObject({ agentImage: "" });
+
+    const refused = await save("postgres:16-alpine");
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json<{ error: string }>().error).toMatch(/« postgres:16-alpine » non autorisée/);
+    expect((await save("-x")).statusCode).toBe(400);
+    expect((await save(42)).statusCode).toBe(400);
+    expect(((await app.inject({ method: "GET", url: "/api/projects" })).json<{ projectId: number; agentImage: string }[]>()).find((p) => p.projectId === 5)?.agentImage).toBe(""); // les refus n'ont rien enregistré
   });
 
   it("secrets : un jeton GitHub refusé par GitHub n'est pas enregistré ; un secret du .env n'est pas modifiable", async () => {

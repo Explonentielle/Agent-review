@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IMAGE_NAME_RE } from "../agent/imageName.js";
 import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 
 /**
@@ -143,6 +144,11 @@ export const ProjectSettingsSchema = z.object({
   allowedCommands: z.array(z.string().trim().min(1)),
   /** Consignes propres au projet (stack, conventions, pièges), ajoutées aux prompts de dev et de review. */
   instructions: z.string(),
+  /**
+   * Image Docker des agents de ce projet (mode conteneur, `AGENT_RUNTIME=docker`) : vide = image par défaut. Doit figurer dans `AGENT_IMAGE`
+   * ou `AGENT_IMAGES` du .env, ce qui est vérifié à l'enregistrement et au lancement de chaque tâche.
+   */
+  agentImage: z.string().trim().refine((v) => v === "" || IMAGE_NAME_RE.test(v), "nom d'image invalide").default(""),
 });
 
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;

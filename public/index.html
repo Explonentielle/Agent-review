@@ -1100,9 +1100,14 @@ function runtimeSection() {
   const r = state.runtime;
   const body = !r ? `<p class="note">L'état des conteneurs d'agents est indisponible.</p>`
     : r.mode !== "docker" ? `<p class="note">Les agents tournent directement sur la machine (<code>AGENT_RUNTIME=host</code>). Pour les isoler dans des conteneurs jetables, voir <code>docs/deploiement.md</code>, sections 10 et 11.</p>`
-    : `<dl class="kv"><dt>Image</dt><dd><code>${esc(r.image)}</code></dd><dt>Plafonds par agent</dt><dd>${esc(r.memory)} de mémoire, ${esc(String(r.cpus))} processeur(s), ${esc(String(r.pids))} processus</dd><dt>Utilisateur du conteneur</dt><dd>${esc(r.containerUser)}</dd></dl>
-      <button type="button" class="btn sm" data-act="runtime-check">Tester les conteneurs</button>
-      <div id="runtime-result"></div>`;
+    : (() => {
+      const images = r.images || [r.image];
+      return `<dl class="kv"><dt>Image par défaut</dt><dd><code>${esc(r.image)}</code></dd>
+        ${images.length > 1 ? `<dt>Autres images</dt><dd>${images.slice(1).map((i) => `<code>${esc(i)}</code>`).join(", ")} (au choix par projet)</dd>` : ""}
+        <dt>Plafonds par agent</dt><dd>${esc(r.memory)} de mémoire, ${esc(String(r.cpus))} processeur(s), ${esc(String(r.pids))} processus</dd><dt>Utilisateur du conteneur</dt><dd>${esc(r.containerUser)}</dd></dl>
+        <div class="actions-inline">${images.map((i) => `<button type="button" class="btn sm" data-act="runtime-check" data-image="${esc(i)}">${images.length > 1 ? `Tester ${esc(i)}` : "Tester les conteneurs"}</button>`).join("")}</div>
+        <div id="runtime-result"></div>`;
+    })();
   return `<section class="card-section">
         <h2>Agents dans des conteneurs</h2>
         <p class="desc">Chaque review et chaque tâche de dev peut tourner dans un conteneur jetable qui ne voit que son dossier de travail (réglage <code>AGENT_RUNTIME</code> du .env). Le test lance un conteneur d'essai avec les options d'une vraie tâche, et vérifie le mode clé API, Docker, l'image, l'écriture dans le dossier de travail, l'isolation, les plafonds de ressources et la CLI Claude Code.</p>
@@ -1116,8 +1121,9 @@ async function runRuntimeCheck(button) {
   button.disabled = true;
   out.innerHTML = `<p class="note">Essai en cours, quelques secondes...</p>`;
   try {
-    const res = await api("/api/agent-runtime/check", {});
-    out.innerHTML = `<div class="check-list">${res.checks.map((c) => `<div class="check-row">${c.ok ? pill("green", "ok") : pill("red", "échec")}<b>${esc(c.label)}</b><span>${esc(c.detail)}</span></div>`).join("")}</div>
+    const image = button.dataset.image || "";
+    const res = await api("/api/agent-runtime/check", { image });
+    out.innerHTML = `${image ? `<p class="note">Image testée : <code>${esc(image)}</code></p>` : ""}<div class="check-list">${res.checks.map((c) => `<div class="check-row">${c.ok ? pill("green", "ok") : pill("red", "échec")}<b>${esc(c.label)}</b><span>${esc(c.detail)}</span></div>`).join("")}</div>
       <p class="note">${res.ok ? "Tout est en ordre : les agents peuvent tourner en conteneur." : "Corrige les points en échec, puis relance le test."}</p>`;
   } catch (err) {
     out.innerHTML = "";
@@ -1249,7 +1255,7 @@ function renderSettings() {
       <div id="projects-list">${projectsData.length ? projectsData.map((p) => `
         <div class="project-row">
           <div class="grow"><div>${forgePill(p.source)}<b>${esc(p.path)}</b> ${p.devEnabled ? pill("green", "Agent activé") : pill("gray", "Désactivé")}</div>
-            <div><code>${esc(p.baseBranch || "?")}</code> → MR vers <code>${esc(p.targetBranch || "?")}</code> · ${p.allowedCommands.length} commande(s) autorisée(s)</div></div>
+            <div><code>${esc(p.baseBranch || "?")}</code> → MR vers <code>${esc(p.targetBranch || "?")}</code> · ${p.allowedCommands.length} commande(s) autorisée(s)${p.agentImage ? ` · image <code>${esc(p.agentImage)}</code>` : ""}</div></div>
           <button class="btn sm" data-editproject="${projectKey(p)}">Modifier</button>
           <button class="btn sm ghost" data-delproject="${projectKey(p)}">Supprimer</button>
         </div>`).join("") : `<p class="note">Aucun projet configuré.</p>`}</div>
@@ -1381,6 +1387,21 @@ async function searchProjects(q) {
   } catch (err) { toast(err.message, true); }
 }
 
+/** Champ « image de l'agent » d'un projet : liste des images autorisées en mode conteneur, sinon un champ caché qui garde la valeur enregistrée. */
+function agentImageField(p) {
+  const r = state.runtime;
+  const current = p.agentImage || "";
+  if (!r || r.mode !== "docker") return `<input type="hidden" name="agentImage" value="${esc(current)}">`;
+  const images = r.images || [r.image];
+  return `<label class="field"><span>Image de l'agent (conteneur)</span>
+    <select name="agentImage">
+      <option value="">Image par défaut (${esc(r.image)})</option>
+      ${images.filter((i) => i !== r.image).map((i) => `<option value="${esc(i)}" ${i === current ? "selected" : ""}>${esc(i)}</option>`).join("")}
+      ${!current || images.includes(current) ? "" : `<option value="${esc(current)}" selected>${esc(current)} (non autorisée)</option>`}
+    </select>
+    <small>Les outils du projet (PHP, composer, node...) doivent être dans l'image. Dans un conteneur il n'y a pas de Docker : les commandes autorisées appellent directement les outils (ex. <code>vendor/bin/phpunit</code>), pas <code>docker run</code>. Images proposées : celles de <code>AGENT_IMAGE</code> et <code>AGENT_IMAGES</code> du .env.</small></label>`;
+}
+
 async function renderProjectForm() {
   const p = editingProject;
   const box = document.getElementById("project-editor");
@@ -1391,6 +1412,7 @@ async function renderProjectForm() {
       <label class="field"><span>Branche de départ</span><input name="baseBranch" list="branch-list" value="${esc(p.baseBranch)}" placeholder="ex. develop"><small>La branche du ticket est créée depuis celle-ci.</small></label>
       <label class="field"><span>Branche cible de la MR</span><input name="targetBranch" list="branch-list" value="${esc(p.targetBranch)}" placeholder="ex. global"><small>Global, intermédiaire, master... selon le projet.</small></label>
       <label class="field"><span>Commandes autorisées</span><textarea name="allowedCommands" placeholder="docker run --rm -v {worktree}:/app -w /app php:7.3-cli vendor/bin/phpunit">${esc(p.allowedCommands.join("\n"))}</textarea><small>Une commande par ligne (tests, lint). L'agent pourra y ajouter des arguments. Rien d'autre ne lui est permis. <code>{worktree}</code> est remplacé par le dossier de travail de l'agent : c'est lui qu'il faut monter dans un conteneur, pas ton dossier local (un <code>docker compose exec</code> sur ton conteneur habituel testerait ton code, pas celui de l'agent). Les dépendances non versionnées (<code>vendor/</code>, <code>node_modules/</code>) ne sont pas dans ce dossier.</small></label>
+      ${agentImageField(p)}
       <label class="field"><span>Consignes propres au projet</span><textarea class="prose" name="instructions" placeholder="Stack et version, conventions, pièges connus...">${esc(p.instructions)}</textarea><small>Utilisées par l'agent dev et par la review des MR de ce projet.</small></label>
     </div>
     <datalist id="branch-list"></datalist>
@@ -1417,6 +1439,7 @@ async function saveProject() {
     targetBranch: f.targetBranch.value.trim(),
     allowedCommands: lines(f.allowedCommands.value),
     instructions: f.instructions.value,
+    agentImage: f.agentImage.value,
   };
   try {
     await api("/api/projects", data);

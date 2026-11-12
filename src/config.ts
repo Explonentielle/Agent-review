@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { IMAGE_NAME_RE } from "./agent/imageName.js";
 
 /**
  * Configuration de la machine, lue dans le .env : secrets et chemins uniquement.
@@ -26,7 +27,12 @@ const EnvSchema = z
     /** Où tournent les agents : sur la machine (host), ou dans un conteneur jetable par tâche (docker, mode clé API seulement). */
     AGENT_RUNTIME: z.preprocess(blankIsMissing, z.enum(["host", "docker"]).default("host")),
     /** Image des conteneurs d'agents : doit contenir la CLI Claude Code et les outils du projet. */
-    AGENT_IMAGE: z.preprocess(blankIsMissing, z.string().trim().min(1).default("review-agent-sandbox:local")),
+    AGENT_IMAGE: z.preprocess(blankIsMissing, z.string().trim().regex(IMAGE_NAME_RE, "nom d'image invalide").default("review-agent-sandbox:local")),
+    /** Autres images que les projets peuvent choisir (Paramètres > Projets), séparées par des virgules ou des espaces. */
+    AGENT_IMAGES: z.preprocess(
+      blankIsMissing,
+      z.string().transform((s) => s.split(/[\s,]+/).filter(Boolean)).pipe(z.array(z.string().regex(IMAGE_NAME_RE, "nom d'image invalide")).max(50)).optional(),
+    ),
     AGENT_MEMORY: z.preprocess(blankIsMissing, z.string().regex(/^\d+[bkmg]$/i, "ex. 1536m ou 2g").default("1536m")),
     AGENT_CPUS: z.coerce.number().min(0.25).max(16).default(1),
     AGENT_PIDS: z.coerce.number().int().min(16).max(4096).default(256),
@@ -143,7 +149,7 @@ export interface Config {
   /** Nombre maximum de reviews, et de tâches de dev, simultanées sur la machine. */
   maxConcurrentAgents: number;
   /** Où et comment tournent les agents (sur la machine, ou dans des conteneurs jetables). */
-  agentRuntime: { mode: "host" | "docker"; image: string; memory: string; cpus: number; pids: number; network: string | null; dockerBin: string; containerUser: "auto" | "host" | "root" };
+  agentRuntime: { mode: "host" | "docker"; image: string; extraImages: string[]; memory: string; cpus: number; pids: number; network: string | null; dockerBin: string; containerUser: "auto" | "host" | "root" };
   claudeBin: string;
   /** Clé API Anthropic, ou null. Utilisée uniquement quand les réglages demandent le mode clé API. */
   anthropicApiKey: string | null;
@@ -192,7 +198,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     pollIntervalMs: e.POLL_INTERVAL_SEC * 1000,
     maxConcurrentAgents: e.MAX_CONCURRENT_AGENTS,
-    agentRuntime: { mode: e.AGENT_RUNTIME, image: e.AGENT_IMAGE, memory: e.AGENT_MEMORY, cpus: e.AGENT_CPUS, pids: e.AGENT_PIDS, network: e.AGENT_NETWORK ?? null, dockerBin: e.DOCKER_BIN, containerUser: e.AGENT_CONTAINER_USER },
+    agentRuntime: { mode: e.AGENT_RUNTIME, image: e.AGENT_IMAGE, extraImages: e.AGENT_IMAGES ?? [], memory: e.AGENT_MEMORY, cpus: e.AGENT_CPUS, pids: e.AGENT_PIDS, network: e.AGENT_NETWORK ?? null, dockerBin: e.DOCKER_BIN, containerUser: e.AGENT_CONTAINER_USER },
     claudeBin: e.CLAUDE_BIN ?? defaultClaudeBin(),
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
     server: { host: e.HOST, port: e.PORT },

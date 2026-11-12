@@ -6,6 +6,7 @@ import { ZodError } from "zod";
 import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 import type { ForgeKind } from "../connectors/types.js";
 import { diagnoseAgentRuntime, type RuntimeDiagnostic } from "../agent/dockerDiagnostic.js";
+import { allowedImages, imageFor } from "../agent/imageName.js";
 import { registerAuth, type AuthRuntime } from "../auth/routes.js";
 import type { SessionContext } from "../auth/sessions.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
@@ -183,23 +184,38 @@ export function buildServer(base: ServerDeps) {
 
   // --- Agents dans des conteneurs ---------------------------------------------
 
-  /** Où tournent les agents (sur la machine ou en conteneur) et avec quels plafonds. Aucun secret. */
+  /**
+   * Image d'agent demandée par le dashboard, vérifiée contre les images autorisées du .env.
+   * @param requested Image demandée (vide ou absente : image par défaut).
+   * @returns Le nom de l'image à utiliser.
+   * @throws BadRequestError Si l'image n'est pas autorisée (répondu en 400).
+   */
+  const checkedImage = (requested: unknown): string => {
+    try {
+      return imageFor(deps.config.agentRuntime, typeof requested === "string" ? requested : "");
+    } catch (err) {
+      throw new BadRequestError(errorMessage(err));
+    }
+  };
+
+  /** Où tournent les agents (sur la machine ou en conteneur), avec quels plafonds et quelles images. Aucun secret. */
   app.get("/api/agent-runtime", async () => {
     const r = deps.config.agentRuntime;
-    return { mode: r.mode, image: r.image, memory: r.memory, cpus: r.cpus, pids: r.pids, network: r.network, containerUser: r.containerUser };
+    return { mode: r.mode, image: r.image, images: allowedImages(r), memory: r.memory, cpus: r.cpus, pids: r.pids, network: r.network, containerUser: r.containerUser };
   });
 
-  /** Diagnostics en cours, par dossier de données : un clic répété pendant l'essai partage le même diagnostic au lieu de lancer d'autres conteneurs. */
+  /** Diagnostics en cours, par dossier de données et image : un clic répété pendant l'essai partage le même diagnostic au lieu de lancer d'autres conteneurs. */
   const runtimeChecks = new Map<string, Promise<RuntimeDiagnostic>>();
 
-  /** Vérifie que les agents tournent en conteneur sur cette machine : lance un conteneur d'essai avec les options d'une vraie tâche. */
-  app.post("/api/agent-runtime/check", async (_req, reply) => {
+  /** Vérifie que les agents tournent en conteneur sur cette machine : lance un conteneur d'essai avec les options d'une vraie tâche, pour l'image demandée (défaut : l'image par défaut). */
+  app.post<{ Body: { image?: unknown } | null }>("/api/agent-runtime/check", async (req, reply) => {
     try {
+      const image = checkedImage(req.body?.image);
       const settings = await deps.settings.get();
-      const key = deps.config.dataDir;
+      const key = `${deps.config.dataDir}|${image}`;
       let running = runtimeChecks.get(key);
       if (!running) {
-        running = diagnoseAgentRuntime(deps.config.agentRuntime, {
+        running = diagnoseAgentRuntime({ ...deps.config.agentRuntime, image }, {
           dataDir: deps.config.dataDir,
           agentAuth: settings.agentAuth,
           apiKeyConfigured: deps.config.anthropicApiKey !== null,
@@ -268,6 +284,7 @@ export function buildServer(base: ServerDeps) {
 
   app.post<{ Body: unknown }>("/api/projects", async (req, reply) => {
     try {
+      checkedImage((req.body as { agentImage?: unknown } | null)?.agentImage);
       return await deps.settings.saveProject(req.body);
     } catch (err) {
       return fail(reply, err, 400);

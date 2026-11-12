@@ -11,6 +11,7 @@ const project: ProjectSettings = {
   targetBranch: "develop",
   allowedCommands: [],
   instructions: "FuelPHP 1.8",
+  agentImage: "",
 };
 
 describe("assemblage du prompt système", () => {

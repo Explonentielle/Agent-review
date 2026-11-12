@@ -249,7 +249,7 @@ async function runAgent(c: RunContext, worktree: string, prompt: string): Promis
     systemPrompt: await loadDevSystemPrompt(c.settings, c.project, commands),
     prompt,
     engine: agentRunConfig(c.settings.dev),
-    runner: c.deps.runner ?? createRunner(c.deps.config, c.settings),
+    runner: c.deps.runner ?? createRunner(c.deps.config, c.settings, c.project),
     allowedCommands: commands,
     signal: c.signal,
     onEvent: (kind, text) => void c.journal.event(kind, text),

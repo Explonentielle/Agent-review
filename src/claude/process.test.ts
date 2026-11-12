@@ -1,5 +1,6 @@
+import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { claudeEnv } from "./process.js";
+import { claudeEnv, runProcess } from "./process.js";
 
 describe("environnement de l'agent", () => {
   const saved = { ...process.env };
@@ -53,5 +54,26 @@ describe("environnement de l'agent", () => {
     Object.assign(process.env, { PATH: "/usr/bin", ANTHROPIC_API_KEY: "cle-du-shell" });
     expect(claudeEnv().ANTHROPIC_API_KEY).toBeUndefined();
     expect(claudeEnv("cle-des-reglages").ANTHROPIC_API_KEY).toBe("cle-des-reglages");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("programme qui se termine sans lire son entrée", () => {
+  it("rend son code et son stderr au lieu de faire tomber l'outil (docker qui échoue tout de suite)", async () => {
+    const uncaught: unknown[] = [];
+    const onUncaught = (err: unknown) => uncaught.push(err);
+    process.on("uncaughtException", onUncaught);
+    try {
+      const res = await runProcess("sh", ["-c", "echo 'image introuvable' >&2; exit 125"], "x".repeat(8_000_000), {
+        cwd: tmpdir(),
+        env: { PATH: process.env.PATH },
+        timeoutMs: 10_000,
+      });
+      expect(res.exitCode).toBe(125);
+      expect(res.stderr).toContain("image introuvable");
+      await new Promise((resolve) => setTimeout(resolve, 50)); // laisse arriver une éventuelle erreur d'écriture tardive
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
   });
 });

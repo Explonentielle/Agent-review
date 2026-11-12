@@ -63,12 +63,13 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
     const checkout = await workspace.checkoutChangeRequest(row.project_id, project.cloneUrl, row.mr_iid, mr.headSha, connector.changeRequestHeadRef(row.mr_iid));
     cleanup = checkout.cleanup;
 
+    const projectSettings = await deps.settings.getProject(row.source, row.project_id);
     const { result, costUsd, numTurns } = await runReviewAgent({
       cwd: checkout.path,
       systemPrompt: await loadSystemPrompt("review", {
         override: settings.systemPrompts.review,
         instructions: settings.instructions.review,
-        project: await deps.settings.getProject(row.source, row.project_id),
+        project: projectSettings,
       }),
       prompt: buildReviewPrompt({
         project,
@@ -79,7 +80,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
         statuses,
       }),
       engine: agentRunConfig(settings.review),
-      runner: deps.runner ?? createRunner(config, settings),
+      runner: deps.runner ?? createRunner(config, settings, projectSettings),
     });
 
     const changedLines = countChangedLines(diffs);

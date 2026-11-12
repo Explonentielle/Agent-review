@@ -169,6 +169,36 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
     expect(loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" }).agentRuntime).toMatchObject({ mode: "host", image: "review-agent-sandbox:local", memory: "1536m", cpus: 1, pids: 256, network: null, containerUser: "auto" });
   });
 
+  it("createRunner : l'image du projet est lancée si elle est autorisée, sinon la tâche est refusée avant tout conteneur", async () => {
+    const config = loadConfig({
+      GITHUB_TOKEN: "github_pat_ENV_123456",
+      DATA_DIR: "/tmp/x",
+      ANTHROPIC_API_KEY: KEY,
+      AGENT_RUNTIME: "docker",
+      DOCKER_BIN: installFakeDocker(),
+      AGENT_CONTAINER_USER: "host",
+      AGENT_IMAGE: "defaut:1",
+      AGENT_IMAGES: "agent-php73:1",
+    });
+    const settings = { ...DEFAULT_SETTINGS, agentAuth: "api" as const };
+    const imageLaunched = () => {
+      const args = read("run-args.txt").split("\n");
+      return args[args.indexOf("claude") - 1]; // l'image précède le programme lancé
+    };
+
+    await createRunner(config, settings, { agentImage: "agent-php73:1" }).run(request());
+    expect(imageLaunched()).toBe("agent-php73:1");
+    await createRunner(config, settings, { agentImage: "" }).run(request());
+    expect(imageLaunched()).toBe("defaut:1");
+    await createRunner(config, settings, null).run(request());
+    expect(imageLaunched()).toBe("defaut:1");
+
+    expect(() => createRunner(config, settings, { agentImage: "intrus:1" })).toThrow(/non autorisée/);
+    // Sur la machine, l'image d'un projet est sans objet : la tâche ne casse pas
+    const onHost = { ...config, agentRuntime: { ...config.agentRuntime, mode: "host" as const } };
+    expect(() => createRunner(onHost, settings, { agentImage: "intrus:1" })).not.toThrow();
+  });
+
   describe("utilisateur du conteneur selon le mode de Docker", () => {
     const argAfter = (flag: string) => {
       const args = read("run-args.txt").split("\n");

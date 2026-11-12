@@ -51,6 +51,7 @@ describe.skipIf(process.platform === "win32")("diagnostic des conteneurs d'agent
   const runtime = (over: Partial<Config["agentRuntime"]> = {}): Config["agentRuntime"] => ({
     mode: "docker",
     image: "mon-image:1",
+    extraImages: [],
     memory: "1536m",
     cpus: 1,
     pids: 256,
