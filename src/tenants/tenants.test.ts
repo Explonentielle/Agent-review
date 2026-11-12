@@ -363,3 +363,122 @@ describe("serveur pour plusieurs personnes", () => {
     expect((await app.inject({ method: "GET", url: "/api/stats", headers: { cookie: `${SESSION_COOKIE}=${other.ctx.userId}` } })).statusCode).toBe(401);
   });
 });
+
+describe("sans connexion (mode local), le propriétaire suit la reconstruction de ses connexions", () => {
+  let h: Harness;
+  let manager: TenantManager;
+  let app: ReturnType<typeof buildServer>;
+
+  beforeEach(async () => {
+    h = await createHarness();
+    manager = new TenantManager({
+      db: h.db,
+      config: h.config,
+      store: createSecretStore(h.db, new Keyring([randomBytes(32)])),
+      ownerUserId: h.local.userId,
+      limits: { review: new ConcurrencyLimiter(1), dev: new ConcurrencyLimiter(1) },
+      hooks: {
+        createForges: async (config, options) => {
+          const forges: Forge[] = [];
+          const workspace = {} as RepoWorkspace;
+          if (config.gitlab) forges.push({ connector: new FakeConnector({ cloneUrl: "file:///x" }, "gitlab"), workspace, username: config.gitlab.username });
+          if (config.github) {
+            const github = new FakeConnector({ cloneUrl: "file:///x" }, "github");
+            github.tickets.set(1, h.ticket({ projectId: 42, projectPath: "Explonentielle/MonAccompagnateur", iid: 1, title: "Gérer le SEO", labels: [] }));
+            forges.push({ connector: github, workspace, username: "Explonentielle" });
+          }
+          return new ForgeRegistry(forges, options);
+        },
+        startPoller: () => () => undefined,
+        verifyGithubToken: async () => undefined,
+      },
+    });
+    // Comme src/index.ts : les dépôts de départ du propriétaire, et un résolveur qui rend ses connexions ACTUELLES à chaque requête, sans login
+    const [owner] = await manager.startKnown(h.local, false);
+    app = buildServer({ ...owner!.deps, accounts: h.accounts, local: h.local, tenants: async (who) => (await manager.get(who)).deps });
+    await app.ready();
+  });
+  afterEach(async () => {
+    await app.close();
+    await manager.stopAll();
+    h.cleanup();
+  });
+
+  const forgesNow = async () => (await app.inject({ method: "GET", url: "/api/stats" })).json<{ forges: { kind: string }[] }>().forges.map((f) => f.kind);
+  const githubIssues = async () =>
+    (await app.inject({ method: "GET", url: "/api/issues" })).json<{ source: string; iid: number; title: string; column: string }[]>().filter((i) => i.source === "github");
+
+  it("jeton GitHub enregistré dans le dashboard : sa forge et ses tickets apparaissent tout de suite, un ticket sans label dans « Autres »", async () => {
+    expect(await forgesNow()).toEqual(["gitlab"]);
+    expect(await githubIssues()).toEqual([]);
+
+    const saved = await app.inject({ method: "POST", url: "/api/secrets/github.token", headers: WRITE, payload: { value: "github_pat_DU_DASHBOARD_1234" } });
+    expect(saved.json()).toEqual({ restartRequired: false });
+
+    expect(await forgesNow()).toEqual(["gitlab", "github"]);
+    expect(await githubIssues()).toMatchObject([{ iid: 1, title: "Gérer le SEO", column: "other" }]);
+
+    // Retiré du coffre : la forge disparaît aussi, sans redémarrage
+    expect((await app.inject({ method: "POST", url: "/api/secrets/github.token/delete", headers: WRITE })).json()).toEqual({ deleted: true, restartRequired: false });
+    expect(await forgesNow()).toEqual(["gitlab"]);
+    expect(await githubIssues()).toEqual([]);
+  });
+
+  it("sans connexion, le serveur ne sert que l'utilisateur local : le résolveur reçoit toujours son contexte", async () => {
+    const seen: TenantContext[] = [];
+    const resolving = buildServer({
+      ...(await manager.get(h.local)).deps,
+      accounts: h.accounts,
+      local: h.local,
+      tenants: async (who) => {
+        seen.push({ userId: who.userId, workspaceId: who.workspaceId });
+        return (await manager.get(who)).deps;
+      },
+    });
+    await resolving.ready();
+    await resolving.inject({ method: "GET", url: "/api/stats" });
+    await resolving.inject({ method: "GET", url: "/index.html" }); // hors /api : pas de résolution
+    await resolving.close();
+    expect(seen).toEqual([{ userId: h.local.userId, workspaceId: h.local.workspaceId }]);
+  });
+});
+
+describe("connexion sans résolveur de personnes : seul l'espace local est servi", () => {
+  it("une session d'un autre espace est refusée (403), celle de l'espace local est servie", async () => {
+    const h = await createHarness();
+    const auth = createAuthRuntime(
+      { publicUrl: "https://review.example", gitlab: { baseUrl: "https://gitlab.example", clientId: "c", clientSecret: "s" }, github: null, owner: "gitlab:alex", allowedUsers: ["gitlab:bob"], sessionDays: 7 },
+      h.db,
+      h.accounts,
+    );
+    const app = buildServer({
+      config: h.config,
+      forges: h.forges,
+      costs: h.costs,
+      reviews: h.reviews,
+      settings: h.settings,
+      tasks: h.tasks,
+      vault: h.vault,
+      audit: h.audit,
+      accounts: h.accounts,
+      local: h.local,
+      auth,
+      enqueueReview: () => undefined,
+      enqueueDev: () => undefined,
+      queueSize: () => 0,
+    });
+    await app.ready();
+    try {
+      const bobId = await h.accounts.createUser({ name: "Bob" });
+      const bobSpace = await h.accounts.createWorkspace({ name: "Espace de Bob", kind: "personal", adminUserId: bobId });
+      const stats = async (userId: number, workspaceId: number) =>
+        (await app.inject({ method: "GET", url: "/api/stats", headers: { cookie: `${SESSION_COOKIE}=${await auth.sessions.create(userId, workspaceId)}` } })).statusCode;
+
+      expect(await stats(h.local.userId, h.local.workspaceId)).toBe(200);
+      expect(await stats(bobId, bobSpace)).toBe(403);
+    } finally {
+      await app.close();
+      h.cleanup();
+    }
+  });
+});

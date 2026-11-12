@@ -80,7 +80,8 @@ async function main(): Promise<void> {
     accounts,
     local,
     auth,
-    tenants: auth ? async (session) => (await manager.get(session)).deps : undefined,
+    // Avec ou sans connexion : chaque requête est servie avec les connexions actuelles de la personne, même après une reconstruction
+    tenants: async (who) => (await manager.get(who)).deps,
   });
   await server.listen({ host: config.server.host, port: config.server.port });
 

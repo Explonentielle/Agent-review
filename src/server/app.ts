@@ -8,7 +8,6 @@ import type { ForgeKind } from "../connectors/types.js";
 import { diagnoseAgentRuntime, type RuntimeDiagnostic } from "../agent/dockerDiagnostic.js";
 import { allowedImages, imageFor } from "../agent/imageName.js";
 import { registerAuth, type AuthRuntime } from "../auth/routes.js";
-import type { SessionContext } from "../auth/sessions.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
 import { currentMonth } from "../db/costs.js";
 import type { ReviewStatus } from "../db/reviews.js";
@@ -22,7 +21,7 @@ import type { Finding, ReviewResult } from "../review/schema.js";
 import { SecretError } from "../secrets/crypto.js";
 import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret } from "../secrets/vault.js";
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
-import type { TenantDeps } from "../tenants/manager.js";
+import type { TenantContext, TenantDeps } from "../tenants/manager.js";
 
 /** Ce que le serveur reçoit : les dépôts et connexions de l'utilisateur local (servis sans connexion), et de quoi servir les autres personnes. */
 export interface ServerDeps extends TenantDeps {
@@ -33,10 +32,11 @@ export interface ServerDeps extends TenantDeps {
   /** Connexion par compte de forge. Absente : pas de connexion, l'outil sert l'utilisateur local. */
   auth?: AuthRuntime;
   /**
-   * Retrouve les dépôts, connexions aux forges et files de la personne d'une session. Absente : toute session d'un autre espace que
-   * l'espace local est refusée (les dépôts reçus ci-dessus sont ceux de l'utilisateur local).
+   * Retrouve les dépôts, connexions aux forges et files ACTUELS d'une personne : celle d'une session, ou l'utilisateur local quand il n'y a pas
+   * de connexion. Appelée à chaque requête, donc elle suit les reconstructions. Absente : toute session d'un autre espace que l'espace local
+   * est refusée, et les dépôts reçus ci-dessus (ceux de l'utilisateur local) servent tels quels.
    */
-  tenants?: (session: SessionContext) => Promise<TenantDeps>;
+  tenants?: (who: TenantContext) => Promise<TenantDeps>;
 }
 
 /**
@@ -105,26 +105,27 @@ export function buildServer(base: ServerDeps) {
   });
 
   // Connexion (si configurée) : sans session valide, tout est refusé sauf la page de connexion et l'aller-retour OAuth
-  if (deps.auth) {
-    registerAuth(app, deps.auth);
-    if (base.tenants) {
-      // Les routes /api d'une session sont servies avec les dépôts et connexions de cette personne
-      const resolve = base.tenants;
-      app.addHook("onRequest", (req, reply, done) => {
-        if (!req.session || !req.url.startsWith("/api/")) return done();
-        resolve(req.session).then(
-          (tenant) => requestDeps.run(tenant, done),
-          (err: unknown) => void reply.code(500).send({ error: errorMessage(err) }),
-        );
-      });
-    } else {
-      // Les dépôts reçus sont liés à l'espace local : une session d'un autre espace ne doit jamais être servie par eux
-      app.addHook("onRequest", async (req, reply) => {
-        if (req.session && req.session.workspaceId !== deps.local.workspaceId && req.url.startsWith("/api/")) {
-          return reply.code(403).send({ error: "Cet espace n'est pas servi par cette installation" });
-        }
-      });
-    }
+  if (deps.auth) registerAuth(app, deps.auth);
+
+  if (base.tenants) {
+    // Les routes /api sont servies avec les dépôts et connexions ACTUELS de la personne (ceux de sa session, ou ceux de l'utilisateur local
+    // sans connexion) : une reconstruction, par exemple après l'enregistrement d'un jeton dans le dashboard, est suivie sans redémarrer
+    const resolve = base.tenants;
+    app.addHook("onRequest", (req, reply, done) => {
+      const who = req.session ?? (deps.auth ? null : deps.local);
+      if (!who || !req.url.startsWith("/api/")) return done();
+      resolve(who).then(
+        (tenant) => requestDeps.run(tenant, done),
+        (err: unknown) => void reply.code(500).send({ error: errorMessage(err) }),
+      );
+    });
+  } else if (deps.auth) {
+    // Les dépôts reçus sont liés à l'espace local : une session d'un autre espace ne doit jamais être servie par eux
+    app.addHook("onRequest", async (req, reply) => {
+      if (req.session && req.session.workspaceId !== deps.local.workspaceId && req.url.startsWith("/api/")) {
+        return reply.code(403).send({ error: "Cet espace n'est pas servi par cette installation" });
+      }
+    });
   }
 
   // --- Général ---------------------------------------------------------------

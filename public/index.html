@@ -1090,9 +1090,20 @@ async function secretAction(act, name) {
     }
     await refreshHeader();
     state.secrets = (await api("/api/secrets")).secrets;
+    document.getElementById("forges-block").innerHTML = forgesBlock();
     document.getElementById("secrets-block").innerHTML = secretsBlock();
     document.getElementById("api-key-state").innerHTML = apiKeyPill();
   } catch (err) { toast(err.message, true); }
+}
+
+/** Forges connectées (le compte utilisé pour chacune) et, pour celles qui manquent, comment les configurer : jeton enregistré dans l'outil ou variables du .env. */
+function forgesBlock() {
+  const st = state.stats || {};
+  const forges = st.forges || [];
+  const has = (kind) => forges.some((f) => f.kind === kind);
+  return `<dl class="kv">${forges.map((f) => `<dt>${forgeName(f.kind)}</dt><dd>@${esc(f.username)}${f.kind === "gitlab" && st.gitlabUrl ? ` · ${esc(st.gitlabUrl)}` : ""}</dd>`).join("")}
+    ${has("github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : enregistre un jeton ci-dessous, ou ajoute <code>GITHUB_TOKEN</code> dans le .env.</dd>`}
+    ${has("gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : ajoute <code>GITLAB_URL</code> dans le .env, puis enregistre un jeton ci-dessous (ou ajoute <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env).</dd>`}</dl>`;
 }
 
 /** Section « Agents dans des conteneurs » : où tournent les agents et, en mode conteneur, le bouton qui vérifie que tout est prêt. */
@@ -1147,10 +1158,8 @@ function renderSettings() {
     <form id="settings-form" autocomplete="off">
       <section class="card-section">
         <h2>Connexion</h2>
-        <p class="desc">Les comptes GitLab et GitHub se lisent dans le fichier <code>.env</code> : à modifier là-bas, puis redémarrer l'outil. GitLab et GitHub peuvent être configurés ensemble. Tes jetons GitLab et GitHub et ta clé API Anthropic peuvent aussi s'enregistrer ci-dessous, chiffrés en base : ils sont à toi seul et pris en compte tout de suite.</p>
-        <dl class="kv">${(st.forges || []).map((f) => `<dt>${forgeName(f.kind)}</dt><dd>@${esc(f.username)}${f.kind === "gitlab" && st.gitlabUrl ? ` · ${esc(st.gitlabUrl)}` : ""}</dd>`).join("")}
-          ${(st.forges || []).some((f) => f.kind === "github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : ajoute <code>GITHUB_TOKEN</code> dans le .env.</dd>`}
-          ${(st.forges || []).some((f) => f.kind === "gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : ajoute <code>GITLAB_URL</code>, <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env.</dd>`}</dl>
+        <p class="desc">Les comptes GitLab et GitHub se configurent de deux façons : un jeton enregistré ci-dessous (chiffré en base, à toi seul, pris en compte tout de suite), ou les variables du fichier <code>.env</code> (prioritaires : à modifier là-bas, puis redémarrer l'outil). GitLab et GitHub peuvent être configurés ensemble. Ta clé API Anthropic s'enregistre aussi ci-dessous.</p>
+        <div id="forges-block">${forgesBlock()}</div>
         <div id="secrets-block">${secretsBlock()}</div>
         ${sessionBlock()}
       </section>
