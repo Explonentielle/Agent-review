@@ -22,6 +22,9 @@ import { SecretError } from "../secrets/crypto.js";
 import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret } from "../secrets/vault.js";
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
 import type { TenantContext, TenantDeps } from "../tenants/manager.js";
+import { computeHero } from "../game/hero.js";
+import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
+import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
 
 /** Ce que le serveur reçoit : les dépôts et connexions de l'utilisateur local (servis sans connexion), et de quoi servir les autres personnes. */
 export interface ServerDeps extends TenantDeps {
@@ -37,13 +40,15 @@ export interface ServerDeps extends TenantDeps {
    * est refusée, et les dépôts reçus ci-dessus (ceux de l'utilisateur local) servent tels quels.
    */
   tenants?: (who: TenantContext) => Promise<TenantDeps>;
+  /** Terminal Claude du navigateur (connexion de l'abonnement) et état de la connexion. Absent : routes non montées. */
+  terminal?: TerminalFeature;
 }
 
 /**
  * Propriétés de `ServerDeps` communes à toutes les personnes. Toutes les autres sont celles de la personne servie : une propriété ajoutée
  * plus tard est donc propre à la personne par défaut, jamais partagée par oubli.
  */
-const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants"]);
+const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal"]);
 
 type IdParams = { Params: { id: string } };
 
@@ -261,6 +266,47 @@ export function buildServer(base: ServerDeps) {
     } catch (err) {
       return fail(reply, err, 400);
     }
+  });
+
+  // --- Terminal Claude et forge (jeu) -----------------------------------------
+
+  if (base.terminal) {
+    registerTerminal(app, { feature: base.terminal, authEnabled: Boolean(base.auth), whoIs: (req) => req.session ?? base.local, ownerUserId: base.local.userId, fail });
+  }
+
+  /** La forge : héros, quêtes et hauts faits déduits de l'état réel de l'outil. */
+  app.get("/api/hero", async (req) => {
+    const who = req.session ?? base.local;
+    const [projects, reviews, tasks] = await Promise.all([deps.settings.listProjects(), deps.reviews.countByStatus(), deps.tasks.list()]);
+    const taskCounts: Record<string, number> = {};
+    for (const task of tasks) taskCounts[task.status] = (taskCounts[task.status] ?? 0) + 1;
+    // La connexion Claude est celle de la machine : elle ne compte que pour son propriétaire. Une CLI lente ne bloque pas la page (4 s au plus).
+    let claudeConnected = false;
+    if (base.terminal && who.userId === base.local.userId) {
+      const slow = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000).unref());
+      claudeConnected = (await Promise.race([base.terminal.status.get(), slow]))?.connected ?? false;
+    }
+    // Atelier animé : les agents actifs (ou terminés depuis peu) et ce qu'ils disent, d'après leur dernière étape connue
+    const activeTasks = tasks.filter((t) => t.status === "running").slice(0, MAX_WORKERS);
+    const steps: Record<number, string> = {};
+    for (const task of activeTasks) {
+      const events = await deps.tasks.events(task.id, 0);
+      const last = [...events].reverse().find((e) => e.kind === "step") ?? [...events].reverse().find((e) => e.kind === "tool");
+      if (last) steps[task.id] = last.text;
+    }
+    const activeReviews = [...(await deps.reviews.list("running", MAX_WORKERS)), ...(await deps.reviews.list("queued", MAX_WORKERS))];
+    const workers = pickWorkers({ tasks, reviews: activeReviews, steps, now: Date.now() });
+    return {
+      ...computeHero({
+        forges: deps.forges.all().map((f) => f.connector.kind),
+        claudeConnected,
+        projects: projects.length,
+        devProjects: projects.filter((p) => p.devEnabled).length,
+        reviews,
+        tasks: taskCounts,
+      }),
+      workers,
+    };
   });
 
   // --- Paramètres ------------------------------------------------------------

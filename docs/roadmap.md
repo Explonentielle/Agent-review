@@ -46,6 +46,7 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 36 | Plateforme | Plateforme hébergée : conteneur par utilisateur, GitLab / GitHub / tickets internes, abonnement ou clé API | Très élevé | Spec, parcours et roadmap détaillée écrits (2026-11-09) ; lot A fait sauf A3 (attend une clé API de test) et A6 : A1, A2, A4 et A5 faits (2026-11-09), voir `docs/roadmap-plateforme.md` ; lot B (GitHub à côté de GitLab) fait le 2026-11-10, à valider sur un vrai dépôt ; lot C (serveur) fait le 2026-11-10 et 11 sauf l'ouverture réelle à d'autres personnes : comptes, secrets chiffrés, données par espace, connexion OAuth, exécution par personne, audit, déploiement préparé (jamais essayé), voir docs/a-tester.md |
 | 37 | Agent dev | Lecture seule des autres projets d'une organisation par l'agent dev | Moyen | Noté (2026-11-12), à spécifier : touche aux droits de l'agent, à discuter avant tout code |
 | 38 | Plateforme | Connexion par organisation (OAuth ou GitHub App) pour la version commerciale | Élevé | Noté (2026-11-12), lié à l'item 36 (lot C) |
+| 39 | Dashboard | Terminal Claude dans le navigateur, premiers pas guidés, forge MMORPG | Élevé | ✅ Fait (2026-11-12), annexe A de ce fichier ; jamais essayé avec la vraie CLI ni sous Linux, voir `docs/a-tester.md` section 11 bis |
 
 ---
 
@@ -404,3 +405,29 @@ Tout élargissement des droits de l'agent doit être discuté avant (règles du 
 **À trancher** : modèle de facturation, rôle de l'administrateur d'organisation, révocation, conservation des jetons (chiffrement, rotation).
 
 Lié à l'item 36 (`docs/vision-plateforme.md`). Rien n'est implémenté.
+
+---
+
+## Annexe A. Terminal Claude, premiers pas et forge MMORPG (item 39, 2026-11-12)
+
+**Demande** : connecter l'abonnement Claude au conteneur depuis le navigateur, sans SSH (c'est ce qui manque pour que l'agent du VPS travaille sur l'abonnement de l'utilisateur), avec en prime un parcours d'accueil et une couche de jeu de rôle sur l'activité réelle de l'outil.
+
+| # | Lot | Contenu | Statut |
+|---|---|---|---|
+| A1 | Terminal | Terminal web dans Paramètres > Connexion, branché sur la CLI `claude` du conteneur (sortie en flux continu, saisie par requêtes, xterm.js servi par l'outil) | ✅ |
+| A2 | Terminal | État de la connexion Claude (`claude auth status`) affiché par une pastille | ✅ |
+| A3 | Accueil | « Premiers pas » : quêtes déduites de l'état réel (jeton de forge, Claude, projet, premier agent) | ✅ |
+| A4 | Jeu | Classe Forgeron, niveaux, XP et hauts faits calculés depuis l'historique des reviews et des tâches, sans nouvelle table | ✅ |
+| A5 | Sécurité | Une session à la fois, `claude` seul (pas de shell), environnement filtré, expiration, refus derrière un proxy sans connexion | ✅ |
+| A6 | Qualité | Tests, `docs/deploiement.md`, `docs/a-tester.md` | ✅ |
+| A7 | Jeu | Atelier animé en 2D (SVG et CSS, sans dépendance) : une forge, un forgeron par agent actif qui bouge et parle par bulles selon l'état réel de ses tâches. Fait en dernier | ✅ |
+
+**Implémenté (2026-11-12)** : tous les lots, sans nouvelle table ni migration.
+- **A1, A2, A5, terminal** : `src/terminal/` (session, lancement, routes) et `src/claude/status.ts`. La CLI `claude` seule tourne dans un pseudo-terminal fourni par l'outil `script` (aucun paquet natif), avec l'environnement filtré des agents ; la sortie part en flux continu (Server-Sent Events, octets en base64), la saisie par requêtes. Une session par personne, 15 min d'inactivité, 1 h au plus, taille fixe 100 x 30, réservé au propriétaire, refusé derrière un reverse proxy tant que `AUTH_*` n'est pas configuré. Côté navigateur : xterm.js 5.5.0 servi par l'outil (`public/vendor/xterm/`, licence MIT jointe), bloc « Abonnement Claude » dans Paramètres > Connexion.
+- **A3, A4** : `src/game/hero.ts` et route `GET /api/hero`. XP, niveaux (seuils 25 x n x (n - 1)), quêtes de premiers pas et hauts faits calculés depuis les forges, projets, reviews et tâches existants ; les petites actions sont plafonnées. Onglet « La forge ».
+- **A7** : `src/game/workers.ts` et atelier SVG animé en CSS (forge, fumée, forgerons au marteau avec étincelles, bulles d'après l'état réel, apprenti qui se promène sans activité ; `prefers-reduced-motion` respecté).
+- **Testé** : typecheck ; 44 tests automatiques nouveaux (héros, forgerons, sonde, lancement, session, routes avec flux réel, API de la forge sur le harnais) exécutés par un substitut de vitest, vitest ne démarrant pas sous Windows avec le lock actuel ; parcours complet dans Chrome sans fenêtre avec un faux programme à la place de `claude`.
+- **Pas testé** : la vraie CLI Claude dans le terminal, l'outil `script` (inexistant sous Windows), Linux, le VPS. Voir `docs/a-tester.md`, section 11 bis.
+- **Limites** : pas de redimensionnement du terminal ; un seul terminal par personne et la connexion Claude est celle de la machine (un conteneur par personne viendra avec le lot D) ; la connexion à l'abonnement dans un conteneur hébergé reste à faire valider par Anthropic avant toute ouverture à d'autres personnes (item 36).
+
+**Hors périmètre** : l'authentification publique (durcissement, HTTPS), confiée à l'agent par ticket une fois Claude connecté ; redimensionnement du terminal ; plusieurs terminaux ou plusieurs personnes (conteneur par personne, lot D).

@@ -1,4 +1,6 @@
 import { createAuthRuntime } from "./auth/runtime.js";
+import { claudeEnv } from "./claude/process.js";
+import { createClaudeStatusProbe } from "./claude/status.js";
 import { loadConfig, type Config } from "./config.js";
 import { createAccountRepo } from "./db/accounts.js";
 import { openDb } from "./db/index.js";
@@ -8,6 +10,8 @@ import { createSecretStore, hasAnySecret } from "./secrets/store.js";
 import { buildServer } from "./server/app.js";
 import { ConcurrencyLimiter } from "./tenants/limiter.js";
 import { TenantManager } from "./tenants/manager.js";
+import { claudeTerminalLaunch } from "./terminal/launch.js";
+import { TerminalHub } from "./terminal/session.js";
 
 /**
  * Déclare au journal les secrets du `.env` pour qu'ils n'y apparaissent jamais, même dans un message d'erreur.
@@ -75,11 +79,20 @@ async function main(): Promise<void> {
   });
   const [owner] = await manager.startKnown(local, auth?.policy.multiUser ?? false);
 
+  // Terminal Claude du navigateur : la CLI seule, avec l'environnement filtré des agents (jamais les secrets de l'outil)
+  const terminalHub = new TerminalHub();
+  const terminal = {
+    hub: terminalHub,
+    launch: () => claudeTerminalLaunch({ claudeBin: config.claudeBin, env: claudeEnv(), cwd: config.dataDir }),
+    status: createClaudeStatusProbe(config.claudeBin, () => claudeEnv()),
+  };
+
   const server = buildServer({
     ...owner!.deps,
     accounts,
     local,
     auth,
+    terminal,
     // Avec ou sans connexion : chaque requête est servie avec les connexions actuelles de la personne, même après une reconstruction
     tenants: async (who) => (await manager.get(who)).deps,
   });
@@ -88,6 +101,7 @@ async function main(): Promise<void> {
   log.info("app.started", { dashboard: `http://localhost:${config.server.port}`, actionMode: (await owner!.deps.settings.get()).actionMode });
 
   const shutdown = async () => {
+    terminalHub.stopAll();
     await manager.stopAll();
     await server.close();
     await db.close();

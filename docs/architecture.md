@@ -113,6 +113,9 @@ Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le do
 | `src/budget.ts`, `src/db/costs.ts` | Consommation des agents par mois, projet et type de tâche. Budget mensuel appliqué en mode clé API : une review ou une tâche de dev n'est pas lancée une fois le budget atteint |
 | `src/redact/` | Caviardage des données personnelles avant tout envoi au modèle : détecteurs à validation, repères stables, mode strict. Pas encore branché (réservé au support client) |
 | `src/claude/process.ts` | Lancement de la CLI : stdin, streaming ligne par ligne, délai maximum, annulation, environnement sans clé API |
+| `src/claude/status.ts` | Sonde de l'état de connexion de la CLI (`claude auth status`), mise en mémoire 30 s : pastille « connecté » des Paramètres et quête du jeu |
+| `src/terminal/` | Terminal Claude du navigateur, pour connecter l'abonnement sans SSH : `session.ts` (une session par personne, sortie gardée, expiration), `launch.ts` (la CLI `claude` seule dans un pseudo-terminal fourni par l'outil `script`, environnement filtré des agents, jamais un shell), `routes.ts` (flux de sortie en Server-Sent Events, saisie par requêtes, réservé au propriétaire, refusé derrière un proxy sans connexion par compte). Côté navigateur : xterm.js, servi par l'outil (`public/vendor/xterm/`, version figée) |
+| `src/game/` | La forge, couche de jeu déduite de l'activité réelle sans aucune table : `hero.ts` (XP, niveaux, quêtes de premiers pas, hauts faits), `workers.ts` (forgerons de l'atelier animé : un par agent actif, avec ce qu'il dit d'après sa dernière étape) |
 | `src/review/*` | Review : contexte, worktree git (partagé avec l'agent dev), moteur, décision, mise en forme, orchestration |
 | `src/dev/*` | Agent dev : garde-fous, templates, contexte, moteur, orchestration |
 | `src/server/app.ts` | API JSON et service du dashboard |

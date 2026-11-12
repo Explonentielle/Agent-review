@@ -133,6 +133,26 @@ Fermé par défaut (`AGENT_RUNTIME` absent = les agents tournent comme avant). �
 - [ ] La CLI Claude Code accepte de tourner en root du conteneur avec `--permission-mode dontAsk` (elle refuse seulement `--dangerously-skip-permissions` en root, que l'outil n'utilise pas) : à confirmer avec la vraie CLI.
 - [ ] `ps` sur le VPS : l'outil et `dockerd` tournent sous `review`, pas sous root ; rag-saas est inchangé (`docker ps` avec le Docker de root).
 
+## 11 bis. Terminal Claude, premiers pas et atelier (annexe A de la roadmap)
+
+Essayé dans un vrai navigateur (Chrome sans fenêtre, sous Windows) avec un **faux programme** à la place de `claude` : ouverture du terminal, sortie en flux continu avec accents et caractères japonais, saisie et touche Entrée, pastille qui passe à « connecté », arrêt de la session, rendu de la page « La forge » (quatre forgerons, bulles, étincelles). **Jamais essayé avec la vraie CLI ni avec l'outil `script`, qui n'existe pas sous Windows.**
+
+Sur le VPS (Linux) :
+- [ ] `docker compose exec app which script` affiche un chemin. Sinon, le terminal le dit (« exige l'outil script ») : le dire avant de continuer.
+- [ ] Paramètres > Connexion > Abonnement Claude : pastille « non connecté », puis **Ouvrir le terminal Claude** : la CLI s'affiche (choix du thème, puis de la connexion).
+- [ ] Choisir la connexion avec ton compte Claude : un lien s'affiche. Il se lit entier malgré la largeur du terminal (sinon le copier avec la souris). L'ouvrir dans ton navigateur, se connecter, copier le code, le **coller** dans le terminal (Ctrl+Maj+V ou clic droit), Entrée.
+- [ ] La pastille passe à « connecté » en moins de 10 s, avec un message « Claude est connecté ». `docker compose exec app claude auth status --text` le confirme.
+- [ ] **Arrêter la session**, recharger la page, vérifier que la pastille reste « connecté » (la session est dans le volume), puis `docker compose restart app` : toujours connecté.
+- [ ] Les flèches, Tab, Échap et Ctrl+C fonctionnent dans le terminal. Les couleurs et le cadre de la CLI ne sont pas déformés (taille fixe 100 x 30).
+- [ ] Laisser le terminal ouvert sans rien taper 15 min : la session se ferme seule (`[Session terminée]`).
+- [ ] Depuis un autre onglet, ouvrir la page avec un en-tête proxy (`curl -H 'X-Forwarded-For: 1.2.3.4' http://127.0.0.1:4321/api/terminal`) : refusé (403) tant que `AUTH_*` n'est pas configuré.
+- [ ] Lancer une tâche de l'agent dev : elle tourne sur ton abonnement, sans erreur d'authentification.
+
+La forge (onglet « La forge ») :
+- [ ] Niveau, XP et quêtes cohérents avec ce que tu as configuré ; la quête « Réveiller l'apprenti » se coche quand Claude est connecté, le bouton « Ouvrir le terminal » mène aux Paramètres et ouvre le terminal.
+- [ ] Pendant une tâche de l'agent dev : un forgeron frappe l'enclume avec des étincelles, sa bulle dit la dernière étape connue ; à la fin, il lève le marteau (« Pièce forgée ! »). Sans activité : un apprenti se promène et parle tout seul.
+- [ ] Avec « réduire les animations » activé dans le système, la scène est immobile mais lisible.
+
 ## 12. Pas testé du tout
 
 - Un vrai serveur PostgreSQL (pilote `pg`) : seuls SQLite et PostgreSQL embarqué (PGlite) sont testés. Lancer avec `TEST_DATABASE_URL` pour la suite complète.
