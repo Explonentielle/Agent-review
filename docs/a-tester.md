@@ -29,6 +29,7 @@ Paramètres > Connexion > « Jetons enregistrés dans l'outil ».
 Jamais essayé sur un vrai dépôt. Prérequis : un dépôt privé de test (un README, 2 ou 3 issues assignées à toi) et un jeton à portée fine limité à ce dépôt : Contents, Pull requests et Issues en lecture et écriture ; Checks et Commit statuses en lecture.
 
 - [ ] Onglet Tickets : les issues assignées à toi apparaissent avec l'étiquette GitHub et le numéro `#12` (pas `!12`).
+- [ ] Filtre par forge (pastilles sous le titre, visibles dès que GitLab et GitHub sont connectés) : « Toutes » affiche tout ; « GitHub » ne montre que les tickets GitHub, « GitLab » que ceux de GitLab ; chaque pastille porte son compteur (qui suit le champ de recherche). Recharger la page : le choix est retenu. Taper dans la recherche garde le filtre actif.
 - [ ] Ajouter le projet GitHub dans Paramètres > Projets (choisir la forge GitHub), activer l'agent dev, renseigner les branches.
 - [ ] Lancer l'agent sur une issue : une branche `feature/<n>-...` est poussée, une PR **Draft** s'ouvre, un commentaire est posé sur l'issue. Aucune autre branche n'est touchée.
 - [ ] Le label de départ (réglé dans Workflow des tickets) est posé sur l'issue ; un label « Portée::valeur » remplace l'autre de la même portée.

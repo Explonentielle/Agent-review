@@ -578,7 +578,8 @@ async function copy(text) {
 /* =====================================================================
    Navigation
    ===================================================================== */
-const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewId: null, taskId: null, ticketSearch: "", issues: null, issuesAt: null };
+const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewId: null, taskId: null, ticketSearch: "", ticketSource: "", issues: null, issuesAt: null };
+try { state.ticketSource = localStorage.getItem("ra.ticketSource") || ""; } catch { /* stockage indisponible */ }
 
 function route() {
   const [tab = "tickets", id] = location.hash.replace(/^#/, "").split("/");
@@ -644,7 +645,14 @@ async function loadTickets(force) {
 function renderTickets() {
   const root = document.getElementById("view-tickets");
   const q = state.ticketSearch.toLowerCase();
-  const issues = state.issues.filter((i) => !q || `${i.title} ${i.projectPath} #${i.iid}`.toLowerCase().includes(q));
+  const matching = state.issues.filter((i) => !q || `${i.title} ${i.projectPath} #${i.iid}`.toLowerCase().includes(q));
+  // Filtre par forge : proposé dès que plusieurs forges sont connectées ; un choix retenu pour une forge disparue est ignoré
+  const sources = [...new Set([...(state.stats?.forges || []).map((f) => f.kind), ...state.issues.map((i) => i.source)])];
+  const source = sources.includes(state.ticketSource) ? state.ticketSource : "";
+  const issues = source ? matching.filter((i) => i.source === source) : matching;
+  const sourceChips = sources.length > 1
+    ? `<div class="chips">${["", ...sources].map((k) => `<button class="fchip ${k === source ? "active" : ""}" data-tsource="${esc(k)}">${k ? esc(forgeName(k)) : "Toutes"}<span class="n">${k ? matching.filter((i) => i.source === k).length : matching.length}</span></button>`).join("")}</div>`
+    : "";
   const wf = state.settingsCache?.workflow;
   const notConfigured = wf && !wf.todoLabels.length && !wf.inProgressLabels.length;
 
@@ -681,9 +689,17 @@ function renderTickets() {
       <input class="search" id="ticket-search" placeholder="Filtrer (titre, projet, #numéro)" value="${esc(state.ticketSearch)}">
       <button class="btn" data-act="refresh-tickets">Actualiser</button>
     </div>
+    ${sourceChips}
     ${notConfigured ? `<div class="callout info">${ICON.info}<h3>Range tes tickets par statut</h3><p>Indique les labels de ton workflow (« à traiter », « en cours ») dans <a href="#settings">Paramètres</a> : en attendant, ils sont tous dans « Autres ».</p></div>` : ""}
     ${state.issues.length ? `<div class="board">${cols}</div>` : `<div class="empty">Aucun ticket ouvert ne t'est assigné.</div>`}
   </div></div>`;
+}
+
+/** Filtre l'onglet Tickets sur une forge (vide = toutes) et retient le choix pour la prochaine visite. */
+function setTicketSource(source) {
+  state.ticketSource = source;
+  try { localStorage.setItem("ra.ticketSource", source); } catch { /* stockage indisponible */ }
+  renderTickets();
 }
 
 async function launchAgent(source, projectId, iid) {
@@ -1481,6 +1497,7 @@ document.addEventListener("click", async (e) => {
   if ((t = el("[data-task]"))) return go(`#dev/${t.dataset.task}`);
   if ((t = el("[data-review]"))) return go(`#reviews/${t.dataset.review}`);
   if ((t = el("[data-rfilter]"))) { state.reviewFilter = t.dataset.rfilter; return refreshReviews(); }
+  if ((t = el("[data-tsource]"))) return setTicketSource(t.dataset.tsource);
   if ((t = el("[data-launch]"))) { const [source, p, i] = t.dataset.launch.split(":"); return launchAgent(source, Number(p), Number(i)); }
   if ((t = el("[data-configure]"))) { state.prefillProject = t.dataset.configure; state.prefillSource = t.dataset.configureSource; return go("#settings"); }
   if ((t = el("[data-copy]"))) return copy(t.dataset.copy);

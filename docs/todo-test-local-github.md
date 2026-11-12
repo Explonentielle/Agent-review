@@ -22,7 +22,7 @@ Je ne peux pas faire à ta place : créer le jeton, modifier le `.env`, cliquer 
 ## C. Vérifier dans le dashboard (5 min)
 
 - [ ] http://localhost:4321 > Paramètres > Connexion : une ligne **GitHub** avec ton identifiant `@...`.
-- [ ] Onglet Tickets : l'issue apparaît avec l'étiquette GitHub et un numéro `#N` (pas `!N`). Si elle n'y est pas : elle n'est pas assignée à toi, le jeton n'a pas accès à ce dépôt, ou l'outil n'a pas été relancé après l'ajout du jeton. Sa carte porte un bouton **Configurer le projet** : raccourci vers l'ajout du projet ci-dessous.
+- [ ] Onglet Tickets : l'issue apparaît avec l'étiquette GitHub et un numéro `#N` (pas `!N`). Si elle n'y est pas : elle n'est pas assignée à toi, le jeton n'a pas accès à ce dépôt, ou l'outil n'a pas été relancé après l'ajout du jeton. Sa carte porte un bouton **Configurer le projet** : raccourci vers l'ajout du projet ci-dessous. Sous le titre, les pastilles **Toutes / GitLab / GitHub** (avec leur compteur) filtrent par forge : clique **GitHub** pour ne voir que tes tickets GitHub. Le choix est retenu à la prochaine visite. Un ticket sans label est dans la colonne « Autres ».
 - [ ] Paramètres > Projets > **Ajouter un projet** > forge GitHub > rechercher le dépôt. Cocher « Autoriser l'agent dev », branche de départ = la branche principale (ex. `main`), branche cible = la même. **Commandes autorisées : vide** pour ce premier essai (l'agent le dira dans son rapport). Enregistrer.
 
 ## D. L'agent dev (10 à 15 min, consomme ton quota d'abonnement)
