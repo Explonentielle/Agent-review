@@ -1097,9 +1097,7 @@ function renderSettings() {
   const costs = state.costs;
   const seenLabels = [...new Set((state.issues || []).flatMap((i) => i.labels))].sort();
   const usd = (n) => `${n.toFixed(2)} $`;
-  const costsLine = !costs ? "indisponible" : costs.lines.length
-    ? `${usd(costs.totalUsd)} <span class="note" style="display:inline">(${costs.lines.map((l) => `${l.kind === "dev" ? "dev" : "review"} ${esc(l.projectPath)} : ${usd(l.usd)}`).slice(0, 3).join(" · ")}${costs.lines.length > 3 ? " · ..." : ""})</span>`
-    : "0.00 $";
+  const costsLine = costs ? usd(costs.totalUsd) : "indisponible";
 
   document.getElementById("settings").innerHTML = `
     <div class="page-head"><div><h1>Paramètres</h1><div class="sub">Enregistrés dans la base locale de l'outil. Seuls les secrets restent dans le fichier .env.</div></div></div>
