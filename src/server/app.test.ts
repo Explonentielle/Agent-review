@@ -1,4 +1,8 @@
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { RuntimeDiagnostic } from "../agent/dockerDiagnostic.js";
 import { createHarness, type Harness } from "../testing/harness.js";
 import { buildServer } from "./app.js";
 
@@ -171,6 +175,39 @@ describe("API du dashboard sur le connecteur", () => {
     expect(h.config.anthropicApiKey).toBeNull();
     expect((await app.inject({ method: "POST", url: "/api/secrets/anthropic.api_key/delete" })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/api/secrets/inconnu/delete", headers: WRITE })).statusCode).toBe(400);
+  });
+
+  it("agents en conteneur : réglages sans secret, diagnostic protégé par l'en-tête anti-CSRF, vide hors du mode conteneur", async () => {
+    const info = await app.inject({ method: "GET", url: "/api/agent-runtime" });
+    expect(info.json()).toEqual({ mode: "host", image: "review-agent-sandbox:local", memory: "1536m", cpus: 1, pids: 256, network: null, containerUser: "auto" });
+
+    expect((await app.inject({ method: "POST", url: "/api/agent-runtime/check" })).statusCode).toBe(403);
+    const res = await app.inject({ method: "POST", url: "/api/agent-runtime/check", headers: WRITE });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ mode: "host", ok: true, checks: [] });
+  });
+
+  it.skipIf(process.platform === "win32")("diagnostic des conteneurs : les clics répétés partagent un seul essai, qui décrit l'état de Docker", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "route-diag-"));
+    try {
+      const bin = path.join(dir, "docker");
+      writeFileSync(bin, '#!/bin/sh\necho x >> "$(dirname "$0")/calls.txt"\nsleep 0.4\necho "Cannot connect" >&2\nexit 1\n');
+      chmodSync(bin, 0o755);
+      h.config.agentRuntime = { ...h.config.agentRuntime, mode: "docker", dockerBin: bin };
+      const post = () => app.inject({ method: "POST", url: "/api/agent-runtime/check", headers: WRITE });
+      const calls = () => readFileSync(path.join(dir, "calls.txt"), "utf8").trim().split("\n").length;
+
+      const [a, b] = await Promise.all([post(), post()]);
+      expect(a.json()).toEqual(b.json());
+      expect(a.json<RuntimeDiagnostic>().ok).toBe(false);
+      expect(a.json<RuntimeDiagnostic>().checks.map((c) => c.id)).toEqual(["auth", "docker"]);
+      expect(calls()).toBe(1); // un seul docker lancé pour les deux requêtes
+
+      await post(); // l'essai précédent est terminé : un nouveau clic en relance un
+      expect(calls()).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("secrets : un jeton GitHub refusé par GitHub n'est pas enregistré ; un secret du .env n'est pas modifiable", async () => {

@@ -109,6 +109,8 @@ Sauvegarde d'abord : les migrations de base ne se défont pas. Retour arrière :
 - Une **image** qui contient la CLI Claude Code (`claude`) **et** les outils des projets, construite avec `Dockerfile.agent` (Node, git, la CLI) : `docker build -f Dockerfile.agent -t review-agent-sandbox:local .` (nom par défaut de `AGENT_IMAGE`). Les outils de tes projets s'ajoutent avec `--build-arg AGENT_PACKAGES="php-cli php-mbstring php-xml unzip"`. Ce sont les paquets de Debian bookworm (PHP 8.2 par exemple) : un projet qui exige une autre version (PHP 7.3...) demande une autre image de base, non gérée pour l'instant. L'image n'est jamais téléchargée au lancement d'une tâche (`--pull never`).
 - L'outil doit pouvoir lancer `docker`.
 
+**Vérifier que tout est prêt** : dans le dashboard, Paramètres > **Agents dans des conteneurs** > **Tester les conteneurs**. L'outil lance un conteneur d'essai avec les options exactes d'une vraie tâche et affiche sept contrôles : mode clé API, Docker (version, avec ou sans root), image présente, écriture dans le dossier de travail, isolation (système de fichiers en lecture seule, capacités retirées, pas d'élévation de droits), plafonds de mémoire et de processus réellement appliqués, CLI Claude Code présente. Chaque échec dit quoi faire. Le test dure quelques secondes, ne touche à aucun réglage, et supprime son conteneur et son dossier d'essai ensuite.
+
 **Décision de déploiement (2026-11-12) : l'outil sur la machine, avec Docker sans root**
 Lancer des conteneurs, c'est pouvoir être root sur la machine : le processus qui lance `docker` est de confiance. L'application dans son conteneur (le `docker-compose.yml` des sections 1 à 8) n'a **pas** accès à Docker et ne peut donc pas utiliser ce mode. Deux voies existaient, la première est **retenue** :
 1. L'outil tourne sur la machine sous un utilisateur dédié avec **Docker sans root** (rootless) ; seule la base reste dans compose. Une compromission de l'outil ne donne alors pas root. Mise en place à la section 11.
@@ -182,7 +184,7 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
    journalctl --user -u review-agent -f
    ```
    Le fichier est copié dans le dossier des services de l'utilisateur, `daemon-reload` le prend en compte, `enable --now` le lance et le programme au démarrage, `journalctl -f` suit le journal : on y lit `app.started`.
-9. **Contrôles** : `ss -tlnp | grep -E '4321|5433'` ne montre que `127.0.0.1`. Dans le dashboard : Paramètres > Modèles > **Clé API**, puis lance une review : `docker ps` montre un conteneur `ra-agent-...` pendant la tâche, et plus rien après.
+9. **Contrôles** : `ss -tlnp | grep -E '4321|5433'` ne montre que `127.0.0.1`. Dans le dashboard : Paramètres > Modèles > **Clé API**, puis Paramètres > Agents dans des conteneurs > **Tester les conteneurs** (section 10) : les sept contrôles doivent être `ok` (il revérifie l'écriture dans le dossier de travail et les plafonds de l'étape 4, avec la vraie configuration). Lance ensuite une review : `docker ps` montre un conteneur `ra-agent-...` pendant la tâche, et plus rien après.
 
 **Au quotidien dans cette variante**
 - **Accès** : tunnel SSH comme à la section 6.

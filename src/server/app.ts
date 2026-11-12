@@ -5,6 +5,7 @@ import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
 import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 import type { ForgeKind } from "../connectors/types.js";
+import { diagnoseAgentRuntime, type RuntimeDiagnostic } from "../agent/dockerDiagnostic.js";
 import { registerAuth, type AuthRuntime } from "../auth/routes.js";
 import type { SessionContext } from "../auth/sessions.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
@@ -178,6 +179,37 @@ export function buildServer(base: ServerDeps) {
       totalUsd: lines.reduce((sum, l) => sum + l.usd, 0),
       lines,
     };
+  });
+
+  // --- Agents dans des conteneurs ---------------------------------------------
+
+  /** Où tournent les agents (sur la machine ou en conteneur) et avec quels plafonds. Aucun secret. */
+  app.get("/api/agent-runtime", async () => {
+    const r = deps.config.agentRuntime;
+    return { mode: r.mode, image: r.image, memory: r.memory, cpus: r.cpus, pids: r.pids, network: r.network, containerUser: r.containerUser };
+  });
+
+  /** Diagnostics en cours, par dossier de données : un clic répété pendant l'essai partage le même diagnostic au lieu de lancer d'autres conteneurs. */
+  const runtimeChecks = new Map<string, Promise<RuntimeDiagnostic>>();
+
+  /** Vérifie que les agents tournent en conteneur sur cette machine : lance un conteneur d'essai avec les options d'une vraie tâche. */
+  app.post("/api/agent-runtime/check", async (_req, reply) => {
+    try {
+      const settings = await deps.settings.get();
+      const key = deps.config.dataDir;
+      let running = runtimeChecks.get(key);
+      if (!running) {
+        running = diagnoseAgentRuntime(deps.config.agentRuntime, {
+          dataDir: deps.config.dataDir,
+          agentAuth: settings.agentAuth,
+          apiKeyConfigured: deps.config.anthropicApiKey !== null,
+        }).finally(() => runtimeChecks.delete(key));
+        runtimeChecks.set(key, running);
+      }
+      return await running;
+    } catch (err) {
+      return fail(reply, err);
+    }
   });
 
   // --- Secrets : jamais renvoyés, seulement leur présence et leur origine -------

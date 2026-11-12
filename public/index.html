@@ -290,6 +290,9 @@
   .audit-list { display: grid; font-size: 13px; }
   .audit-row { display: grid; grid-template-columns: 110px 80px 1fr auto; gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--border); }
   .audit-row small { color: var(--muted); }
+  .check-list { display: grid; gap: 8px; margin: 10px 0 12px; font-size: 13px; }
+  .check-row { display: grid; grid-template-columns: 56px 200px 1fr; gap: 10px; align-items: baseline; }
+  .check-row b { font-weight: 600; }
   .secret-form { display: flex; gap: 8px; flex-wrap: wrap; }
   .secret-form input { flex: 1; min-width: 220px; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; }
   .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: calc(100vw - 40px); }
@@ -994,8 +997,9 @@ async function loadSettings() {
   state.prefillProject = null;
   state.prefillSource = null;
   try {
-    const [s, projects, costs, secrets, me, audit] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), api("/api/me").catch(() => null), api("/api/audit?limit=30").catch(() => null), refreshHeader()]);
+    const [s, projects, costs, secrets, me, audit, runtime] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), api("/api/me").catch(() => null), api("/api/audit?limit=30").catch(() => null), api("/api/agent-runtime").catch(() => null), refreshHeader()]);
     settingsData = s;
+    state.runtime = runtime;
     state.me = me;
     state.audit = audit;
     state.secrets = secrets ? secrets.secrets : null;
@@ -1091,6 +1095,38 @@ async function secretAction(act, name) {
   } catch (err) { toast(err.message, true); }
 }
 
+/** Section « Agents dans des conteneurs » : où tournent les agents et, en mode conteneur, le bouton qui vérifie que tout est prêt. */
+function runtimeSection() {
+  const r = state.runtime;
+  const body = !r ? `<p class="note">L'état des conteneurs d'agents est indisponible.</p>`
+    : r.mode !== "docker" ? `<p class="note">Les agents tournent directement sur la machine (<code>AGENT_RUNTIME=host</code>). Pour les isoler dans des conteneurs jetables, voir <code>docs/deploiement.md</code>, sections 10 et 11.</p>`
+    : `<dl class="kv"><dt>Image</dt><dd><code>${esc(r.image)}</code></dd><dt>Plafonds par agent</dt><dd>${esc(r.memory)} de mémoire, ${esc(String(r.cpus))} processeur(s), ${esc(String(r.pids))} processus</dd><dt>Utilisateur du conteneur</dt><dd>${esc(r.containerUser)}</dd></dl>
+      <button type="button" class="btn sm" data-act="runtime-check">Tester les conteneurs</button>
+      <div id="runtime-result"></div>`;
+  return `<section class="card-section">
+        <h2>Agents dans des conteneurs</h2>
+        <p class="desc">Chaque review et chaque tâche de dev peut tourner dans un conteneur jetable qui ne voit que son dossier de travail (réglage <code>AGENT_RUNTIME</code> du .env). Le test lance un conteneur d'essai avec les options d'une vraie tâche, et vérifie le mode clé API, Docker, l'image, l'écriture dans le dossier de travail, l'isolation, les plafonds de ressources et la CLI Claude Code.</p>
+        ${body}
+      </section>`;
+}
+
+/** Lance le diagnostic des conteneurs d'agents et affiche un contrôle par ligne. Aucun réglage n'est modifié. */
+async function runRuntimeCheck(button) {
+  const out = document.getElementById("runtime-result");
+  button.disabled = true;
+  out.innerHTML = `<p class="note">Essai en cours, quelques secondes...</p>`;
+  try {
+    const res = await api("/api/agent-runtime/check", {});
+    out.innerHTML = `<div class="check-list">${res.checks.map((c) => `<div class="check-row">${c.ok ? pill("green", "ok") : pill("red", "échec")}<b>${esc(c.label)}</b><span>${esc(c.detail)}</span></div>`).join("")}</div>
+      <p class="note">${res.ok ? "Tout est en ordre : les agents peuvent tourner en conteneur." : "Corrige les points en échec, puis relance le test."}</p>`;
+  } catch (err) {
+    out.innerHTML = "";
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderSettings() {
   const s = settingsData.settings;
   const st = state.stats || {};
@@ -1144,6 +1180,8 @@ function renderSettings() {
           ${agentFields("dev", s.dev, "Agent dev", "Une tâche de dev consomme bien plus qu'une review : surveille ton quota.")}
         </div>
       </section>
+
+      ${runtimeSection()}
 
       <section class="card-section">
         <h2>Règles de décision des reviews</h2>
@@ -1450,6 +1488,7 @@ document.addEventListener("click", async (e) => {
     return toast(act === "prompt-load-default" ? "Prompt d'origine affiché : modifie-le puis enregistre." : "Champ vidé : le prompt d'origine sera utilisé après enregistrement.");
   }
   if (act === "secret-save" || act === "secret-delete") return secretAction(act, t.dataset.name);
+  if (act === "runtime-check") return runRuntimeCheck(t);
   if (act === "logout") {
     await api("/auth/logout", {}).catch(() => undefined);
     location.href = "/login";

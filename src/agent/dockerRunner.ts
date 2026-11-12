@@ -42,7 +42,7 @@ const AGENT_HOME = "/home/agent";
  * @param apiKey Clé API Anthropic de la tâche.
  * @returns L'environnement du client docker.
  */
-function dockerClientEnv(apiKey: string | null): NodeJS.ProcessEnv {
+export function dockerClientEnv(apiKey: string | null): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const name of ["PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"]) {
     if (process.env[name] !== undefined) env[name] = process.env[name];
@@ -58,12 +58,20 @@ function dockerClientEnv(apiKey: string | null): NodeJS.ProcessEnv {
  * @param runtime Réglages de l'exécution en conteneur.
  * @param req Tâche de l'agent (dossier de travail).
  * @param name Nom du conteneur, pour pouvoir l'arrêter.
- * @param cliArgs Arguments de la CLI Claude Code.
+ * @param cliArgs Arguments du programme lancé (par défaut ceux de la CLI Claude Code).
  * @param user Utilisateur du conteneur `uid:gid` : celui du processus de l'outil (Docker classique) ou `0:0` (Docker sans root), voir `resolveContainerUser`.
+ * @param program Programme lancé dans le conteneur : la CLI Claude Code, sauf pour le diagnostic des conteneurs (`sh`).
  * @returns Les arguments de `docker`.
  * @throws Error Si le dossier de travail n'est pas un chemin absolu sûr.
  */
-export function buildDockerArgs(runtime: DockerRuntime, req: Pick<AgentRequest, "cwd">, name: string, cliArgs: string[], user: string): string[] {
+export function buildDockerArgs(
+  runtime: DockerRuntime,
+  req: Pick<AgentRequest, "cwd">,
+  name: string,
+  cliArgs: string[],
+  user: string,
+  program = "claude",
+): string[] {
   // `--mount` sépare ses options par des virgules : un chemin qui en contient pourrait ajouter une option (monter autre chose)
   if (!path.isAbsolute(req.cwd) || /[,\n\r]/.test(req.cwd)) throw new Error(`Dossier de travail invalide pour le conteneur de l'agent : ${req.cwd}`);
   return [
@@ -86,7 +94,7 @@ export function buildDockerArgs(runtime: DockerRuntime, req: Pick<AgentRequest, 
     "-e", `HOME=${AGENT_HOME}`,
     "-e", "ANTHROPIC_API_KEY", // sans valeur : prise dans l'environnement du client docker
     runtime.image,
-    "claude",
+    program,
     ...cliArgs,
   ];
 }
@@ -97,7 +105,7 @@ export function buildDockerArgs(runtime: DockerRuntime, req: Pick<AgentRequest, 
  * @param name Nom du conteneur.
  * @returns Rien.
  */
-function removeContainer(dockerBin: string, name: string): Promise<void> {
+export function removeContainer(dockerBin: string, name: string): Promise<void> {
   return new Promise((resolve) => {
     execFile(dockerBin, ["rm", "-f", name], { env: dockerClientEnv(null), timeout: 20_000 }, () => resolve());
   });
@@ -107,7 +115,24 @@ function removeContainer(dockerBin: string, name: string): Promise<void> {
 const rootlessByDaemon = new Map<string, boolean>();
 
 /**
- * Indique si le démon Docker tourne sans root (rootless) : `docker info` liste alors l'option de sécurité `rootless`.
+ * Interroge le démon Docker (`docker info`) : sa version et s'il tourne sans root (l'option de sécurité `rootless` est alors listée).
+ * @param dockerBin Commande `docker`.
+ * @returns La version du démon (« inconnue » si absente) et `rootless` à vrai si le démon est sans root.
+ * @throws Error Si Docker ne répond pas (démon arrêté, commande introuvable).
+ */
+export async function readDockerInfo(dockerBin: string): Promise<{ version: string; rootless: boolean }> {
+  const raw = await new Promise<string>((resolve, reject) => {
+    execFile(dockerBin, ["info", "--format", "{{.ServerVersion}}|{{.SecurityOptions}}"], { env: dockerClientEnv(null), timeout: 20_000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`Impossible d'interroger Docker (${dockerBin} info) : ${(stderr.trim() || err.message).slice(0, 300)}`));
+      else resolve(stdout);
+    });
+  });
+  const sep = raw.indexOf("|");
+  return { version: (sep > 0 ? raw.slice(0, sep) : "").trim() || "inconnue", rootless: raw.includes("name=rootless") };
+}
+
+/**
+ * Indique si le démon Docker tourne sans root. Le résultat est mémorisé par démon, sauf en cas d'échec.
  * @param dockerBin Commande `docker`.
  * @returns `true` si le démon est sans root.
  * @throws Error Si Docker ne répond pas (démon arrêté, commande introuvable).
@@ -116,13 +141,7 @@ async function isRootlessDocker(dockerBin: string): Promise<boolean> {
   const key = `${dockerBin}|${process.env.DOCKER_HOST ?? ""}|${process.env.DOCKER_CONTEXT ?? ""}`;
   const known = rootlessByDaemon.get(key);
   if (known !== undefined) return known;
-  const info = await new Promise<string>((resolve, reject) => {
-    execFile(dockerBin, ["info", "--format", "{{.SecurityOptions}}"], { env: dockerClientEnv(null), timeout: 20_000 }, (err, stdout) => {
-      if (err) reject(new Error(`Impossible d'interroger Docker (${dockerBin} info) : ${err.message.slice(0, 300)}`));
-      else resolve(stdout);
-    });
-  });
-  const rootless = info.includes("name=rootless");
+  const { rootless } = await readDockerInfo(dockerBin);
   rootlessByDaemon.set(key, rootless);
   return rootless;
 }
@@ -131,13 +150,23 @@ async function isRootlessDocker(dockerBin: string): Promise<boolean> {
  * Utilisateur `uid:gid` du conteneur d'agent. Avec Docker sans root, l'utilisateur de l'outil est root DANS le conteneur : c'est la seule
  * correspondance qui lui permet d'écrire dans le dossier de travail (l'UID 1000 du conteneur serait un sous-UID de l'hôte). Sans danger,
  * car root du conteneur n'a alors aucun droit sur l'hôte et toutes ses capacités sont retirées.
- * @param runtime Réglages de l'exécution en conteneur.
+ * @param setting Choix de l'utilisateur du conteneur (`AGENT_CONTAINER_USER`).
+ * @param rootless Vrai si le démon Docker tourne sans root (ignoré quand le choix est explicite).
  * @returns `0:0` (Docker sans root) ou l'UID/GID du processus de l'outil.
+ */
+export function containerUserFor(setting: ContainerUser, rootless: boolean): string {
+  return setting === "root" || (setting === "auto" && rootless) ? "0:0" : `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
+}
+
+/**
+ * Utilisateur `uid:gid` du conteneur d'agent d'après le réglage, en interrogeant Docker seulement en mode `auto`.
+ * @param runtime Réglages de l'exécution en conteneur.
+ * @returns `0:0` (Docker sans root) ou l'UID/GID du processus de l'outil, voir `containerUserFor`.
  * @throws Error Si le mode est `auto` et que Docker ne répond pas.
  */
 export async function resolveContainerUser(runtime: DockerRuntime): Promise<string> {
-  const rootless = runtime.containerUser === "root" || (runtime.containerUser === "auto" && (await isRootlessDocker(runtime.dockerBin)));
-  return rootless ? "0:0" : `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
+  const rootless = runtime.containerUser === "auto" ? await isRootlessDocker(runtime.dockerBin) : false;
+  return containerUserFor(runtime.containerUser, rootless);
 }
 
 /**

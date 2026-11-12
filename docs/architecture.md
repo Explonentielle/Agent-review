@@ -95,6 +95,7 @@ Dans les commandes autorisées d'un projet, `{worktree}` est remplacé par le do
 | `src/index.ts` | Point d'entrée : config, BDD, deux files (review, dev), poller, serveur |
 | `src/config.ts` | Lecture du `.env` (secrets et machine uniquement) |
 | `src/agent/dockerRunner.ts` | Option : l'agent tourne dans un conteneur jetable qui ne monte que son dossier de travail (`AGENT_RUNTIME=docker`, mode clé API) |
+| `src/agent/dockerDiagnostic.ts` | Diagnostic des conteneurs d'agents (bouton « Tester les conteneurs » des Paramètres) : lance un conteneur d'essai aux options d'une vraie tâche et contrôle Docker, image, écriture, isolation, plafonds, CLI |
 | `src/connectors/audited.ts`, `src/db/audit.ts` | Journal d'audit : chaque écriture sur une forge (label, MR, commentaire, approbation, branche poussée) est inscrite au nom de la personne, réussie ou non |
 | `Dockerfile`, `docker-compose.yml`, `scripts/` | Déploiement serveur (application et PostgreSQL), sauvegarde et restauration : `docs/deploiement.md` |
 | `Dockerfile.agent`, `docker-compose.hote.yml`, `deploy/review-agent.service` | Variante : l'outil sur la machine sous un utilisateur dédié avec Docker sans root, base seule dans Docker, agents en conteneurs : `docs/deploiement.md`, section 11 |
