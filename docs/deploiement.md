@@ -2,7 +2,7 @@
 
 Statut au 2026-11-10 : **préparé, jamais construit ni lancé** (aucune image n'a été construite, aucun conteneur démarré : cela demande de télécharger des paquets, ce qui n'a pas été fait). La syntaxe du fichier compose, des scripts et la compilation de production (`tsc -p tsconfig.build.json`, 68 modules chargés sans erreur) sont vérifiées. Le premier `docker compose build` peut révéler des erreurs : note-les, elles se corrigent vite.
 
-Fichiers : `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `tsconfig.build.json`, `scripts/backup.sh`, `scripts/restore.sh`.
+Fichiers : `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `tsconfig.build.json`, `scripts/backup.sh`, `scripts/restore.sh`. Variante avec les agents en conteneurs (décidée le 2026-11-12, préparée, jamais essayée sur le VPS) : `Dockerfile.agent`, `docker-compose.hote.yml`, `deploy/review-agent.service`, voir la section 11.
 
 ## 1. Ce que ça installe
 
@@ -25,7 +25,7 @@ Le VPS (4 vCores, 8 Go, Ubuntu 26.04) héberge déjà rag-saas en production (Ca
    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
    ```
    `fallocate` réserve le fichier, `chmod 600` le rend illisible aux autres, `mkswap` le formate en swap, `swapon` l'active, et la dernière ligne l'active aussi après un redémarrage.
-2. **Un utilisateur Linux dédié** (`review`), sans sudo, qui possède le dossier du projet. Pour lancer Docker il doit être dans le groupe `docker`, ce qui équivaut à un accès root à la machine : ne l'utilise pas pour autre chose.
+2. **Un utilisateur Linux dédié** (`review`), sans sudo, qui possède le dossier du projet. Pour lancer Docker il doit être dans le groupe `docker`, ce qui équivaut à un accès root à la machine : ne l'utilise pas pour autre chose. (Avec la variante de la section 11, Docker sans root, il n'a **pas** besoin de ce groupe : ne l'y mets pas.)
 3. **Ne rien ouvrir dans le pare-feu.** L'accès se fait par tunnel SSH (section 6). Après le démarrage, `ss -tlnp | grep 4321` doit montrer `127.0.0.1:4321` et rien d'autre.
 
 ## 4. Configurer
@@ -106,21 +106,14 @@ Sauvegarde d'abord : les migrations de base ne se défont pas. Retour arrière :
 
 **Ce que ça exige**
 - Le **mode clé API** (Paramètres > Modèles) : l'abonnement vit dans ton dossier personnel, qu'on ne monte pas dans un conteneur. Avec `AGENT_RUNTIME=docker` et le mode abonnement, l'outil **refuse** de lancer l'agent plutôt que de retomber sur la machine.
-- Une **image** qui contient la CLI Claude Code (`claude`) **et** les outils des projets. L'image de l'outil (`docker compose build`) a Node, git et la CLI, mais pas PHP ni composer : pour tes projets FuelPHP, construis une image dérivée, par exemple :
-  ```
-  FROM review-agent:local
-  USER root
-  RUN apt-get update && apt-get install -y --no-install-recommends php-cli php-mbstring php-xml unzip && rm -rf /var/lib/apt/lists/*
-  USER app
-  ```
-  puis `docker build -t mon-agent:php -f Dockerfile.agent .` et `AGENT_IMAGE=mon-agent:php`. L'image n'est jamais téléchargée au lancement d'une tâche (`--pull never`).
+- Une **image** qui contient la CLI Claude Code (`claude`) **et** les outils des projets, construite avec `Dockerfile.agent` (Node, git, la CLI) : `docker build -f Dockerfile.agent -t review-agent-sandbox:local .` (nom par défaut de `AGENT_IMAGE`). Les outils de tes projets s'ajoutent avec `--build-arg AGENT_PACKAGES="php-cli php-mbstring php-xml unzip"`. Ce sont les paquets de Debian bookworm (PHP 8.2 par exemple) : un projet qui exige une autre version (PHP 7.3...) demande une autre image de base, non gérée pour l'instant. L'image n'est jamais téléchargée au lancement d'une tâche (`--pull never`).
 - L'outil doit pouvoir lancer `docker`.
 
-**Décision de déploiement à prendre (pas encore tranchée)**
-Lancer des conteneurs, c'est pouvoir être root sur la machine : le processus qui lance `docker` est de confiance. L'application dans son conteneur (le `docker-compose.yml` actuel) n'a **pas** accès à Docker et ne peut donc pas utiliser ce mode. Deux voies :
-1. **Recommandée** : l'outil tourne sur la machine sous un utilisateur dédié avec **Docker sans root** (rootless) ; seule la base reste dans compose. Une compromission de l'outil ne donne alors pas root. À mettre en place sur le VPS (aux côtés du Docker de rag-saas).
-2. L'application reste dans son conteneur avec le socket Docker monté : plus simple, mais le conteneur de l'application devient équivalent à root sur la machine. Un proxy de socket n'y change rien (il ne peut pas filtrer les dossiers montés).
-Tant que ce choix n'est pas fait, les agents du déploiement Docker tournent comme avant (dans le conteneur de l'application, avec la limite expliquée plus haut).
+**Décision de déploiement (2026-11-12) : l'outil sur la machine, avec Docker sans root**
+Lancer des conteneurs, c'est pouvoir être root sur la machine : le processus qui lance `docker` est de confiance. L'application dans son conteneur (le `docker-compose.yml` des sections 1 à 8) n'a **pas** accès à Docker et ne peut donc pas utiliser ce mode. Deux voies existaient, la première est **retenue** :
+1. L'outil tourne sur la machine sous un utilisateur dédié avec **Docker sans root** (rootless) ; seule la base reste dans compose. Une compromission de l'outil ne donne alors pas root. Mise en place à la section 11.
+2. L'application reste dans son conteneur avec le socket Docker monté : plus simple, mais le conteneur de l'application devient équivalent à root sur la machine. Un proxy de socket n'y change rien (il ne peut pas filtrer les dossiers montés). **Écartée.**
+Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker des sections 1 à 8 tournent comme avant (dans le conteneur de l'application, avec la limite expliquée plus haut).
 
 **Limites**
 - La clé API de la personne est visible de son propre agent (il en a besoin) : sans filtre du réseau sortant (D7), un agent manipulé pourrait l'envoyer ailleurs. Une clé par personne avec un budget limité chez Anthropic réduit ce risque.
@@ -128,7 +121,84 @@ Tant que ce choix n'est pas fait, les agents du déploiement Docker tournent com
 - Le réseau est celui par défaut de Docker (accès à Internet). Pas encore de liste blanche (D7), ni de terminal (D8), ni de modèles d'environnement partagés (D9).
 - La reprise d'une session d'agent (« Reprendre la main ») n'existe pas en mode conteneur : sa session ne survit pas à la tâche.
 
-## 11. Liste de vérification avant d'inviter quelqu'un
+## 11. Variante avec les agents en conteneurs : l'outil sur la machine, Docker sans root
+
+**Statut : préparée, jamais essayée sur le VPS.** Le code est testé avec un faux `docker` ; le fichier compose et l'unité systemd sont vérifiés par leurs outils (`docker compose config`, `systemd-analyze verify`) ; rien n'a tourné avec un vrai Docker sans root.
+
+**Pourquoi** : avec Docker « sans root » (rootless), le démon tourne sous un utilisateur ordinaire. Une évasion d'un conteneur ou une compromission de l'outil ne donne que les droits de cet utilisateur, pas ceux de root. Le Docker de rag-saas (avec root) n'est pas touché : c'est un second démon, séparé, qui ne voit ni ses conteneurs ni ses volumes.
+
+**Ce qui change** : l'application n'est plus dans un conteneur. `docker-compose.hote.yml` ne contient que la base (publiée sur `127.0.0.1:5433`, même volume que la variante complète), l'outil tourne sous systemd (`deploy/review-agent.service`) sous l'utilisateur `review`, et chaque agent tourne dans un conteneur jetable (section 10). Avec `AGENT_CONTAINER_USER=auto` (défaut), l'outil détecte Docker sans root et lance alors le conteneur en « root du conteneur » : pour la machine, c'est l'utilisateur `review`, le seul à pouvoir écrire dans le dossier de travail (l'UID 1000 du conteneur serait un sous-UID sans droit d'écriture). Toutes les capacités Linux sont retirées : ce « root » n'a que les droits de `review` sur ses propres fichiers.
+
+**Mise en place (une fois).** Les étapes 1 et 2 demandent `sudo`, les suivantes se font en tant que `review`.
+
+1. **L'utilisateur et ses prérequis** (sudo) :
+   ```
+   sudo adduser --disabled-password --gecos "" review
+   sudo apt-get install -y uidmap dbus-user-session
+   sudo loginctl enable-linger review
+   grep '^review:' /etc/subuid /etc/subgid
+   ```
+   `adduser` crée `review` sans mot de passe (connexion par clé SSH seulement) : ne l'ajoute **ni à sudo ni au groupe docker**. `uidmap` fournit `newuidmap` et `newgidmap`, dont Docker sans root a besoin pour décaler les UID. `dbus-user-session` permet les services systemd utilisateur. `enable-linger` garde ses services actifs sans session ouverte et les relance au démarrage de la machine. `grep` doit afficher une plage dans chacun des deux fichiers (ex. `review:100000:65536`) ; sinon `sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 review`, avec une plage qui ne chevauche aucune autre (`cat /etc/subuid`).
+2. **Délégation des plafonds de ressources** (sudo) :
+   ```
+   sudo mkdir -p /etc/systemd/system/user@.service.d
+   printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
+   sudo systemctl daemon-reload
+   ```
+   Sans cette délégation, Docker sans root **ignore** les plafonds de mémoire, de processeurs et de processus (il affiche un simple avertissement) : toute la protection contre un agent gourmand disparaît. `mkdir -p` crée le dossier de configuration, `printf ... | sudo tee` écrit le fichier (le `tee` en sudo, car une redirection `>` s'exécuterait sans sudo), `daemon-reload` relit la configuration de systemd. Déconnecte puis reconnecte `review` ensuite.
+3. **Docker sans root** (en tant que `review`) :
+   ```
+   curl -fsSL https://get.docker.com/rootless -o rootless-install.sh
+   less rootless-install.sh
+   sh rootless-install.sh
+   ```
+   C'est le script officiel de Docker : on le télécharge, on le lit (`less`), puis on l'exécute, plutôt que de le passer directement à un shell. Il installe les programmes dans `~/bin`, crée le service utilisateur `docker` et affiche deux lignes à ajouter à `~/.bashrc` (`export PATH=$HOME/bin:$PATH` et `export DOCKER_HOST=unix:///run/user/<UID>/docker.sock`). Ensuite `systemctl --user enable --now docker` l'active et le lance. Ubuntu récent restreint les espaces de noms utilisateur non privilégiés : si le démon refuse de démarrer pour cette raison, Docker documente un profil AppArmor pour `rootlesskit` (page « Run the Docker daemon as a non-root user (Rootless mode) »), non essayé ici. Le script n'installe pas toujours `docker compose` : vérifie `docker compose version`, sinon installe le binaire officiel (https://github.com/docker/compose/releases) dans `~/.docker/cli-plugins/docker-compose` (`chmod +x`).
+4. **Vérifier que c'est bien sans root et que les plafonds s'appliquent** :
+   ```
+   docker info --format '{{.SecurityOptions}}'
+   docker run --rm --memory 64m alpine cat /sys/fs/cgroup/memory.max
+   ```
+   La première doit contenir `name=rootless`. La seconde télécharge une petite image et doit afficher `67108864` (64 Mo) : si elle affiche `max`, la délégation de l'étape 2 n'est pas active.
+5. **L'outil** : installe Node 24 en le plaçant dans `/usr/bin` (paquet NodeSource ; sinon adapte `ExecStart` dans l'unité au chemin donné par `which node`), clone le dépôt dans `/home/review/review-agent`, puis :
+   ```
+   cd ~/review-agent
+   npm ci
+   npx tsc -p tsconfig.build.json
+   ```
+   `npm ci` installe exactement les dépendances du fichier de verrouillage, `tsc` compile vers `dist/`.
+6. **Le `.env`** (`chmod 600`, **tu le remplis toi-même**, je n'y touche pas) : en plus de la section 4, `DATABASE_URL=postgres://review:<POSTGRES_PASSWORD>@127.0.0.1:5433/review_agent` (même mot de passe que `POSTGRES_PASSWORD`), `AGENT_RUNTIME=docker` et `AGENT_IMAGE=review-agent-sandbox:local`. Pas de `HOST`, `PORT` ni `DATA_DIR` : le service les fixe.
+7. **La base et l'image des agents** :
+   ```
+   COMPOSE_FILE=docker-compose.hote.yml docker compose up -d
+   docker build -f Dockerfile.agent -t review-agent-sandbox:local --build-arg AGENT_PACKAGES="php-cli php-mbstring php-xml unzip" .
+   ```
+   `COMPOSE_FILE=...` choisit le fichier compose de cette variante pour la commande (`docker compose` lit le `.env` du dossier, c'est ainsi que `POSTGRES_PASSWORD` arrive). Le `build` télécharge des paquets (plusieurs minutes) ; `--build-arg` ajoute les outils de tes projets (à adapter, voir section 10).
+8. **Le service** :
+   ```
+   mkdir -p ~/.config/systemd/user
+   cp deploy/review-agent.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now review-agent
+   journalctl --user -u review-agent -f
+   ```
+   Le fichier est copié dans le dossier des services de l'utilisateur, `daemon-reload` le prend en compte, `enable --now` le lance et le programme au démarrage, `journalctl -f` suit le journal : on y lit `app.started`.
+9. **Contrôles** : `ss -tlnp | grep -E '4321|5433'` ne montre que `127.0.0.1`. Dans le dashboard : Paramètres > Modèles > **Clé API**, puis lance une review : `docker ps` montre un conteneur `ra-agent-...` pendant la tâche, et plus rien après.
+
+**Au quotidien dans cette variante**
+- **Accès** : tunnel SSH comme à la section 6.
+- **Sauvegarde** : `COMPOSE_FILE=docker-compose.hote.yml bash scripts/backup.sh`. Dans un `crontab`, rien n'est hérité de ton shell : mets `COMPOSE_FILE`, `PATH=$HOME/bin:/usr/bin:/bin` et `DOCKER_HOST=unix:///run/user/<UID>/docker.sock` sur la ligne (`id -u` donne l'UID de `review`).
+- **Restauration** : `COMPOSE_FILE=docker-compose.hote.yml APP_UNIT=review-agent bash scripts/restore.sh backups/<fichier>.sql.gz --yes` (`APP_UNIT` : le service systemd arrêté puis relancé à la place du service compose `app`). Destructif : essaie-la une fois avant d'en avoir besoin.
+- **Import de ta base locale** (section 5 bis) : `systemctl --user stop review-agent`, `node --env-file=.env dist/cli/importSqlite.js ~/review-agent.sqlite`, `systemctl --user start review-agent`.
+- **Mise à jour** : sauvegarde, `git pull`, `npm ci`, `npx tsc -p tsconfig.build.json`, reconstruire l'image des agents si `Dockerfile.agent` ou la version de la CLI a changé, `systemctl --user restart review-agent`.
+
+**Mémoire** : base 0,5 Go, outil 1 Go au plus (`MemoryMax` de l'unité), un agent 1,5 Go (`AGENT_MEMORY`, un seul à la fois), soit environ 3 Go sur les 5 Go libres du VPS. Ne monte pas `MAX_CONCURRENT_AGENTS` sans regarder `free -h`.
+
+**Ce que ça protège, et ce que ça ne protège pas**
+- Une compromission de l'outil donne les droits de `review` : son `.env`, ses données, son Docker. Ni root, ni rag-saas (autre démon, autres fichiers), tant que `review` n'a pas de `sudo` et n'est pas dans le groupe `docker` du Docker avec root.
+- Un agent ne voit que son dossier de travail et ne reçoit que la clé API de la personne. Cette clé reste lisible par son propre agent et le réseau n'est pas filtré (D7) : une clé par personne avec un budget plafonné chez Anthropic limite le risque.
+- Non couvert : liste blanche réseau (D7), isolation renforcée de type gVisor (G1), terminal (D8).
+
+## 12. Liste de vérification avant d'inviter quelqu'un
 
 - [ ] `.env` en `chmod 600`, jamais dans git ; `SECRETS_MASTER_KEY` sauvegardée à part.
 - [ ] `ss -tlnp | grep 4321` : `127.0.0.1` seulement.
@@ -136,3 +206,4 @@ Tant que ce choix n'est pas fait, les agents du déploiement Docker tournent com
 - [ ] Une sauvegarde existe **et** une restauration a été essayée.
 - [ ] `free -h` : au moins 1,5 Go de mémoire disponible une fois la pile démarrée.
 - [ ] `AUTH_ALLOWED_USERS` ne contient que des personnes de confiance.
+- [ ] Si les agents tournent en conteneurs (section 11) : `review` n'est ni dans `sudo` ni dans le groupe `docker`, `docker info` contient `name=rootless`, et le test de plafond mémoire de l'étape 4 affiche bien `67108864`.

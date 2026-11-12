@@ -50,11 +50,11 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | C8 | Serveur | File de tâches par utilisateur, limites de concurrence | M | C4 | ✅ 2026-11-10 (files par personne, limite commune) ; priorité équitable et éviction des inactifs non faites |
 | C9 | Serveur | Déploiement : image de la plateforme, TLS, sauvegardes | L | C1a | 🟡 2026-11-10 préparé (image, compose, sauvegardes), jamais construit ni lancé ; TLS non fait |
 | D1 | Environnements | Modèle d'environnement et lecture de `devcontainer.json` | M | C4 | ⬜ |
-| D2 | Environnements | Orchestrateur Docker : rootless, limites, volumes, arrêt à l'inactivité | L | D1 | ⬜ |
+| D2 | Environnements | Orchestrateur Docker : rootless, limites, volumes, arrêt à l'inactivité | L | D1 | 🟡 2026-11-12 un conteneur jetable par tâche, limites, Docker sans root décidé et préparé ; pas de conteneur persistant ni d'arrêt à l'inactivité ; jamais essayé avec un vrai Docker sans root |
 | D3 | Environnements | Génération du Dockerfile par l'agent (droits réduits) | M | D1, A1 | ⬜ |
 | D4 | Environnements | Vérification de l'image : bac à sable, versions, scan, test à blanc | L | D2 | ⬜ |
-| D5 | Environnements | Patch seul : sortie du conteneur et application contrôlée | L | A2, D2 | ⬜ |
-| D6 | Environnements | Démon agent dans le conteneur (tâche, événements, annulation) | L | A1, D2 | ⬜ |
+| D5 | Environnements | Patch seul : sortie du conteneur et application contrôlée | L | A2, D2 | 🟡 2026-11-12 le conteneur n'a aucun identifiant de forge, l'outil fait contrôles, commit et push ; pas de patch à proprement parler |
+| D6 | Environnements | Démon agent dans le conteneur (tâche, événements, annulation) | L | A1, D2 | 🟡 2026-11-12 tâche, événements et annulation par conteneur jetable, sans démon persistant |
 | D7 | Environnements | Réseau : liste blanche et proxy de paquets | M | D2 | ⬜ |
 | D8 | Environnements | Terminal web authentifié et `/login` Claude dans le conteneur | M | D2 | ⬜ |
 | D9 | Environnements | Modèles d'environnement d'équipe | S | D4 | ⬜ |
@@ -226,8 +226,13 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 **Lot D, première tranche (2026-11-12)** : agents dans des conteneurs jetables, `src/agent/dockerRunner.ts`. Opt-in (`AGENT_RUNTIME=docker`), mode clé API seulement ; par défaut rien ne change.
 - Un conteneur par tâche, supprimé ensuite (même après annulation ou délai dépassé) ; en lecture seule, sans capacités, sans élévation de droits, utilisateur sans droits (celui de l'outil, pour les fichiers écrits), mémoire, processeurs et processus plafonnés, image jamais téléchargée au lancement. Il ne monte que le dossier de travail de la tâche ; la clé API passe par l'environnement du client docker et jamais par les arguments (visibles par `ps`). Le mode abonnement est refusé dans ce mode (pas de repli silencieux sur la machine).
 - Correspondances : D2 (orchestrateur, limites) partiellement, sans conteneur persistant ni arrêt à l'inactivité ; D6 partiellement (un conteneur par tâche, pas de démon) ; D5 : le conteneur ne reçoit aucun identifiant de forge, l'outil fait les contrôles de fichiers puis le commit et le push depuis l'hôte.
-- **Pas fait** : D1 (lecture de devcontainer.json), D3/D4 (image générée et vérifiée), D7 (liste blanche réseau), D8 (terminal, connexion Claude dans le conteneur), D9/D10, le démon d'agent persistant, Docker sans root. Décision de déploiement en suspens (voir `docs/deploiement.md`, section 10).
+- **Pas fait** : D1 (lecture de devcontainer.json), D3/D4 (image générée et vérifiée), D7 (liste blanche réseau), D8 (terminal, connexion Claude dans le conteneur), D9/D10, le démon d'agent persistant. La décision de déploiement est prise (voir plus bas).
 - **Vérifié** : 7 tests (arguments, faux docker, annulation, échec, choix de l'exécuteur, configuration), 13 mutations détectées ; options d'isolation essayées avec le vrai Docker sur une image locale. **Non vérifié** : la CLI Claude Code dans le conteneur, une vraie tâche, les performances.
+
+**Décision de déploiement (2026-11-12, par l'utilisateur)** : l'outil tourne **sur la machine** sous un utilisateur dédié avec **Docker sans root** ; seule la base reste dans Docker. Le socket Docker monté dans le conteneur de l'application (équivalent à root) est écarté. Préparé le jour même, jamais essayé sur le VPS (`docs/deploiement.md`, section 11) :
+- `AGENT_CONTAINER_USER` (`auto` par défaut) : avec Docker sans root, l'UID 1000 du conteneur est un sous-UID de la machine qui ne peut pas écrire dans le dossier de travail ; l'agent tourne donc en root du conteneur (= l'utilisateur de l'outil pour la machine, capacités toutes retirées). `auto` lit `docker info` (option `rootless`), une fois par démon ; Docker injoignable = erreur claire, pas de repli.
+- `Dockerfile.agent` (image légère des agents : Node, git, CLI Claude Code, outils des projets en `AGENT_PACKAGES`, nom par défaut `review-agent-sandbox:local`), `docker-compose.hote.yml` (base seule, `127.0.0.1:5433`, même volume que `docker-compose.yml`), `deploy/review-agent.service` (service systemd utilisateur, plafonds mémoire et processus), `scripts/restore.sh` compatible (`APP_UNIT`).
+- **Vérifié** : 6 tests ajoutés (utilisateur selon le mode de Docker, détection mise en cache, panne non mémorisée, choix explicite sans appel), 12 mutations détectées ; `docker compose config` et `systemd-analyze verify` sur les fichiers ; `restore.sh` essayé avec de faux outils dans les deux modes. **Non vérifié** : tout ce qui demande un vrai Docker sans root (écriture dans le dossier de travail en `0:0`, plafonds de ressources avec la délégation de cgroups, profil AppArmor d'Ubuntu récent), le build de `Dockerfile.agent`, la CLI Claude Code en root du conteneur.
 
 ## Lot B : GitHub (jalon J2)
 
@@ -270,7 +275,7 @@ Objectif : tenir en production : isolation renforcée, supervision, sauvegardes 
 | Décision | Bloque | À trancher par |
 |---|---|---|
 | Première vraie clé Anthropic, pour valider A3 en réel | validation de A3 | Utilisateur |
-| ~~SQLite ou PostgreSQL~~ **PostgreSQL** (2026-11-09). SQLite conservé en local (2026-11-09), serveur : VPS OVH existant. Reste : VPS dédié ou partagé avec rag-saas, nom de domaine, Docker rootless | C1, C9, D2 | Utilisateur |
+| ~~SQLite ou PostgreSQL~~ **PostgreSQL** (2026-11-09). SQLite conservé en local (2026-11-09), serveur : VPS OVH existant. Reste : VPS dédié ou partagé avec rag-saas, nom de domaine. **Docker sans root sur la machine, outil hors conteneur : décidé le 2026-11-12** | C1, C9, D2 | Utilisateur |
 | Forge à supporter en premier au-delà de GitLab | B | Utilisateur |
 | ~~Jeton GitHub ou application GitHub~~ **Jeton personnel à portée fine** pour l'outil local, **application GitHub** pour la plateforme (2026-11-09) | B1, C2 | décidé |
 | Validation écrite d'Anthropic pour les abonnements en conteneur hébergé | D8 (ouverture hors équipe) | Utilisateur avec Anthropic |

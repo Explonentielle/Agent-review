@@ -10,7 +10,7 @@ import { buildDockerArgs, dockerLauncher, type DockerRuntime } from "./dockerRun
 import { createRunner } from "./index.js";
 import type { AgentRequest } from "./runner.js";
 
-const RUNTIME: DockerRuntime = { image: "review-agent:local", memory: "1536m", cpus: 1, pids: 256, network: null, dockerBin: "docker" };
+const RUNTIME: DockerRuntime = { image: "review-agent:local", memory: "1536m", cpus: 1, pids: 256, network: null, dockerBin: "docker", containerUser: "host" };
 const KEY = "cle-api-de-la-tache-a-ne-pas-montrer";
 const resultMsg = (structured: unknown) => JSON.stringify({ type: "result", subtype: "success", is_error: false, structured_output: structured, total_cost_usd: 0.05, num_turns: 2, session_id: "s1" });
 
@@ -43,6 +43,13 @@ describe("arguments du conteneur d'agent", () => {
     expect(buildDockerArgs({ ...RUNTIME, network: "agents" }, { cwd: "/w" }, "n", [], "1:1")).toContain("agents");
   });
 
+  it("Docker sans root : conteneur en root (0:0) et dossier personnel en mémoire au même propriétaire", () => {
+    const args = buildDockerArgs(RUNTIME, { cwd: "/w" }, "n", [], "0:0");
+    expect(args[args.indexOf("--user") + 1]).toBe("0:0");
+    expect(args).toContain("/home/agent:rw,size=256m,uid=0,gid=0,mode=700");
+    expect(args).toContain("--cap-drop"); // root du conteneur, mais sans aucune capacité
+  });
+
   it("un dossier de travail relatif ou qui pourrait ajouter une option de montage est refusé", () => {
     for (const bad of ["relatif/dossier", "/ok,src=/etc,dst=/work", "/avec\nsaut", ""]) {
       expect(() => buildDockerArgs(RUNTIME, { cwd: bad }, "n", [], "1:1")).toThrow(/invalide/);
@@ -63,6 +70,8 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
       [
         "#!/bin/sh",
         'dir=$(dirname "$0")',
+        // `docker info` : mode du démon (info.txt), ou panne simulée (info-fails) ; n'apparaît pas dans calls.txt
+        'if [ "$1" = "info" ]; then echo x >> "$dir/info-calls.txt"; if [ -f "$dir/info-fails" ]; then echo "daemon injoignable" >&2; exit 1; fi; cat "$dir/info.txt" 2>/dev/null || echo "[name=seccomp,profile=builtin name=cgroupns]"; exit 0; fi',
         'echo "$1" >> "$dir/calls.txt"',
         'if [ "$1" = "rm" ]; then printf \'%s\\n\' "$@" > "$dir/rm-args.txt"; exit 0; fi',
         'printf \'%s\\n\' "$@" > "$dir/run-args.txt"',
@@ -157,7 +166,62 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
 
     expect(() => createRunner(config, { ...DEFAULT_SETTINGS, agentAuth: "subscription" })).toThrow(/exige le mode « clé API »/);
     // Par défaut (host) : comportement d'origine, aucun conteneur
-    expect(loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" }).agentRuntime).toMatchObject({ mode: "host", image: "review-agent:local", memory: "1536m", cpus: 1, pids: 256, network: null });
+    expect(loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" }).agentRuntime).toMatchObject({ mode: "host", image: "review-agent-sandbox:local", memory: "1536m", cpus: 1, pids: 256, network: null, containerUser: "auto" });
+  });
+
+  describe("utilisateur du conteneur selon le mode de Docker", () => {
+    const argAfter = (flag: string) => {
+      const args = read("run-args.txt").split("\n");
+      return args[args.indexOf(flag) + 1];
+    };
+    const run = (containerUser: DockerRuntime["containerUser"], bin: string) =>
+      new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher({ ...RUNTIME, dockerBin: bin, containerUser }, KEY)).run(request());
+    const hostUser = `${process.getuid?.()}:${process.getgid?.()}`;
+
+    it("auto, Docker sans root détecté : root du conteneur, qui est l'utilisateur de l'outil pour la machine", async () => {
+      const bin = installFakeDocker();
+      writeFileSync(path.join(dir, "info.txt"), "[name=seccomp,profile=builtin name=rootless name=cgroupns]");
+      await run("auto", bin);
+      expect(argAfter("--user")).toBe("0:0");
+      expect(read("run-args.txt")).toContain("/home/agent:rw,size=256m,uid=0,gid=0,mode=700");
+    });
+
+    it("auto, Docker classique : l'UID et le GID du processus de l'outil", async () => {
+      const bin = installFakeDocker();
+      await run("auto", bin);
+      expect(argAfter("--user")).toBe(hostUser);
+    });
+
+    it("en mode auto, la détection n'est faite qu'une fois par démon", async () => {
+      const bin = installFakeDocker();
+      await run("auto", bin);
+      await run("auto", bin);
+      expect(read("info-calls.txt").split("\n").filter(Boolean)).toHaveLength(1);
+    });
+
+    it("choix explicite (host ou root) : Docker n'est pas interrogé, même s'il annonce le contraire", async () => {
+      const bin = installFakeDocker();
+      writeFileSync(path.join(dir, "info.txt"), "[name=rootless]");
+      await run("host", bin);
+      expect(argAfter("--user")).toBe(hostUser);
+      writeFileSync(path.join(dir, "info.txt"), "[name=seccomp,profile=builtin]");
+      await run("root", bin);
+      expect(argAfter("--user")).toBe("0:0");
+      expect(existsSync(path.join(dir, "info-calls.txt"))).toBe(false);
+    });
+
+    it("auto, Docker injoignable : erreur claire, aucun conteneur lancé, et la panne n'est pas mémorisée", async () => {
+      const bin = installFakeDocker();
+      writeFileSync(path.join(dir, "info-fails"), "");
+      await expect(run("auto", bin)).rejects.toThrow(/Impossible d'interroger Docker/);
+      expect(existsSync(path.join(dir, "calls.txt"))).toBe(false);
+
+      // Docker répond de nouveau, et il est sans root : la réponse est lue, pas celle d'avant la panne
+      rmSync(path.join(dir, "info-fails"));
+      writeFileSync(path.join(dir, "info.txt"), "[name=rootless]");
+      await run("auto", bin);
+      expect(argAfter("--user")).toBe("0:0");
+    });
   });
 });
 
@@ -169,6 +233,8 @@ describe("configuration de l'exécution des agents", () => {
     expect(() => loadConfig({ ...base, AGENT_MEMORY: "beaucoup" })).toThrow(/AGENT_MEMORY/);
     expect(() => loadConfig({ ...base, AGENT_CPUS: "0" })).toThrow(/AGENT_CPUS/);
     expect(() => loadConfig({ ...base, AGENT_NETWORK: "--privileged" })).toThrow(/AGENT_NETWORK/);
+    expect(() => loadConfig({ ...base, AGENT_CONTAINER_USER: "admin" })).toThrow(/AGENT_CONTAINER_USER/);
+    expect(loadConfig({ ...base, AGENT_CONTAINER_USER: "root" }).agentRuntime.containerUser).toBe("root");
     expect(loadConfig({ ...base, AGENT_NETWORK: "agents-net", AGENT_CPUS: "1.5" }).agentRuntime).toMatchObject({ network: "agents-net", cpus: 1.5 });
   });
 });

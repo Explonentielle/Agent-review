@@ -1,0 +1,31 @@
+# Déploiement « l'outil sur la machine » : seule la base PostgreSQL tourne dans Docker (voir docs/deploiement.md, section 11).
+# L'outil lui-même est lancé par systemd (deploy/review-agent.service) sous un utilisateur dédié avec Docker sans root, pour pouvoir
+# lancer les agents dans des conteneurs jetables (AGENT_RUNTIME=docker) sans donner un accès root à la machine.
+# Utilisation : COMPOSE_FILE=docker-compose.hote.yml docker compose up -d   (variables lues dans le .env à côté de ce fichier)
+# Même nom de projet et même volume que docker-compose.yml : on peut passer de l'un à l'autre sans perdre la base.
+name: review-agent
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: review
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans le .env}
+      POSTGRES_DB: review_agent
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Boucle locale seulement : l'outil (sur la machine) se connecte à 127.0.0.1:5433. Jamais sur toutes les interfaces.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U review -d review_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+volumes:
+  pgdata: {}

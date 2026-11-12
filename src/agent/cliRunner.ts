@@ -55,7 +55,7 @@ export interface Launch {
 }
 
 /** Décide comment lancer la CLI pour une tâche : directement sur la machine (défaut) ou dans un conteneur jetable. */
-export type Launcher = (req: AgentRequest, cliArgs: string[]) => Launch;
+export type Launcher = (req: AgentRequest, cliArgs: string[]) => Launch | Promise<Launch>;
 
 /** Remplace chaque secret par un repère : une clé ne doit apparaître ni dans une erreur, ni dans le journal. */
 export function maskSecrets(text: string, secrets: string[]): string {
@@ -85,6 +85,13 @@ export class CliRunner implements AgentRunner {
     }
   }
 
+  /**
+   * Lance la CLI (sur la machine ou, avec un lanceur, dans un conteneur), lit son flux et renvoie le résultat structuré.
+   * @param rawReq Tâche de l'agent.
+   * @returns Le résultat de l'agent (sortie structurée, coût, tours, session).
+   * @throws Error Si la CLI échoue, si sa sortie est illisible ou si le lanceur échoue.
+   * @throws ProcessCancelledError Si la tâche est annulée.
+   */
   private async execute(rawReq: AgentRequest): Promise<AgentResult> {
     const req: AgentRequest = this.secrets.length
       ? { ...rawReq, onEvent: rawReq.onEvent && ((kind, text) => rawReq.onEvent?.(kind, maskSecrets(text, this.secrets))) }
@@ -110,7 +117,7 @@ export class CliRunner implements AgentRunner {
       : undefined;
 
     const cliArgs = buildCliArgs(req);
-    const launch: Launch = this.launcher ? this.launcher(req, cliArgs) : { bin: this.bin, args: cliArgs, env: this.env() };
+    const launch: Launch = this.launcher ? await this.launcher(req, cliArgs) : { bin: this.bin, args: cliArgs, env: this.env() };
     let output: Awaited<ReturnType<typeof runProcess>>;
     try {
       output = await runProcess(launch.bin, launch.args, req.prompt, {

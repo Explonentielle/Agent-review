@@ -1,0 +1,36 @@
+# Service systemd « utilisateur » de l'outil (voir docs/deploiement.md, section 11) : à copier dans ~/.config/systemd/user/ de l'utilisateur dédié.
+# L'outil tourne sur la machine sous cet utilisateur, sans root ; les agents tournent dans des conteneurs lancés par SON Docker sans root.
+# Prérequis : npm ci && npx tsc -p tsconfig.build.json dans ~/review-agent, un .env rempli par toi (chmod 600), Docker sans root démarré.
+[Unit]
+Description=review-agent (plateforme de review et de dev par agents)
+Wants=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/review-agent
+# Réglages propres au service. Le .env ci-dessous a priorité s'il redéfinit l'une de ces variables.
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=4321
+Environment=DATA_DIR=%h/review-agent/data
+# Docker sans root : son socket est dans le dossier d'exécution de l'utilisateur, son client dans ~/bin (installation officielle)
+Environment=DOCKER_HOST=unix://%t/docker.sock
+Environment=DOCKER_BIN=%h/bin/docker
+# Le .env est lu par systemd (lignes NOM=valeur, guillemets acceptés, pas de « export ») : jamais versionné, chmod 600
+EnvironmentFile=%h/review-agent/.env
+# Node doit être dans /usr/bin (paquet NodeSource) ; sinon remplace par le chemin complet de `which node`
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5
+# Arrêt propre : laisse l'outil finir ses écritures puis annuler ses agents
+TimeoutStopSec=30
+# Aucune élévation de droits pour l'outil et ses sous-processus ; /tmp privé
+NoNewPrivileges=true
+PrivateTmp=true
+# Plafonds de l'outil lui-même (les agents ont les leurs, AGENT_MEMORY et AGENT_PIDS) ; exige la délégation de cgroups, voir docs/deploiement.md
+MemoryMax=1G
+TasksMax=512
+
+[Install]
+WantedBy=default.target

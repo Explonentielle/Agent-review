@@ -4,6 +4,15 @@ import path from "node:path";
 import type { Launcher } from "./cliRunner.js";
 import type { AgentRequest } from "./runner.js";
 
+/**
+ * Utilisateur du conteneur d'agent :
+ * - `host` : l'UID/GID de l'outil (Docker classique : les fichiers écrits appartiennent à l'outil) ;
+ * - `root` : root du conteneur (Docker sans root : il correspond à l'utilisateur de l'outil sur l'hôte, alors que l'UID 1000 du conteneur
+ *   serait un sous-UID qui ne peut pas écrire dans le dossier de travail) ;
+ * - `auto` : `root` si le démon Docker est sans root, `host` sinon.
+ */
+export type ContainerUser = "auto" | "host" | "root";
+
 /** Réglages de l'exécution des agents dans des conteneurs jetables (variables AGENT_* du `.env`). */
 export interface DockerRuntime {
   /** Image qui contient la CLI Claude Code et les outils du projet (git, interpréteurs, gestionnaires de paquets). */
@@ -18,6 +27,8 @@ export interface DockerRuntime {
   network: string | null;
   /** Commande `docker` (ou un chemin). */
   dockerBin: string;
+  /** Utilisateur du conteneur (voir `ContainerUser`). */
+  containerUser: ContainerUser;
 }
 
 /** Dossier de travail de l'agent dans le conteneur. */
@@ -48,7 +59,7 @@ function dockerClientEnv(apiKey: string | null): NodeJS.ProcessEnv {
  * @param req Tâche de l'agent (dossier de travail).
  * @param name Nom du conteneur, pour pouvoir l'arrêter.
  * @param cliArgs Arguments de la CLI Claude Code.
- * @param user Utilisateur du conteneur `uid:gid` : celui du processus de l'outil, pour que les fichiers écrits lui appartiennent.
+ * @param user Utilisateur du conteneur `uid:gid` : celui du processus de l'outil (Docker classique) ou `0:0` (Docker sans root), voir `resolveContainerUser`.
  * @returns Les arguments de `docker`.
  * @throws Error Si le dossier de travail n'est pas un chemin absolu sûr.
  */
@@ -92,6 +103,43 @@ function removeContainer(dockerBin: string, name: string): Promise<void> {
   });
 }
 
+/** Démons Docker déjà interrogés (clé : commande + cible du client) et leur mode. Seules les réponses réussies sont mémorisées. */
+const rootlessByDaemon = new Map<string, boolean>();
+
+/**
+ * Indique si le démon Docker tourne sans root (rootless) : `docker info` liste alors l'option de sécurité `rootless`.
+ * @param dockerBin Commande `docker`.
+ * @returns `true` si le démon est sans root.
+ * @throws Error Si Docker ne répond pas (démon arrêté, commande introuvable).
+ */
+async function isRootlessDocker(dockerBin: string): Promise<boolean> {
+  const key = `${dockerBin}|${process.env.DOCKER_HOST ?? ""}|${process.env.DOCKER_CONTEXT ?? ""}`;
+  const known = rootlessByDaemon.get(key);
+  if (known !== undefined) return known;
+  const info = await new Promise<string>((resolve, reject) => {
+    execFile(dockerBin, ["info", "--format", "{{.SecurityOptions}}"], { env: dockerClientEnv(null), timeout: 20_000 }, (err, stdout) => {
+      if (err) reject(new Error(`Impossible d'interroger Docker (${dockerBin} info) : ${err.message.slice(0, 300)}`));
+      else resolve(stdout);
+    });
+  });
+  const rootless = info.includes("name=rootless");
+  rootlessByDaemon.set(key, rootless);
+  return rootless;
+}
+
+/**
+ * Utilisateur `uid:gid` du conteneur d'agent. Avec Docker sans root, l'utilisateur de l'outil est root DANS le conteneur : c'est la seule
+ * correspondance qui lui permet d'écrire dans le dossier de travail (l'UID 1000 du conteneur serait un sous-UID de l'hôte). Sans danger,
+ * car root du conteneur n'a alors aucun droit sur l'hôte et toutes ses capacités sont retirées.
+ * @param runtime Réglages de l'exécution en conteneur.
+ * @returns `0:0` (Docker sans root) ou l'UID/GID du processus de l'outil.
+ * @throws Error Si le mode est `auto` et que Docker ne répond pas.
+ */
+export async function resolveContainerUser(runtime: DockerRuntime): Promise<string> {
+  const rootless = runtime.containerUser === "root" || (runtime.containerUser === "auto" && (await isRootlessDocker(runtime.dockerBin)));
+  return rootless ? "0:0" : `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
+}
+
 /**
  * Lanceur qui exécute la CLI Claude Code dans un conteneur jetable au lieu de la machine hôte (voir `buildDockerArgs`).
  * Réservé au mode clé API : l'abonnement de l'utilisateur vit dans son dossier personnel, qu'on ne monte pas dans un conteneur.
@@ -100,8 +148,8 @@ function removeContainer(dockerBin: string, name: string): Promise<void> {
  * @returns Le lanceur à donner à `CliRunner`.
  */
 export function dockerLauncher(runtime: DockerRuntime, apiKey: string): Launcher {
-  const user = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
-  return (req, cliArgs) => {
+  return async (req, cliArgs) => {
+    const user = await resolveContainerUser(runtime);
     const name = `ra-agent-${randomBytes(6).toString("hex")}`;
     return {
       bin: runtime.dockerBin,

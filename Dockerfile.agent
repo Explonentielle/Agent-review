@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# Image des conteneurs d'agents (AGENT_RUNTIME=docker, voir docs/deploiement.md, sections 10 et 11) : la CLI Claude Code, git, et les outils des projets.
+# Construction : docker build -f Dockerfile.agent -t review-agent-sandbox:local .
+# Avec des outils en plus : --build-arg AGENT_PACKAGES="php-cli php-mbstring php-xml unzip"
+# Les versions des outils sont celles de la distribution (Debian bookworm) : elles doivent convenir aux projets (ex. une version de PHP précise).
+
+ARG NODE_VERSION=24
+
+FROM node:${NODE_VERSION}-bookworm-slim
+# Version de la CLI Claude Code : à figer (ex. --build-arg CLAUDE_CODE_VERSION=2.1.0) pour une image reproductible
+ARG CLAUDE_CODE_VERSION=latest
+# Paquets Debian des outils de tes projets, séparés par des espaces
+ARG AGENT_PACKAGES=""
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates ${AGENT_PACKAGES} \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+ && npm cache clean --force
+WORKDIR /work
+# Pas d'utilisateur ni de dossier personnel ici : l'outil lance le conteneur avec son propre --user et un HOME en mémoire (src/agent/dockerRunner.ts)
+CMD ["claude", "--version"]

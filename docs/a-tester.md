@@ -112,14 +112,22 @@ Paramètres > Déclenchement des reviews (trois choix, « Toutes » par défaut 
 
 Fermé par défaut (`AGENT_RUNTIME` absent = les agents tournent comme avant). À essayer sur ton poste, qui a Docker, avec une clé API de test.
 
-- [ ] Construire l'image : `cd ~/review-agent && docker compose build app` (télécharge des paquets : plusieurs minutes). Vérifier `docker run --rm review-agent:local claude --version`.
-- [ ] Dans le `.env` (tu le fais toi-même) : `AGENT_RUNTIME=docker` (et `AGENT_IMAGE` si tu utilises une image avec PHP). Dans le dashboard : Paramètres > Modèles > mode **Clé API** (la clé enregistrée dans Connexion). Redémarrer l'outil.
+- [ ] Construire l'image : `cd ~/review-agent && docker build -f Dockerfile.agent -t review-agent-sandbox:local .` (télécharge des paquets : plusieurs minutes ; ajoute `--build-arg AGENT_PACKAGES="php-cli php-mbstring php-xml unzip"` pour PHP). Vérifier `docker run --rm review-agent-sandbox:local claude --version`.
+- [ ] Dans le `.env` (tu le fais toi-même) : `AGENT_RUNTIME=docker` (l'image par défaut est celle construite ci-dessus). Dans le dashboard : Paramètres > Modèles > mode **Clé API** (la clé enregistrée dans Connexion). Redémarrer l'outil.
 - [ ] Lancer une review : pendant qu'elle tourne, `docker ps` montre un conteneur `ra-agent-...` ; à la fin, `docker ps -a` n'en montre plus. Le résultat est le même qu'avant.
 - [ ] Vérifier l'isolation pendant une tâche : `docker exec <conteneur> env` ne contient ni `GITLAB_TOKEN`, ni `GITHUB_TOKEN`, ni `SECRETS_MASTER_KEY`, ni `DATABASE_URL` (seulement `ANTHROPIC_API_KEY` et `HOME`).
-- [ ] Lancer l'agent dev sur un ticket : les fichiers modifiés t'appartiennent (pas root), la MR Draft est créée comme avant ; les tests du projet (`allowedCommands`) marchent **seulement si l'image contient leurs outils** (sinon : « command not found », il faut une image dérivée, voir `docs/deploiement.md`, section 10).
+- [ ] Lancer l'agent dev sur un ticket : les fichiers modifiés t'appartiennent (pas root), la MR Draft est créée comme avant ; les tests du projet (`allowedCommands`) marchent **seulement si l'image contient leurs outils** (sinon : « command not found » : ajoute-les à l'image avec `AGENT_PACKAGES`, voir `docs/deploiement.md`, section 10).
 - [ ] Annuler une tâche en cours depuis le dashboard : le conteneur disparaît.
 - [ ] Repasser en mode Abonnement avec `AGENT_RUNTIME=docker` : la review échoue avec un message clair (« exige le mode clé API ») au lieu de partir sur la machine.
 - [ ] Constater : la mémoire utilisée par un agent (`docker stats`) et le temps de démarrage du conteneur.
+
+**Sur le VPS, avec Docker sans root** (`docs/deploiement.md`, section 11, décidée le 2026-11-12 : jamais essayée, c'est ici qu'elle se valide) :
+- [ ] Suivre les étapes 1 à 9 de la section 11. Noter chaque erreur : les plus probables sont la restriction des espaces de noms utilisateur d'Ubuntu récent (étape 3), le plugin `docker compose` absent, et un `node` qui n'est pas dans `/usr/bin`.
+- [ ] `docker info --format '{{.SecurityOptions}}'` contient `name=rootless` ; `docker run --rm --memory 64m alpine cat /sys/fs/cgroup/memory.max` affiche `67108864` (sinon les plafonds sont ignorés : le dire avant de continuer).
+- [ ] Une review en mode clé API fonctionne : l'agent écrit dans son dossier de travail (c'est le point que seul un vrai Docker sans root peut confirmer : conteneur en `0:0` = utilisateur `review`). Si l'agent échoue sur des droits d'écriture, noter le message exact.
+- [ ] Les fichiers du dossier de travail appartiennent à `review`, pas à un UID étrange (`ls -ln` dans `data/`).
+- [ ] La CLI Claude Code accepte de tourner en root du conteneur avec `--permission-mode dontAsk` (elle refuse seulement `--dangerously-skip-permissions` en root, que l'outil n'utilise pas) : à confirmer avec la vraie CLI.
+- [ ] `ps` sur le VPS : l'outil et `dockerd` tournent sous `review`, pas sous root ; rag-saas est inchangé (`docker ps` avec le Docker de root).
 
 ## 12. Pas testé du tout
 
