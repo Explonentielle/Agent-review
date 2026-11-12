@@ -23,6 +23,16 @@ const EnvSchema = z
     POLL_INTERVAL_SEC: z.coerce.number().int().min(30).default(90),
     /** Nombre maximum de reviews, et de tâches de dev, qui tournent en même temps sur la machine, toutes personnes confondues. */
     MAX_CONCURRENT_AGENTS: z.coerce.number().int().min(1).max(8).default(1),
+    /** Où tournent les agents : sur la machine (host), ou dans un conteneur jetable par tâche (docker, mode clé API seulement). */
+    AGENT_RUNTIME: z.preprocess(blankIsMissing, z.enum(["host", "docker"]).default("host")),
+    /** Image des conteneurs d'agents : doit contenir la CLI Claude Code et les outils du projet. */
+    AGENT_IMAGE: z.preprocess(blankIsMissing, z.string().trim().min(1).default("review-agent:local")),
+    AGENT_MEMORY: z.preprocess(blankIsMissing, z.string().regex(/^\d+[bkmg]$/i, "ex. 1536m ou 2g").default("1536m")),
+    AGENT_CPUS: z.coerce.number().min(0.25).max(16).default(1),
+    AGENT_PIDS: z.coerce.number().int().min(16).max(4096).default(256),
+    /** Réseau Docker des conteneurs d'agents (par défaut : le réseau par défaut de Docker). */
+    AGENT_NETWORK: z.preprocess(blankIsMissing, z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).optional()),
+    DOCKER_BIN: z.preprocess(blankIsMissing, z.string().min(1).default("docker")),
 
     CLAUDE_BIN: z.string().optional(),
     /** Seulement utilisée si le mode « clé API » est choisi dans les réglages. Jamais affichée ni journalisée. */
@@ -130,6 +140,8 @@ export interface Config {
   pollIntervalMs: number;
   /** Nombre maximum de reviews, et de tâches de dev, simultanées sur la machine. */
   maxConcurrentAgents: number;
+  /** Où et comment tournent les agents (sur la machine, ou dans des conteneurs jetables). */
+  agentRuntime: { mode: "host" | "docker"; image: string; memory: string; cpus: number; pids: number; network: string | null; dockerBin: string };
   claudeBin: string;
   /** Clé API Anthropic, ou null. Utilisée uniquement quand les réglages demandent le mode clé API. */
   anthropicApiKey: string | null;
@@ -178,6 +190,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     pollIntervalMs: e.POLL_INTERVAL_SEC * 1000,
     maxConcurrentAgents: e.MAX_CONCURRENT_AGENTS,
+    agentRuntime: { mode: e.AGENT_RUNTIME, image: e.AGENT_IMAGE, memory: e.AGENT_MEMORY, cpus: e.AGENT_CPUS, pids: e.AGENT_PIDS, network: e.AGENT_NETWORK ?? null, dockerBin: e.DOCKER_BIN },
     claudeBin: e.CLAUDE_BIN ?? defaultClaudeBin(),
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
     server: { host: e.HOST, port: e.PORT },

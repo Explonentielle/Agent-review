@@ -100,7 +100,35 @@ Sauvegarde d'abord : les migrations de base ne se défont pas. Retour arrière :
 - Les journaux sont dans le volume (`/app/data/logs`), sans rotation. À surveiller si le disque se remplit.
 - Rien n'a été essayé sur le vrai VPS : coexistence avec rag-saas, mémoire réelle, durée du build.
 
-## 10. Liste de vérification avant d'inviter quelqu'un
+## 10. Agents dans des conteneurs (lot D, première tranche)
+
+`AGENT_RUNTIME=docker` (variables `AGENT_*` du `.env.example`) fait tourner chaque review et chaque tâche de dev dans un **conteneur jetable** créé pour la tâche et supprimé ensuite. Le conteneur : système de fichiers en lecture seule (sauf `/tmp` et le dossier personnel de l'agent, en mémoire), aucune capacité Linux, pas d'élévation de droits, mémoire, processeurs et processus plafonnés, utilisateur sans droits. Il ne monte **que** le dossier de travail de la tâche. Il ne reçoit ni la base, ni la clé maître, ni les jetons de forge, ni les dossiers des autres personnes, ni l'environnement de l'outil : seulement la clé API Anthropic de la personne. Vérifié avec le vrai Docker sur une image locale (utilisateur 1000, racine en lecture seule, capacités à zéro, `no_new_privs`, jeton de forge absent).
+
+**Ce que ça exige**
+- Le **mode clé API** (Paramètres > Modèles) : l'abonnement vit dans ton dossier personnel, qu'on ne monte pas dans un conteneur. Avec `AGENT_RUNTIME=docker` et le mode abonnement, l'outil **refuse** de lancer l'agent plutôt que de retomber sur la machine.
+- Une **image** qui contient la CLI Claude Code (`claude`) **et** les outils des projets. L'image de l'outil (`docker compose build`) a Node, git et la CLI, mais pas PHP ni composer : pour tes projets FuelPHP, construis une image dérivée, par exemple :
+  ```
+  FROM review-agent:local
+  USER root
+  RUN apt-get update && apt-get install -y --no-install-recommends php-cli php-mbstring php-xml unzip && rm -rf /var/lib/apt/lists/*
+  USER app
+  ```
+  puis `docker build -t mon-agent:php -f Dockerfile.agent .` et `AGENT_IMAGE=mon-agent:php`. L'image n'est jamais téléchargée au lancement d'une tâche (`--pull never`).
+- L'outil doit pouvoir lancer `docker`.
+
+**Décision de déploiement à prendre (pas encore tranchée)**
+Lancer des conteneurs, c'est pouvoir être root sur la machine : le processus qui lance `docker` est de confiance. L'application dans son conteneur (le `docker-compose.yml` actuel) n'a **pas** accès à Docker et ne peut donc pas utiliser ce mode. Deux voies :
+1. **Recommandée** : l'outil tourne sur la machine sous un utilisateur dédié avec **Docker sans root** (rootless) ; seule la base reste dans compose. Une compromission de l'outil ne donne alors pas root. À mettre en place sur le VPS (aux côtés du Docker de rag-saas).
+2. L'application reste dans son conteneur avec le socket Docker monté : plus simple, mais le conteneur de l'application devient équivalent à root sur la machine. Un proxy de socket n'y change rien (il ne peut pas filtrer les dossiers montés).
+Tant que ce choix n'est pas fait, les agents du déploiement Docker tournent comme avant (dans le conteneur de l'application, avec la limite expliquée plus haut).
+
+**Limites**
+- La clé API de la personne est visible de son propre agent (il en a besoin) : sans filtre du réseau sortant (D7), un agent manipulé pourrait l'envoyer ailleurs. Une clé par personne avec un budget limité chez Anthropic réduit ce risque.
+- Le dossier de travail est un `git worktree` : son dépôt est ailleurs sur la machine, donc les commandes `git` de l'agent dans le conteneur échouent (lire, chercher et modifier des fichiers marchent ; l'outil fait lui-même les commits et le push).
+- Le réseau est celui par défaut de Docker (accès à Internet). Pas encore de liste blanche (D7), ni de terminal (D8), ni de modèles d'environnement partagés (D9).
+- La reprise d'une session d'agent (« Reprendre la main ») n'existe pas en mode conteneur : sa session ne survit pas à la tâche.
+
+## 11. Liste de vérification avant d'inviter quelqu'un
 
 - [ ] `.env` en `chmod 600`, jamais dans git ; `SECRETS_MASTER_KEY` sauvegardée à part.
 - [ ] `ss -tlnp | grep 4321` : `127.0.0.1` seulement.

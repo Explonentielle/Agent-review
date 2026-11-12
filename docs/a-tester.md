@@ -108,7 +108,20 @@ Paramètres > Déclenchement des reviews (trois choix, « Toutes » par défaut 
 - [ ] Choisir « Projets configurés seulement » : une MR d'un projet absent de Paramètres > Projets n'apparaît pas du tout ; ajouter ce projet, elle apparaît au cycle suivant.
 - [ ] Revenir à « Toutes » : les nouvelles MR repartent toutes seules (celles déjà « À lancer » attendent toujours ton clic).
 
-## 11. Pas testé du tout
+## 11. Agents dans des conteneurs (lot D, facultatif)
+
+Fermé par défaut (`AGENT_RUNTIME` absent = les agents tournent comme avant). À essayer sur ton poste, qui a Docker, avec une clé API de test.
+
+- [ ] Construire l'image : `cd ~/review-agent && docker compose build app` (télécharge des paquets : plusieurs minutes). Vérifier `docker run --rm review-agent:local claude --version`.
+- [ ] Dans le `.env` (tu le fais toi-même) : `AGENT_RUNTIME=docker` (et `AGENT_IMAGE` si tu utilises une image avec PHP). Dans le dashboard : Paramètres > Modèles > mode **Clé API** (la clé enregistrée dans Connexion). Redémarrer l'outil.
+- [ ] Lancer une review : pendant qu'elle tourne, `docker ps` montre un conteneur `ra-agent-...` ; à la fin, `docker ps -a` n'en montre plus. Le résultat est le même qu'avant.
+- [ ] Vérifier l'isolation pendant une tâche : `docker exec <conteneur> env` ne contient ni `GITLAB_TOKEN`, ni `GITHUB_TOKEN`, ni `SECRETS_MASTER_KEY`, ni `DATABASE_URL` (seulement `ANTHROPIC_API_KEY` et `HOME`).
+- [ ] Lancer l'agent dev sur un ticket : les fichiers modifiés t'appartiennent (pas root), la MR Draft est créée comme avant ; les tests du projet (`allowedCommands`) marchent **seulement si l'image contient leurs outils** (sinon : « command not found », il faut une image dérivée, voir `docs/deploiement.md`, section 10).
+- [ ] Annuler une tâche en cours depuis le dashboard : le conteneur disparaît.
+- [ ] Repasser en mode Abonnement avec `AGENT_RUNTIME=docker` : la review échoue avec un message clair (« exige le mode clé API ») au lieu de partir sur la machine.
+- [ ] Constater : la mémoire utilisée par un agent (`docker stats`) et le temps de démarrage du conteneur.
+
+## 12. Pas testé du tout
 
 - Un vrai serveur PostgreSQL (pilote `pg`) : seuls SQLite et PostgreSQL embarqué (PGlite) sont testés. Lancer avec `TEST_DATABASE_URL` pour la suite complète.
 - Le dashboard dans plusieurs navigateurs.

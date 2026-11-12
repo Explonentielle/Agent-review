@@ -1,0 +1,174 @@
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ProcessCancelledError, claudeEnv } from "../claude/process.js";
+import { loadConfig } from "../config.js";
+import { DEFAULT_SETTINGS } from "../settings/schema.js";
+import { CliRunner } from "./cliRunner.js";
+import { buildDockerArgs, dockerLauncher, type DockerRuntime } from "./dockerRunner.js";
+import { createRunner } from "./index.js";
+import type { AgentRequest } from "./runner.js";
+
+const RUNTIME: DockerRuntime = { image: "review-agent:local", memory: "1536m", cpus: 1, pids: 256, network: null, dockerBin: "docker" };
+const KEY = "cle-api-de-la-tache-a-ne-pas-montrer";
+const resultMsg = (structured: unknown) => JSON.stringify({ type: "result", subtype: "success", is_error: false, structured_output: structured, total_cost_usd: 0.05, num_turns: 2, session_id: "s1" });
+
+describe("arguments du conteneur d'agent", () => {
+  it("conteneur jetable sans privilèges, ressources plafonnées, un seul dossier monté, clé transmise sans valeur", () => {
+    const args = buildDockerArgs(RUNTIME, { cwd: "/data/worktrees/projet-12" }, "ra-agent-abc", ["-p", "--model", "claude-sonnet-5-5"], "1000:1000");
+
+    expect(args.slice(0, 2)).toEqual(["run", "--rm"]);
+    const has = (...seq: string[]) => seq.every((_, i) => args.indexOf(seq[0]!) >= 0 && args[args.indexOf(seq[0]!) + i] === seq[i]);
+    expect(has("--name", "ra-agent-abc")).toBe(true);
+    expect(has("--pull", "never")).toBe(true); // aucun téléchargement implicite
+    expect(args).toContain("--read-only");
+    expect(has("--cap-drop", "ALL")).toBe(true);
+    expect(has("--security-opt", "no-new-privileges")).toBe(true);
+    expect(has("--memory", "1536m")).toBe(true);
+    expect(has("--memory-swap", "1536m")).toBe(true); // pas de swap au-delà de la mémoire
+    expect(has("--cpus", "1")).toBe(true);
+    expect(has("--pids-limit", "256")).toBe(true);
+    expect(has("--user", "1000:1000")).toBe(true);
+    expect(args.filter((a) => a === "--mount")).toHaveLength(1); // un seul montage : le dossier de travail
+    expect(args).toContain("type=bind,src=/data/worktrees/projet-12,dst=/work");
+    expect(args).toContain("/home/agent:rw,size=256m,uid=1000,gid=1000,mode=700");
+
+    // La clé est nommée, jamais donnée : sa valeur ne peut pas apparaître dans les arguments
+    expect(args[args.indexOf("ANTHROPIC_API_KEY") - 1]).toBe("-e");
+    expect(args.join(" ")).not.toContain("ANTHROPIC_API_KEY=");
+    // L'image, puis la commande, puis les arguments de la CLI telle quelle
+    expect(args.slice(args.indexOf("review-agent:local"))).toEqual(["review-agent:local", "claude", "-p", "--model", "claude-sonnet-5-5"]);
+    expect(args).not.toContain("--network");
+    expect(buildDockerArgs({ ...RUNTIME, network: "agents" }, { cwd: "/w" }, "n", [], "1:1")).toContain("agents");
+  });
+
+  it("un dossier de travail relatif ou qui pourrait ajouter une option de montage est refusé", () => {
+    for (const bad of ["relatif/dossier", "/ok,src=/etc,dst=/work", "/avec\nsaut", ""]) {
+      expect(() => buildDockerArgs(RUNTIME, { cwd: bad }, "n", [], "1:1")).toThrow(/invalide/);
+    }
+  });
+});
+
+describe.skipIf(process.platform === "win32")("exécution dans un conteneur, avec un faux docker", () => {
+  let dir = "";
+  const saved = { ...process.env };
+  const read = (name: string) => readFileSync(path.join(dir, name), "utf8");
+
+  /** Faux `docker` : enregistre ses appels, son entrée, l'environnement de son processus, et répond comme la CLI Claude Code. */
+  function installFakeDocker(runBody = 'cat "$dir/response.txt"'): string {
+    const bin = path.join(dir, "docker");
+    writeFileSync(
+      bin,
+      [
+        "#!/bin/sh",
+        'dir=$(dirname "$0")',
+        'echo "$1" >> "$dir/calls.txt"',
+        'if [ "$1" = "rm" ]; then printf \'%s\\n\' "$@" > "$dir/rm-args.txt"; exit 0; fi',
+        'printf \'%s\\n\' "$@" > "$dir/run-args.txt"',
+        'printenv ANTHROPIC_API_KEY > "$dir/keyval.txt"',
+        'env > "$dir/env.txt"',
+        runBody,
+      ].join("\n"),
+    );
+    chmodSync(bin, 0o755);
+    writeFileSync(path.join(dir, "response.txt"), resultMsg({ ok: true }));
+    return bin;
+  }
+  const request = (over: Partial<AgentRequest> = {}): AgentRequest => ({
+    cwd: dir,
+    systemPrompt: "SYSTEME",
+    prompt: "CONTEXTE",
+    outputSchema: { type: "object" },
+    tools: ["Read"],
+    allowedTools: [],
+    disallowedTools: [],
+    model: "claude-sonnet-5-5",
+    effort: "high",
+    maxTurns: 5,
+    timeoutMs: 20_000,
+    persistSession: false,
+    stream: false,
+    ...over,
+  });
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "docker-runner-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name];
+    Object.assign(process.env, saved);
+  });
+
+  it("résultat lu comme avec la CLI directe ; la clé passe par l'environnement du client docker, jamais par les arguments ni avec les secrets de l'outil", async () => {
+    process.env.GITLAB_TOKEN = "jeton-gitlab-de-l-outil";
+    process.env.SECRETS_MASTER_KEY = "cle-maitre-de-l-outil";
+    const runtime = { ...RUNTIME, dockerBin: installFakeDocker() };
+    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, KEY));
+
+    const out = await runner.run(request());
+    expect(out).toMatchObject({ structured: { ok: true }, costUsd: 0.05, numTurns: 2, sessionId: "s1" });
+
+    const args = read("run-args.txt");
+    expect(args).not.toContain(KEY);
+    expect(args).toContain(`type=bind,src=${dir},dst=/work`);
+    expect(read("keyval.txt").trim()).toBe(KEY); // transmise au client docker par l'environnement
+    const env = read("env.txt");
+    expect(env).not.toContain("jeton-gitlab-de-l-outil"); // les secrets de l'outil ne vont même pas au client docker
+    expect(env).not.toContain("cle-maitre-de-l-outil");
+
+    // Le conteneur est supprimé ensuite, sous le nom qu'il portait
+    const name = args.split("\n")[args.split("\n").indexOf("--name") + 1];
+    expect(name).toMatch(/^ra-agent-[0-9a-f]{12}$/);
+    expect(read("calls.txt").split("\n").filter(Boolean)).toEqual(["run", "rm"]);
+    expect(read("rm-args.txt").split("\n").filter(Boolean)).toEqual(["rm", "-f", name]);
+  });
+
+  it("annulation : le client docker est arrêté et le conteneur supprimé", async () => {
+    const runtime = { ...RUNTIME, dockerBin: installFakeDocker("exec sleep 30") };
+    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, KEY));
+    const controller = new AbortController();
+
+    const pending = runner.run(request({ signal: controller.signal, timeoutMs: 60_000 }));
+    setTimeout(() => controller.abort(), 150);
+    await expect(pending).rejects.toBeInstanceOf(ProcessCancelledError);
+    expect(read("calls.txt").split("\n").filter(Boolean)).toEqual(["run", "rm"]);
+  });
+
+  it("échec de la CLI dans le conteneur : l'erreur ne contient pas la clé, et le conteneur est quand même supprimé", async () => {
+    const runtime = { ...RUNTIME, dockerBin: installFakeDocker(`echo '{"type":"result","subtype":"error_max_turns","is_error":true,"result":"échec avec ${KEY}"}'`) };
+    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, KEY));
+
+    const err = await runner.run(request()).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/Claude Code a échoué/);
+    expect((err as Error).message).not.toContain(KEY);
+    expect(existsSync(path.join(dir, "rm-args.txt"))).toBe(true);
+  });
+
+  it("createRunner : avec AGENT_RUNTIME=docker et la clé API, l'agent passe par docker ; avec l'abonnement, c'est refusé", async () => {
+    const fake = installFakeDocker();
+    const config = loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x", ANTHROPIC_API_KEY: KEY, AGENT_RUNTIME: "docker", DOCKER_BIN: fake, AGENT_IMAGE: "mon-image:1", AGENT_MEMORY: "2g" });
+
+    const out = await createRunner(config, { ...DEFAULT_SETTINGS, agentAuth: "api" }).run(request());
+    expect(out.structured).toEqual({ ok: true });
+    expect(read("run-args.txt")).toContain("mon-image:1");
+    expect(read("run-args.txt")).toContain("2g");
+
+    expect(() => createRunner(config, { ...DEFAULT_SETTINGS, agentAuth: "subscription" })).toThrow(/exige le mode « clé API »/);
+    // Par défaut (host) : comportement d'origine, aucun conteneur
+    expect(loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" }).agentRuntime).toMatchObject({ mode: "host", image: "review-agent:local", memory: "1536m", cpus: 1, pids: 256, network: null });
+  });
+});
+
+describe("configuration de l'exécution des agents", () => {
+  const base = { GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" };
+
+  it("valeurs invalides refusées au démarrage", () => {
+    expect(() => loadConfig({ ...base, AGENT_RUNTIME: "kubernetes" })).toThrow(/AGENT_RUNTIME/);
+    expect(() => loadConfig({ ...base, AGENT_MEMORY: "beaucoup" })).toThrow(/AGENT_MEMORY/);
+    expect(() => loadConfig({ ...base, AGENT_CPUS: "0" })).toThrow(/AGENT_CPUS/);
+    expect(() => loadConfig({ ...base, AGENT_NETWORK: "--privileged" })).toThrow(/AGENT_NETWORK/);
+    expect(loadConfig({ ...base, AGENT_NETWORK: "agents-net", AGENT_CPUS: "1.5" }).agentRuntime).toMatchObject({ network: "agents-net", cpus: 1.5 });
+  });
+});

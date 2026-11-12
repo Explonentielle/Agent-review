@@ -45,6 +45,18 @@ export function buildCliArgs(req: AgentRequest): string[] {
   ];
 }
 
+/** Comment lancer la CLI : le programme, ses arguments, l'environnement du processus, et un nettoyage après coup. */
+export interface Launch {
+  bin: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  /** Appelé quand le processus est terminé (réussi, en échec ou annulé) : par exemple supprimer un conteneur resté en vie. Ne doit pas lever d'erreur. */
+  cleanup?: () => Promise<void>;
+}
+
+/** Décide comment lancer la CLI pour une tâche : directement sur la machine (défaut) ou dans un conteneur jetable. */
+export type Launcher = (req: AgentRequest, cliArgs: string[]) => Launch;
+
 /** Remplace chaque secret par un repère : une clé ne doit apparaître ni dans une erreur, ni dans le journal. */
 export function maskSecrets(text: string, secrets: string[]): string {
   return secrets.reduce((out, s) => (s ? out.replaceAll(s, "[clé masquée]") : out), text);
@@ -54,12 +66,14 @@ export function maskSecrets(text: string, secrets: string[]): string {
  * Exécute l'agent avec la CLI Claude Code (`claude -p`). L'authentification dépend de
  * l'environnement fourni : abonnement de l'utilisateur (`claudeEnv()`), ou clé API (`claudeEnv(clé)`).
  * Les `secrets` (la clé API) sont masqués dans les erreurs et dans le journal.
+ * Avec un `launcher`, la CLI est lancée comme il l'indique (conteneur jetable) au lieu de `bin` avec `env`.
  */
 export class CliRunner implements AgentRunner {
   constructor(
     private readonly bin: string,
     private readonly env: () => NodeJS.ProcessEnv = claudeEnv,
     private readonly secrets: string[] = [],
+    private readonly launcher?: Launcher,
   ) {}
 
   async run(req: AgentRequest): Promise<AgentResult> {
@@ -95,13 +109,21 @@ export class CliRunner implements AgentRunner {
         }
       : undefined;
 
-    const { stdout, stderr, exitCode } = await runProcess(this.bin, buildCliArgs(req), req.prompt, {
-      cwd: req.cwd,
-      env: this.env(),
-      timeoutMs: req.timeoutMs,
-      signal: req.signal,
-      onStdoutLine,
-    });
+    const cliArgs = buildCliArgs(req);
+    const launch: Launch = this.launcher ? this.launcher(req, cliArgs) : { bin: this.bin, args: cliArgs, env: this.env() };
+    let output: Awaited<ReturnType<typeof runProcess>>;
+    try {
+      output = await runProcess(launch.bin, launch.args, req.prompt, {
+        cwd: req.cwd,
+        env: launch.env,
+        timeoutMs: req.timeoutMs,
+        signal: req.signal,
+        onStdoutLine,
+      });
+    } finally {
+      await launch.cleanup?.();
+    }
+    const { stdout, stderr, exitCode } = output;
 
     const payload = req.stream ? final : parseCliOutput(stdout);
     if (!payload) {

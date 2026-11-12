@@ -223,6 +223,12 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - Le réglage est relu à chaque cycle du poller : il s'applique sans redémarrer. Une review « À lancer » n'est pas relancée par un redémarrage. Lancer une review déjà en file est refusé (409), donc un double clic ne la lance pas deux fois. Le lancement est inscrit au journal des actions de la review.
 - **Vérifié** : 5 tests de plus (344 au total) et 7 mutations détectées ; le dashboard n'a été vérifié qu'en syntaxe.
 
+**Lot D, première tranche (2026-11-12)** : agents dans des conteneurs jetables, `src/agent/dockerRunner.ts`. Opt-in (`AGENT_RUNTIME=docker`), mode clé API seulement ; par défaut rien ne change.
+- Un conteneur par tâche, supprimé ensuite (même après annulation ou délai dépassé) ; en lecture seule, sans capacités, sans élévation de droits, utilisateur sans droits (celui de l'outil, pour les fichiers écrits), mémoire, processeurs et processus plafonnés, image jamais téléchargée au lancement. Il ne monte que le dossier de travail de la tâche ; la clé API passe par l'environnement du client docker et jamais par les arguments (visibles par `ps`). Le mode abonnement est refusé dans ce mode (pas de repli silencieux sur la machine).
+- Correspondances : D2 (orchestrateur, limites) partiellement, sans conteneur persistant ni arrêt à l'inactivité ; D6 partiellement (un conteneur par tâche, pas de démon) ; D5 : le conteneur ne reçoit aucun identifiant de forge, l'outil fait les contrôles de fichiers puis le commit et le push depuis l'hôte.
+- **Pas fait** : D1 (lecture de devcontainer.json), D3/D4 (image générée et vérifiée), D7 (liste blanche réseau), D8 (terminal, connexion Claude dans le conteneur), D9/D10, le démon d'agent persistant, Docker sans root. Décision de déploiement en suspens (voir `docs/deploiement.md`, section 10).
+- **Vérifié** : 7 tests (arguments, faux docker, annulation, échec, choix de l'exécuteur, configuration), 13 mutations détectées ; options d'isolation essayées avec le vrai Docker sur une image locale. **Non vérifié** : la CLI Claude Code dans le conteneur, une vraie tâche, les performances.
+
 ## Lot B : GitHub (jalon J2)
 
 Objectif : traiter un ticket GitHub et reviewer une PR, comme aujourd'hui pour GitLab.
