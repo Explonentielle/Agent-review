@@ -1,6 +1,6 @@
 # À tester en rentrant
 
-Mis à jour le 2026-11-11. Chaque ligne dit quoi faire et ce qu'on doit voir. Les cases à cocher sont pour toi. Tout ce qui est écrit ici a des tests automatiques (339), mais **aucun n'a été essayé sur un vrai compte ni dans un vrai navigateur** : c'est ce qu'il reste à vérifier.
+Mis à jour le 2026-11-12. Chaque ligne dit quoi faire et ce qu'on doit voir. Les cases à cocher sont pour toi. Tout ce qui est écrit ici a des tests automatiques (390), mais **aucun n'a été essayé sur un vrai compte ni dans un vrai navigateur** : c'est ce qu'il reste à vérifier. Un parcours guidé pour GitHub en local : `docs/todo-test-local-github.md`.
 
 **Ordre conseillé ce soir** : sections 0, puis 7 (les agents tournent-ils encore ? c'est le seul vrai risque de régression), puis 1 et 2 (GitHub), 3, 9. Les sections 5, 6 et 8 sont facultatives : elles ne changent rien tant que tu ne mets pas les variables `AUTH_*` ou que tu ne déploies pas.
 
@@ -44,8 +44,8 @@ Jamais essayé sur un vrai dépôt. Prérequis : un dépôt privé de test (un R
 
 ## 4. Questions pour toi
 
-- [ ] Le bloc « Reprendre la main » (4 lignes dans `public/index.html`, fonction `showTask`) est-il à toi ? Il reste non commité.
-- [ ] Déclenchement automatique des reviews : j'ai ajouté le réglage (section 10) avec « Toutes » par défaut, donc rien ne change tant que tu ne le modifies pas. Est-ce que « Toutes » reste le bon défaut pour toi ?
+- [x] Le bloc « Reprendre la main » (4 lignes de `showTask`) : il était à toi, retiré le 2026-11-12 sur ta demande.
+- [x] Déclenchement automatique des reviews : « Toutes » reste le défaut (décidé le 2026-11-12).
 
 ## 5. Connexion OAuth (C2), seulement si tu veux l'essayer
 
