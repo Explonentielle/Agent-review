@@ -471,6 +471,18 @@ export function buildServer(base: ServerDeps) {
     return { ok: true };
   });
 
+  /** Lance une review détectée mais pas encore analysée (déclenchement manuel). */
+  app.post<IdParams>("/api/reviews/:id/start", async (req, reply) => {
+    const id = Number(req.params.id);
+    const row = await deps.reviews.get(id);
+    if (!row) return reply.code(404).send({ error: "Review introuvable" });
+    if (row.status !== "detected") return reply.code(409).send({ error: "Cette review n'est pas en attente de lancement" });
+    await deps.reviews.setStatus(id, "queued");
+    await deps.reviews.logAction(id, "start", false);
+    deps.enqueueReview(id);
+    return { ok: true };
+  });
+
   app.post<IdParams>("/api/reviews/:id/retry", async (req) => {
     const id = Number(req.params.id);
     await deps.reviews.setStatus(id, "queued");

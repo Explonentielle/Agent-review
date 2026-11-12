@@ -25,6 +25,11 @@ export const AgentSettingsSchema = z.object({
  */
 export const SettingsSchema = z.object({
   actionMode: z.enum(["shadow", "comment", "auto"]),
+  /**
+   * Quelles demandes de fusion où tu es relecteur sont analysées : toutes dès qu'elles passent en Ready (all), seulement celles des projets
+   * configurés dans les Paramètres (configured), ou aucune toute seule : elles sont détectées et tu lances la review à la main (manual).
+   */
+  reviewTrigger: z.enum(["all", "configured", "manual"]).default("all"),
   /** Connexion à Claude : abonnement de l'utilisateur, ou clé API (ANTHROPIC_API_KEY du .env, facturée à l'usage). */
   agentAuth: z.enum(["subscription", "api"]),
   /** Budget du mois en dollars, appliqué seulement en mode clé API (0 = aucune limite). */
@@ -73,6 +78,7 @@ export type AgentSettings = z.infer<typeof AgentSettingsSchema>;
 
 export const DEFAULT_SETTINGS: Settings = {
   actionMode: "shadow",
+  reviewTrigger: "all",
   agentAuth: "subscription",
   budget: { monthlyUsd: 0 },
   review: { model: "claude-sonnet-5-5", effort: "high", maxTurns: 40, timeoutMin: 20 },

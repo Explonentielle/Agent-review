@@ -45,7 +45,7 @@ Jamais essayé sur un vrai dépôt. Prérequis : un dépôt privé de test (un R
 ## 4. Questions pour toi
 
 - [ ] Le bloc « Reprendre la main » (4 lignes dans `public/index.html`, fonction `showTask`) est-il à toi ? Il reste non commité.
-- [ ] Déclenchement automatique des reviews : garder tel quel, ou ajouter un bouton de lancement manuel / limiter aux projets configurés ?
+- [ ] Déclenchement automatique des reviews : j'ai ajouté le réglage (section 10) avec « Toutes » par défaut, donc rien ne change tant que tu ne le modifies pas. Est-ce que « Toutes » reste le bon défaut pour toi ?
 
 ## 5. Connexion OAuth (C2), seulement si tu veux l'essayer
 
@@ -95,7 +95,19 @@ Suivre `docs/deploiement.md`. À noter ce qui se passe réellement :
 - [ ] Provoquer un échec (par exemple retirer un droit du jeton puis publier) : la ligne est en rouge « échec », le message d'erreur s'affiche au survol, et ne contient aucun jeton.
 - [ ] Le texte des commentaires n'apparaît nulle part dans le journal (seulement leur longueur dans le détail de l'API).
 
-## 10. Pas testé du tout
+## 10. Déclenchement des reviews
+
+Paramètres > Déclenchement des reviews (trois choix, « Toutes » par défaut : rien ne change tant que tu n'y touches pas).
+
+- [ ] La section s'affiche avec « Toutes » coché ; enregistrer les paramètres sans rien changer fonctionne comme avant.
+- [ ] Choisir « À la main », enregistrer, attendre un cycle (90 s) : une MR où tu es relecteur apparaît dans Reviews avec le filtre **À lancer** (puce à part, avec son compteur), et l'agent ne démarre pas.
+- [ ] Ouvrir cette review : l'encart « Pas encore analysée » et le bouton **Lancer la review** (à la place de « Relancer »). Cliquer : le statut passe à « En file » puis « En cours », le résultat arrive comme d'habitude.
+- [ ] Un double clic rapide sur le bouton ne lance pas deux analyses.
+- [ ] Redémarrer l'outil avec une review « À lancer » : elle y reste, aucune analyse ne démarre toute seule.
+- [ ] Choisir « Projets configurés seulement » : une MR d'un projet absent de Paramètres > Projets n'apparaît pas du tout ; ajouter ce projet, elle apparaît au cycle suivant.
+- [ ] Revenir à « Toutes » : les nouvelles MR repartent toutes seules (celles déjà « À lancer » attendent toujours ton clic).
+
+## 11. Pas testé du tout
 
 - Un vrai serveur PostgreSQL (pilote `pg`) : seuls SQLite et PostgreSQL embarqué (PGlite) sont testés. Lancer avec `TEST_DATABASE_URL` pour la suite complète.
 - Le dashboard dans plusieurs navigateurs.

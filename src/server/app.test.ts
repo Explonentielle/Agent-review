@@ -7,11 +7,13 @@ const WRITE = { "x-review-agent": "1" };
 describe("API du dashboard sur le connecteur", () => {
   let h: Harness;
   let enqueuedDev: number[];
+  let enqueuedReviews: number[];
   let app: ReturnType<typeof buildServer>;
 
   beforeEach(async () => {
     h = await createHarness();
     enqueuedDev = [];
+    enqueuedReviews = [];
     h.connector.tickets.set(609, h.ticket());
     const current = await h.settings.get();
     await h.settings.save({ ...current, workflow: { ...current.workflow, todoLabels: ["Statut::A traiter"] } });
@@ -26,7 +28,7 @@ describe("API du dashboard sur le connecteur", () => {
       audit: h.audit,
       accounts: h.accounts,
       local: h.local,
-      enqueueReview: () => undefined,
+      enqueueReview: (id) => enqueuedReviews.push(id),
       enqueueDev: (id) => enqueuedDev.push(id),
       queueSize: () => 0,
     });
@@ -106,6 +108,25 @@ describe("API du dashboard sur le connecteur", () => {
     const res = await app.inject({ method: "POST", url: `/api/tasks/${id}/cleanup`, headers: WRITE });
     expect(res.statusCode).toBe(200);
     expect((await h.tasks.get(id))!.worktree_path).toBeNull();
+  });
+
+  it("lancer une review détectée : seulement si elle attend, une seule fois, mise en file", async () => {
+    const mr = { projectId: 1, projectPath: "groupe/projet", mrIid: 7, mrTitle: "t", mrUrl: "u", author: "a", headSha: "a".repeat(40) };
+    const waiting = (await h.reviews.insertIfNew({ ...mr, status: "detected" }))!;
+    const queued = (await h.reviews.insertIfNew({ ...mr, mrIid: 8 }))!;
+    const start = (id: number, headers: Record<string, string> = WRITE) => app.inject({ method: "POST", url: `/api/reviews/${id}/start`, headers });
+
+    expect((await start(waiting, {})).statusCode).toBe(403); // en-tête anti-CSRF
+    expect((await start(999_999)).statusCode).toBe(404);
+    expect((await start(queued)).statusCode).toBe(409); // déjà en file : rien à lancer
+    expect(enqueuedReviews).toEqual([]);
+
+    expect((await start(waiting)).statusCode).toBe(200);
+    expect(enqueuedReviews).toEqual([waiting]);
+    expect(await h.reviews.get(waiting)).toMatchObject({ status: "queued" });
+    expect((await start(waiting)).statusCode).toBe(409); // un second clic ne relance pas
+    expect(enqueuedReviews).toEqual([waiting]);
+    expect(await h.db.get("SELECT kind, automatic FROM actions WHERE review_id = ?", [waiting])).toEqual({ kind: "start", automatic: 0 });
   });
 
   it("secrets : valeurs jamais renvoyées, en-tête anti-CSRF, noms limités, jeton GitHub contrôlé", async () => {

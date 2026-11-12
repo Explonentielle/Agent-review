@@ -195,6 +195,7 @@ export class TenantManager {
       (hooks.startPoller ?? startReviewPoller)({
         connector: forge.connector,
         reviews,
+        settings,
         username: forge.username,
         intervalMs: config.pollIntervalMs,
         enqueue: (id) => reviewQueue.push(id),

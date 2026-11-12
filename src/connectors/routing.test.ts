@@ -173,7 +173,7 @@ describe("plusieurs forges : chaque donnée passe par sa forge", () => {
     github.reviewRequests = [{ projectId: 1, projectPath: "acme/projet", iid: 7, title: "PR", description: "", state: "opened", draft: false, sourceBranch: "f", targetBranch: "develop", headSha: sha, url: "https://github.com/acme/projet/pull/7", author: { id: 12, username: "collegue", name: "Collègue" }, reviewers: [], labels: [] }];
     const enqueued: number[] = [];
 
-    const stop = startReviewPoller({ connector: github, reviews: h.reviews, username: "alex-gh", intervalMs: 60_000, enqueue: (id) => enqueued.push(id) });
+    const stop = startReviewPoller({ connector: github, reviews: h.reviews, settings: h.settings, username: "alex-gh", intervalMs: 60_000, enqueue: (id) => enqueued.push(id) });
     await new Promise((resolve) => setTimeout(resolve, 50));
     stop();
 

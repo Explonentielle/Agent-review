@@ -22,6 +22,7 @@ export function mergeWithDefaults(stored: unknown): Settings {
 
   const merged = {
     actionMode: section("actionMode"),
+    reviewTrigger: section("reviewTrigger"),
     agentAuth: section("agentAuth"),
     budget: section("budget"),
     review: section("review"),

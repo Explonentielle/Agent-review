@@ -166,6 +166,12 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     await settings.save({ ...defaults, actionMode: "comment", budget: { monthlyUsd: 12.5 } });
     expect(await settings.get()).toMatchObject({ actionMode: "comment", budget: { monthlyUsd: 12.5 } });
     await expect(settings.save({ ...defaults, actionMode: "n'importe quoi" })).rejects.toThrow();
+    expect(defaults.reviewTrigger).toBe("all"); // comportement d'origine
+    await settings.save({ ...(await settings.get()), reviewTrigger: "manual" });
+    expect((await settings.get()).reviewTrigger).toBe("manual");
+    await expect(settings.save({ ...defaults, reviewTrigger: "toujours" })).rejects.toThrow();
+    await db.run("UPDATE settings SET value = ? WHERE key = 'settings'", [JSON.stringify({ actionMode: "comment" })]); // réglages d'avant l'option
+    expect((await settings.get()).reviewTrigger).toBe("all");
     expect((await settings.get()).actionMode).toBe("comment");
 
     const project = { projectId: 5, path: "g/b", devEnabled: true, baseBranch: "develop", targetBranch: "develop", allowedCommands: [], instructions: "" };

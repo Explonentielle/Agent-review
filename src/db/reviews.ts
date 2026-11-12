@@ -3,6 +3,7 @@ import type { ForgeKind } from "../connectors/types.js";
 import type { Db } from "./db.js";
 
 export type ReviewStatus =
+  | "detected" // détectée mais pas lancée : le déclenchement manuel attend ton clic
   | "queued" // détectée, en attente de l'agent
   | "running" // review en cours
   | "needs_human" // l'agent a trouvé des points qui demandent ton analyse
@@ -48,6 +49,8 @@ export interface NewReview {
   mrUrl: string;
   author: string;
   headSha: string;
+  /** `detected` : la review attend d'être lancée à la main (déclenchement manuel). Par défaut `queued` : l'agent la prend. */
+  status?: "queued" | "detected";
 }
 
 export interface SavedResult {
@@ -79,11 +82,11 @@ export function createReviewRepo(db: Db, workspaceId: number) {
      */
     async insertIfNew(r: NewReview): Promise<number | null> {
       const row = await db.get<{ id: number }>(
-        `INSERT INTO reviews (workspace_id, source, project_id, project_path, mr_iid, mr_title, mr_url, author, head_sha)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO reviews (workspace_id, source, project_id, project_path, mr_iid, mr_title, mr_url, author, head_sha, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (workspace_id, source, project_id, mr_iid, head_sha) DO NOTHING
          RETURNING id`,
-        [workspaceId, r.source ?? DEFAULT_FORGE, r.projectId, r.projectPath, r.mrIid, r.mrTitle, r.mrUrl, r.author, r.headSha],
+        [workspaceId, r.source ?? DEFAULT_FORGE, r.projectId, r.projectPath, r.mrIid, r.mrTitle, r.mrUrl, r.author, r.headSha, r.status ?? "queued"],
       );
       return row ? row.id : null;
     },
@@ -171,7 +174,7 @@ export function createReviewRepo(db: Db, workspaceId: number) {
      * @returns Rien.
      * @throws Error Si la review n'est pas dans l'espace : rien n'est écrit.
      */
-    async logAction(reviewId: number, kind: "comment" | "approve" | "dismiss" | "retry", automatic: boolean, detail?: string): Promise<void> {
+    async logAction(reviewId: number, kind: "comment" | "approve" | "dismiss" | "retry" | "start", automatic: boolean, detail?: string): Promise<void> {
       const res = await db.run(
         "INSERT INTO actions (review_id, kind, automatic, detail) SELECT id, CAST(? AS TEXT), CAST(? AS INTEGER), CAST(? AS TEXT) FROM reviews WHERE id = ? AND workspace_id = ?",
         [kind, automatic ? 1 : 0, detail ?? null, reviewId, workspaceId],

@@ -217,6 +217,11 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - **Pas encore fait** : purge automatique (E10), vue d'ensemble pour un admin d'équipe, journal des actions de l'agent sur le disque ou des changements de réglages.
 - **Vérifié** : 9 tests (écritures, lectures, échecs avec secret masqué, journal en panne, pushs, pagination, étanchéité entre espaces, bout en bout avec deux personnes) et 5 mutations détectées. Non vérifié : sur une vraie forge.
 
+**Déclenchement des reviews (2026-11-12)** : réglage Paramètres > Déclenchement des reviews, par espace.
+- **Trois choix** : « Toutes » (défaut, comportement d'origine : chaque MR où tu es relecteur est analysée dès qu'elle passe en Ready), « Projets configurés seulement » (les MR des autres projets ne sont même pas enregistrées, elles le sont dès que le projet est configuré), « À la main » (la MR est enregistrée avec le statut **À lancer**, rien ne démarre ; un bouton « Lancer la review » dans le détail met l'analyse en file).
+- Le réglage est relu à chaque cycle du poller : il s'applique sans redémarrer. Une review « À lancer » n'est pas relancée par un redémarrage. Lancer une review déjà en file est refusé (409), donc un double clic ne la lance pas deux fois. Le lancement est inscrit au journal des actions de la review.
+- **Vérifié** : 5 tests de plus (344 au total) et 7 mutations détectées ; le dashboard n'a été vérifié qu'en syntaxe.
+
 ## Lot B : GitHub (jalon J2)
 
 Objectif : traiter un ticket GitHub et reviewer une PR, comme aujourd'hui pour GitLab.
