@@ -1083,10 +1083,13 @@ function secretsBlock() {
   const origin = (x) => x.source === "env" ? pill("gray", "défini dans le .env (prioritaire)")
     : x.source === "vault" ? pill("green", `enregistré, chiffré${x.updatedAt ? ` le ${esc(x.updatedAt.slice(0, 10))}` : ""}`)
     : pill("orange", "non défini");
-  return `<div class="sub-title">Jetons enregistrés dans l'outil</div>
+  const input = (x) => x.secret === false
+    ? `<input type="text" autocomplete="off" spellcheck="false" placeholder="https://gitlab.exemple.com" value="${esc(x.value || "")}" data-secret-input="${esc(x.name)}">`
+    : `<input type="password" autocomplete="new-password" placeholder="${x.source === "vault" ? "Nouvelle valeur (remplace l'actuelle)" : "Coller la valeur"}" data-secret-input="${esc(x.name)}">`;
+  return `<div class="sub-title">Adresse et jetons enregistrés dans l'outil</div>
     <div class="secret-list">${list.map((x) => `
       <div class="field"><span>${esc(x.label)} ${origin(x)}</span>
-        ${x.source === "env" ? "" : `<div class="secret-form"><input type="password" autocomplete="new-password" placeholder="${x.source === "vault" ? "Nouvelle valeur (remplace l'actuelle)" : "Coller la valeur"}" data-secret-input="${esc(x.name)}"><button type="button" class="btn sm primary" data-act="secret-save" data-name="${esc(x.name)}">Enregistrer</button>${x.source === "vault" ? `<button type="button" class="btn sm ghost" data-act="secret-delete" data-name="${esc(x.name)}">Supprimer</button>` : ""}</div>`}
+        ${x.source === "env" ? (x.secret === false && x.value ? `<small>${esc(x.value)}</small>` : "") : `<div class="secret-form">${input(x)}<button type="button" class="btn sm primary" data-act="secret-save" data-name="${esc(x.name)}">Enregistrer</button>${x.source === "vault" ? `<button type="button" class="btn sm ghost" data-act="secret-delete" data-name="${esc(x.name)}">Supprimer</button>` : ""}</div>`}
         <small>Appliqué tout de suite.</small></div>`).join("")}</div>`;
 }
 
@@ -1101,7 +1104,7 @@ async function secretAction(act, name) {
       toast(res.restartRequired ? "Enregistré, chiffré. Redémarre l'outil pour le prendre en compte." : "Enregistré, chiffré et appliqué.");
       state.issues = null; // les tickets viennent des forges : ils sont rechargés avec les nouvelles connexions
     } else {
-      if (!(await ask({ title: "Supprimer ce jeton ?", html: "<p>Il est effacé de la base de l'outil. Rien n'est révoqué chez GitLab, GitHub ou Anthropic : fais-le là-bas si le jeton a fuité.</p>", okLabel: "Supprimer" }))) return;
+      if (!(await ask({ title: "Supprimer ce réglage ?", html: "<p>Il est effacé de la base de l'outil. Pour un jeton, rien n'est révoqué chez GitLab, GitHub ou Anthropic : fais-le là-bas si le jeton a fuité.</p>", okLabel: "Supprimer" }))) return;
       const res = await api(`/api/secrets/${encodeURIComponent(name)}/delete`, {});
       toast(res.restartRequired ? "Supprimé. Redémarre l'outil pour que la forge cesse de l'utiliser." : "Supprimé.");
     }
@@ -1119,8 +1122,8 @@ function forgesBlock() {
   const forges = st.forges || [];
   const has = (kind) => forges.some((f) => f.kind === kind);
   return `<dl class="kv">${forges.map((f) => `<dt>${forgeName(f.kind)}</dt><dd>@${esc(f.username)}${f.kind === "gitlab" && st.gitlabUrl ? ` · ${esc(st.gitlabUrl)}` : ""}</dd>`).join("")}
-    ${has("github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : enregistre un jeton ci-dessous, ou ajoute <code>GITHUB_TOKEN</code> dans le .env.</dd>`}
-    ${has("gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : ajoute <code>GITLAB_URL</code> dans le .env, puis enregistre un jeton ci-dessous (ou ajoute <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env).</dd>`}</dl>`;
+    ${has("github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : enregistre un jeton ci-dessous, ou ajoute <code>GITHUB_TOKEN</code> dans le .env. Utilise un jeton à portée fine créé pour le compte ou l'organisation qui possède les dépôts.</dd>`}
+    ${has("gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : enregistre l'adresse de ton GitLab puis un jeton ci-dessous (ou ajoute <code>GITLAB_URL</code>, <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env). Utilise le jeton d'un compte qui a accès aux projets concernés.</dd>`}</dl>`;
 }
 
 /** Section « Agents dans des conteneurs » : où tournent les agents et, en mode conteneur, le bouton qui vérifie que tout est prêt. */

@@ -5,11 +5,15 @@ import { errorMessage, log, registerSecret } from "../logger.js";
 import { SecretError } from "./crypto.js";
 import type { SecretScope, SecretStore } from "./store.js";
 
-/** Secrets que le dashboard peut enregistrer, et si un changement s'applique sans reconstruire les connexions aux forges. */
+/**
+ * Réglages de connexion que le dashboard peut enregistrer, et si un changement s'applique sans reconstruire les connexions aux forges.
+ * `secret: false` : une adresse, qui peut être réaffichée (stockée chiffrée comme le reste, par simplicité).
+ */
 export const MANAGED_SECRETS = [
-  { name: "gitlab.token", label: "Jeton GitLab", live: false },
-  { name: "github.token", label: "Jeton GitHub", live: false },
-  { name: "anthropic.api_key", label: "Clé API Anthropic", live: true },
+  { name: "gitlab.url", label: "Adresse de GitLab", live: false, secret: false },
+  { name: "gitlab.token", label: "Jeton GitLab", live: false, secret: true },
+  { name: "github.token", label: "Jeton GitHub", live: false, secret: true },
+  { name: "anthropic.api_key", label: "Clé API Anthropic", live: true, secret: true },
 ] as const;
 export type ManagedSecretName = (typeof MANAGED_SECRETS)[number]["name"];
 
@@ -28,7 +32,7 @@ export interface Vault {
   scope: SecretScope;
   /** Secrets déjà fournis par le `.env` : prioritaires. */
   fromEnv: Record<ManagedSecretName, boolean>;
-  /** Adresse de l'instance GitLab (GITLAB_URL), ou null : sans elle, le jeton GitLab ne se gère pas ici. */
+  /** Adresse de l'instance GitLab (GITLAB_URL du `.env`, ou saisie dans le dashboard), ou null : sans elle, le jeton GitLab ne se gère pas ici. */
   gitlabUrl: string | null;
   /** Contrôle qu'un jeton GitHub est accepté par l'API (erreur sinon). Remplaçable dans les tests. */
   verifyGithubToken: (apiUrl: string, token: string) => Promise<void>;
@@ -39,6 +43,10 @@ export interface Vault {
 export interface SecretStatus {
   name: ManagedSecretName;
   label: string;
+  /** Vrai pour un jeton ou une clé (jamais renvoyé), faux pour une adresse (renvoyée dans `value`). */
+  secret: boolean;
+  /** Valeur d'un réglage qui n'est pas un secret (l'adresse de GitLab), sinon null. */
+  value: string | null;
   /** D'où vient la valeur utilisée : le `.env`, le coffre, ou nulle part. */
   source: "env" | "vault" | null;
   updatedAt: string | null;
@@ -88,7 +96,7 @@ export function createVault(
   return {
     store,
     scope,
-    fromEnv: { "gitlab.token": config.gitlab !== null, "github.token": config.github !== null, "anthropic.api_key": config.anthropicApiKey !== null },
+    fromEnv: { "gitlab.url": config.gitlabUrl !== null, "gitlab.token": config.gitlab !== null, "github.token": config.github !== null, "anthropic.api_key": config.anthropicApiKey !== null },
     gitlabUrl: config.gitlabUrl,
     verifyGithubToken,
     verifyGitlabToken,
@@ -98,11 +106,18 @@ export function createVault(
 /**
  * Complète la configuration avec les secrets du coffre que le `.env` ne fournit pas. Un secret illisible ou un
  * jeton de forge refusé est signalé au journal et ignoré : l'outil démarre quand même, et on peut le corriger dans le dashboard.
- * @param config Configuration modifiée en place (`gitlab`, `github`, `anthropicApiKey`).
+ * @param config Configuration modifiée en place (`gitlabUrl`, `gitlab`, `github`, `anthropicApiKey`).
  * @param vault Coffre de la personne.
  * @returns Rien.
  */
 export async function applyVaultSecrets(config: Config, vault: Vault): Promise<void> {
+  if (!vault.fromEnv["gitlab.url"]) {
+    const url = await readQuietly(vault, "gitlab.url");
+    if (url) {
+      config.gitlabUrl = url;
+      vault.gitlabUrl = url;
+    }
+  }
   if (!vault.fromEnv["anthropic.api_key"]) {
     const key = await readQuietly(vault, "anthropic.api_key");
     if (key) config.anthropicApiKey = key;
@@ -155,6 +170,8 @@ export async function describeSecrets(vault: Vault): Promise<SecretStatus[]> {
   return MANAGED_SECRETS.filter((m) => m.name !== "gitlab.token" || vault.gitlabUrl !== null).map((m) => ({
     name: m.name,
     label: m.label,
+    secret: m.secret,
+    value: m.name === "gitlab.url" ? vault.gitlabUrl : null,
     source: vault.fromEnv[m.name] ? "env" : stored.has(m.name) ? "vault" : null,
     updatedAt: vault.fromEnv[m.name] ? null : (stored.get(m.name) ?? null),
     live: m.live,
@@ -174,8 +191,26 @@ export function managedName(name: string): ManagedSecretName {
 }
 
 /**
- * Enregistre un secret saisi dans le dashboard. Un jeton de forge est d'abord contrôlé auprès de la forge (un jeton
- * refusé enregistré empêcherait la forge de démarrer). La clé API est appliquée tout de suite ; un jeton de forge demande de
+ * Normalise l'adresse d'une instance GitLab saisie dans le dashboard.
+ * @param value Adresse saisie.
+ * @returns L'adresse sans barre finale, ni paramètres (un chemin est gardé : GitLab peut vivre sous /gitlab).
+ * @throws SecretError Si ce n'est pas une adresse http(s), ou si elle contient des identifiants.
+ */
+function cleanGitlabUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new SecretError("Adresse invalide (exemple : https://gitlab.exemple.com)");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new SecretError("L'adresse doit commencer par https:// (ou http://)");
+  if (url.username || url.password) throw new SecretError("Pas d'identifiants dans l'adresse : le jeton se saisit à part");
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+}
+
+/**
+ * Enregistre un réglage de connexion saisi dans le dashboard. Un jeton de forge est d'abord contrôlé auprès de la forge (un jeton
+ * refusé enregistré empêcherait la forge de démarrer). La clé API est appliquée tout de suite ; une adresse ou un jeton de forge demande de
  * reconstruire les connexions aux forges (`restartRequired` dit si cela passe par un redémarrage).
  * @param config Configuration modifiée en place pour la clé API.
  * @param vault Coffre de la personne.
@@ -190,10 +225,17 @@ export async function saveManagedSecret(config: Config, vault: Vault, name: Mana
   if (vault.fromEnv[name]) throw new SecretConflictError("Ce secret est défini dans le .env, qui est prioritaire : retire-le du .env pour le gérer ici");
   const clean = value.trim();
   if (clean === "") throw new SecretError("Valeur vide");
+  if (name === "gitlab.url") {
+    const url = cleanGitlabUrl(clean);
+    await vault.store.put(vault.scope, name, url);
+    config.gitlabUrl = url;
+    vault.gitlabUrl = url;
+    return { restartRequired: true };
+  }
   registerSecret(clean); // masqué dès maintenant, y compris dans l'erreur d'un contrôle qui échoue
   if (name === "github.token") await vault.verifyGithubToken(config.githubApiUrl, clean);
   if (name === "gitlab.token") {
-    if (!vault.gitlabUrl) throw new SecretError("L'adresse de GitLab n'est pas configurée (GITLAB_URL)");
+    if (!vault.gitlabUrl) throw new SecretError("L'adresse de GitLab n'est pas configurée : enregistre-la d'abord");
     await vault.verifyGitlabToken(vault.gitlabUrl, clean);
   }
   await vault.store.put(vault.scope, name, clean);
@@ -214,5 +256,9 @@ export async function deleteManagedSecret(config: Config, vault: Vault, name: Ma
   if (vault.fromEnv[name]) throw new SecretConflictError("Ce secret est défini dans le .env, qui est prioritaire : retire-le du .env pour le gérer ici");
   const deleted = await vault.store.delete(vault.scope, name);
   if (name === "anthropic.api_key") config.anthropicApiKey = null;
+  if (name === "gitlab.url") {
+    config.gitlabUrl = null;
+    vault.gitlabUrl = null;
+  }
   return { deleted, restartRequired: name !== "anthropic.api_key" && deleted };
 }

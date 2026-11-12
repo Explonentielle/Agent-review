@@ -33,7 +33,9 @@ describe("configuration de la machine : forges", () => {
     const config = loadConfig({ ...machine, ...gitlab, GITHUB_TOKEN: "", GITHUB_API_URL: "  " });
 
     expect(config.github).toBeNull();
-    expect(() => loadConfig({ ...machine, GITLAB_URL: "", GITLAB_TOKEN: "", GITLAB_USERNAME: "", GITHUB_TOKEN: "" })).toThrow("aucune forge configurée");
+    const empty = loadConfig({ ...machine, GITLAB_URL: "", GITLAB_TOKEN: "", GITLAB_USERNAME: "", GITHUB_TOKEN: "" });
+    expect(empty.gitlab).toBeNull();
+    expect(empty.gitlabUrl).toBeNull();
   });
 
   it("GitLab à moitié renseigné : chaque variable manquante est signalée, sans afficher les valeurs", () => {
@@ -64,8 +66,12 @@ describe("configuration de la machine : forges", () => {
     expect(alone.gitlabUrl).toBe("https://gitlab.example");
   });
 
-  it("aucune forge : message explicite", () => {
-    expect(() => loadConfig({ ...machine })).toThrow(/aucune forge configurée.*GITHUB_TOKEN/);
+  it("aucune forge dans le .env : l'outil démarre, adresse et jetons se saisissent dans le dashboard", () => {
+    const config = loadConfig({ ...machine });
+    expect(config.gitlab).toBeNull();
+    expect(config.github).toBeNull();
+    expect(config.gitlabUrl).toBeNull();
+    expect(config.githubApiUrl).toBe("https://api.github.com");
   });
 
   it("valeurs invalides : adresse, intervalle trop court", () => {

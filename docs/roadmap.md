@@ -265,6 +265,8 @@ Badges dans l'en-tête : reviews à analyser, agents en cours. Thème clair/somb
 - Le mode d'action, les modèles, les règles et les conventions passent dans le dashboard. Ils sont relus à chaque exécution, sans redémarrage.
 - Validation côté serveur : **vérifié** qu'Opus et l'effort `max` sont refusés (400) même en appelant l'API directement.
 
+**Implémenté (2026-11-12)** : adresse GitLab et jetons saisissables dans Paramètres > Connexion, le `.env` n'exige plus aucune forge. L'adresse de l'instance GitLab (`gitlab.url`) rejoint le coffre (`src/secrets/vault.ts`, stockée chiffrée comme les jetons, par personne), le `.env` (`GITLAB_URL`) reste prioritaire s'il la définit. Adresse normalisée (http(s) seulement, sans identifiants ni paramètres). Le jeton GitLab ne se propose qu'une fois l'adresse connue. `src/config.ts` ne refuse plus un `.env` sans forge. Les messages de forge manquante nomment le jeton à enregistrer. Testé : typecheck et un script rejouant les cas de `src/secrets/vault.test.ts` (base SQLite en mémoire) ; les tests vitest eux-mêmes n'ont pas tourné (vitest ne démarre pas sous Windows avec le lock actuel), à lancer sous Linux. Limites : l'adresse de l'API GitHub (GitHub Enterprise) reste dans le `.env` (`GITHUB_API_URL`) ; une seule instance GitLab par personne ; interface non essayée dans un navigateur.
+
 ### 28. Onglet Tickets : ✅ Fait (2026-11-04)
 
 `GET /api/issues` : tickets ouverts assignés à l'utilisateur (`scope=assigned_to_me`). Ils sont classés par les labels réglés : validation technique, puis en cours, puis à traiter, sinon « Autres ». La page Paramètres propose en un clic les labels vus sur les tickets.
