@@ -108,8 +108,8 @@ const EnvSchema = z
         if (!value) ctx.addIssue({ code: "custom", path: [name], message: `${name} manquant (GitLab demande GITLAB_URL, GITLAB_TOKEN et GITLAB_USERNAME ensemble)` });
       }
     }
-    if (!personal && !e.GITHUB_TOKEN) {
-      ctx.addIssue({ code: "custom", path: ["GITLAB_TOKEN"], message: "aucune forge configurée : renseigne GITLAB_URL, GITLAB_TOKEN et GITLAB_USERNAME, et/ou GITHUB_TOKEN" });
+    if (!e.GITLAB_URL && !e.GITHUB_TOKEN) {
+      ctx.addIssue({ code: "custom", path: ["GITLAB_URL"], message: "aucune forge configurée : renseigne GITLAB_URL (jeton saisi ensuite dans le dashboard) et/ou GITHUB_TOKEN" });
     }
   });
 

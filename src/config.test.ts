@@ -51,13 +51,17 @@ describe("configuration de la machine : forges", () => {
     expect(error).not.toContain("jeton-gitlab-secret");
   });
 
-  it("GITLAB_URL seule : adresse de l'instance pour les jetons personnels, mais elle ne suffit pas comme forge", () => {
+  it("GITLAB_URL seule : suffit au démarrage, le jeton GitLab se saisit ensuite dans le dashboard", () => {
     const config = loadConfig({ ...machine, GITLAB_URL: "https://gitlab.example/", ...github });
     expect(config.gitlab).toBeNull();
     expect(config.gitlabUrl).toBe("https://gitlab.example");
     expect(loadConfig({ ...machine, ...gitlab }).gitlabUrl).toBe("https://gitlab.example");
     expect(loadConfig({ ...machine, ...github }).gitlabUrl).toBeNull();
-    expect(() => loadConfig({ ...machine, GITLAB_URL: "https://gitlab.example" })).toThrow(/aucune forge configurée/);
+
+    const alone = loadConfig({ ...machine, GITLAB_URL: "https://gitlab.example" });
+    expect(alone.gitlab).toBeNull();
+    expect(alone.github).toBeNull();
+    expect(alone.gitlabUrl).toBe("https://gitlab.example");
   });
 
   it("aucune forge : message explicite", () => {

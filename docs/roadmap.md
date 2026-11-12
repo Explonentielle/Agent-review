@@ -44,6 +44,8 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 34 | Paramétrage | Prompts de base remplaçables dans le dashboard, garde-fous verrouillés | Faible | ✅ Fait (2026-11-09) |
 | 35 | Agent dev | Dépôts en ISO-8859-1 (sra-moteur) : l'édition de l'agent corrompt les accents | Moyen | Détection faite (2026-11-09, `src/dev/fileGuard.ts`) : un fichier corrompu est refusé avant le push. Réparation non faite : ne pas activer l'agent dev sur ces dépôts |
 | 36 | Plateforme | Plateforme hébergée : conteneur par utilisateur, GitLab / GitHub / tickets internes, abonnement ou clé API | Très élevé | Spec, parcours et roadmap détaillée écrits (2026-11-09) ; lot A fait sauf A3 (attend une clé API de test) et A6 : A1, A2, A4 et A5 faits (2026-11-09), voir `docs/roadmap-plateforme.md` ; lot B (GitHub à côté de GitLab) fait le 2026-11-10, à valider sur un vrai dépôt ; lot C (serveur) fait le 2026-11-10 et 11 sauf l'ouverture réelle à d'autres personnes : comptes, secrets chiffrés, données par espace, connexion OAuth, exécution par personne, audit, déploiement préparé (jamais essayé), voir docs/a-tester.md |
+| 37 | Agent dev | Lecture seule des autres projets d'une organisation par l'agent dev | Moyen | Noté (2026-11-12), à spécifier : touche aux droits de l'agent, à discuter avant tout code |
+| 38 | Plateforme | Connexion par organisation (OAuth ou GitHub App) pour la version commerciale | Élevé | Noté (2026-11-12), lié à l'item 36 (lot C) |
 
 ---
 
@@ -370,3 +372,33 @@ GitLab a un serveur MCP officiel (`/api/v4/mcp`), en beta depuis 18.6 en auto-h�
 - **Support client** : caviardage des données personnelles avant tout prompt (repères stables, table de correspondance dans le plan de contrôle seul, mode strict au départ). Validation humaine obligatoire par défaut, assouplissement par catégorie après taux d'accord mesuré. Reste à valider : durées de conservation avec le DPO, AIPD, conditions du fournisseur. Détail : section 3.5.
 
 **Rien n'est implémenté.** Prochaine étape : trancher les questions ouvertes (section 9 du document), puis spec détaillée de l'étape 1.
+
+### 37. Lecture seule des autres projets d'une organisation : noté, pas implémenté
+
+**Demande (2026-11-12)** : sur une organisation GitLab qui range plusieurs projets, l'agent dev doit pouvoir consulter les autres projets (contrats d'API, bibliothèques partagées, conventions) sans qu'ils soient montés dans le même conteneur.
+
+**Constat** : aujourd'hui l'agent ne voit que le dossier de travail de son projet, sans réseau ni accès aux autres dépôts. Un jeton par forge suffit déjà à lire tous les projets accessibles au compte ; ce qui manque, c'est de rendre ces dépôts visibles à l'agent.
+
+**Piste** : réglage par projet « projets en lecture seule » (Paramètres > Projets). L'outil clone ou met à jour ces dépôts lui-même, en lecture seule, et les expose à l'agent à côté de son dossier de travail. L'agent reste sans réseau, sans jeton et sans droit d'écriture sur eux. Pas besoin de construire ni de changer de conteneur : un montage en lecture seule suffit.
+
+**À trancher** :
+- Comment exposer ces dépôts à l'agent : chemins ajoutés aux dossiers lisibles de la CLI `claude`, ou montage en lecture seule en mode Docker.
+- Impact sur les garde-fous : l'agent lit du code non fiable de plusieurs dépôts (injection par le contenu), `fileGuard` et `assertBranchAllowed` ne doivent pas être affaiblis, et aucun de ces dépôts ne doit pouvoir être poussé.
+- Limite à fixer : nombre et taille des dépôts, pour le coût en contexte et en disque.
+
+Tout élargissement des droits de l'agent doit être discuté avant (règles du projet). Rien n'est implémenté avant le feu vert.
+
+### 38. Connexion par organisation pour la version commerciale : noté, pas implémenté
+
+**Demande (2026-11-12)** : l'outil doit pouvoir être mis en production et vendu. Les jetons personnels collés à la main ne conviennent pas à ce cas : il faut une connexion par organisation.
+
+**Constat** : le modèle actuel est un jeton par forge et par personne, saisi dans Paramètres > Connexion (coffre chiffré). Il couvre un usage perso ou une équipe qui partage un compte, pas une organisation cliente qui veut limiter les accès.
+
+**Pistes** :
+- GitHub : application GitHub (GitHub App) installée sur l'organisation, avec les dépôts choisis par l'administrateur et des jetons courts générés par l'outil.
+- GitLab : application OAuth sur l'instance, ou jeton d'accès de groupe (group access token) avec un rôle limité.
+- Rattacher la connexion à l'espace (`workspace_id`) et non à la personne, avec rôles et audit déjà en place (item 36, lot C).
+
+**À trancher** : modèle de facturation, rôle de l'administrateur d'organisation, révocation, conservation des jetons (chiffrement, rotation).
+
+Lié à l'item 36 (`docs/vision-plateforme.md`). Rien n'est implémenté.
