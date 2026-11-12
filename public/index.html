@@ -110,6 +110,7 @@
   .fchip.active { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); font-weight: 600; }
   .fchip .n { color: var(--muted); font-variant-numeric: tabular-nums; }
   .fchip .n.hot { background: var(--red); color: #fff; border-radius: 999px; padding: 0 6px; font-weight: 700; }
+  .chips.ticket-sources { margin: 0 0 20px; }
 
   .card { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; }
   .card:hover { background: var(--hover); }
@@ -651,7 +652,7 @@ function renderTickets() {
   const source = sources.includes(state.ticketSource) ? state.ticketSource : "";
   const issues = source ? matching.filter((i) => i.source === source) : matching;
   const sourceChips = sources.length > 1
-    ? `<div class="chips">${["", ...sources].map((k) => `<button class="fchip ${k === source ? "active" : ""}" data-tsource="${esc(k)}">${k ? esc(forgeName(k)) : "Toutes"}<span class="n">${k ? matching.filter((i) => i.source === k).length : matching.length}</span></button>`).join("")}</div>`
+    ? `<div class="chips ticket-sources">${["", ...sources].map((k) => `<button class="fchip ${k === source ? "active" : ""}" data-tsource="${esc(k)}">${k ? esc(forgeName(k)) : "Toutes"}<span class="n">${k ? matching.filter((i) => i.source === k).length : matching.length}</span></button>`).join("")}</div>`
     : "";
   const wf = state.settingsCache?.workflow;
   const notConfigured = wf && !wf.todoLabels.length && !wf.inProgressLabels.length;
