@@ -419,6 +419,7 @@
    ===================================================================== */
 const REVIEW_STATUS = {
   needs_human: { label: "À analyser", pill: "orange" },
+  detected: { label: "À lancer", pill: "accent" },
   auto_ok: { label: "Mineur / OK", pill: "green" },
   queued: { label: "En file", pill: "gray" },
   running: { label: "En cours", pill: "accent" },
@@ -427,7 +428,13 @@ const REVIEW_STATUS = {
   approved: { label: "Approuvée", pill: "green" },
   dismissed: { label: "Ignorée", pill: "gray" },
 };
-const REVIEW_FILTERS = ["needs_human", "auto_ok", "running", "queued", "error", "published", "approved", "dismissed", ""];
+/** Déclenchement des reviews : libellé et explication de chaque choix. */
+const TRIGGER = {
+  all: ["Toutes", "Chaque demande de fusion où tu es relecteur est analysée dès qu'elle passe en Ready (comportement d'origine)."],
+  configured: ["Projets configurés seulement", "Seules les demandes des projets ajoutés dans Paramètres > Projets sont analysées. Les autres sont ignorées, sans trace."],
+  manual: ["À la main", "Les demandes sont détectées et listées « À lancer » : l'agent ne démarre que quand tu cliques sur « Lancer la review »."],
+};
+const REVIEW_FILTERS = ["needs_human", "detected", "auto_ok", "running", "queued", "error", "published", "approved", "dismissed", ""];
 const TASK_STATUS = {
   queued: { label: "En attente", pill: "gray" },
   running: { label: "En cours", pill: "accent" },
@@ -878,7 +885,7 @@ async function refreshReviews() {
         <div class="card-title">${esc(r.mr_title)}</div>
         <div class="card-bottom"><span class="grow">${esc(r.author)}</span>${cardBadges(r)}</div>
       </div>`).join("")
-    : `<div class="empty"><div>${f === "needs_human" ? "Rien ne t'attend. 🎉<br><span class='note'>Les MR où tu es reviewer sont analysées automatiquement dès qu'elles passent en Ready.</span>" : "Aucune review ici."}</div></div>`;
+    : `<div class="empty"><div>${f === "needs_human" ? "Rien ne t'attend. 🎉<br><span class='note'>Les MR où tu es reviewer sont détectées dès qu'elles passent en Ready, puis analysées selon le déclenchement choisi dans Paramètres.</span>" : "Aucune review ici."}</div></div>`;
 }
 
 function renderReviewEmpty() {
@@ -888,6 +895,7 @@ function renderReviewEmpty() {
 
 function reviewCallout(r, reasons) {
   if (r.status === "error") return `<div class="callout err">${ICON.err}<h3>La review a échoué</h3><pre>${esc(r.error)}</pre><p>Tu peux la relancer. Si l'erreur parle d'une limite d'usage, attends que ton quota se libère.</p></div>`;
+  if (r.status === "detected") return `<div class="callout"><h3>Pas encore analysée</h3><p>Cette demande a été détectée, mais le déclenchement des reviews est réglé sur « À la main » : lance l'analyse quand tu veux.</p></div>`;
   if (r.status === "running" || r.status === "queued") return `<div class="callout live"><span class="pulse"></span><h3>${r.status === "running" ? "Analyse en cours" : "En attente d'analyse"}</h3><p>Le résultat apparaîtra ici.</p></div>`;
   if (!r.result) return "";
   if (reasons.length) return `<div class="callout warn">${ICON.warn}<h3>Demande ton analyse</h3><ul>${reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
@@ -937,7 +945,7 @@ async function showReview(id) {
     <div class="actionbar">
       ${res && !["published", "approved"].includes(r.status) ? `<button class="btn primary" data-act="publish">Publier le commentaire</button>` : ""}
       ${res && r.status !== "approved" ? `<button class="btn" data-act="approve">Publier + approuver</button>` : ""}
-      <button class="btn ghost" data-act="retry">Relancer</button>
+      ${r.status === "detected" ? `<button class="btn primary" data-act="start">Lancer la review</button>` : `<button class="btn ghost" data-act="retry">Relancer</button>`}
       ${r.status !== "dismissed" ? `<button class="btn ghost" data-act="dismiss">Ignorer</button>` : ""}
       <span class="spacer"></span>
       ${res ? `<span class="feedback">Décision juste ?
@@ -963,7 +971,7 @@ async function reviewAction(action, button) {
       if (action === "approve" && !(await ask({ title: "Publier et approuver ?", html: "<p>La review sera postée sur la MR et la MR approuvée en ton nom, pour ce commit précis.</p>", okLabel: "Publier + approuver" }))) return;
       if (button) button.disabled = true;
       await api(`/api/reviews/${id}/${action}`, {});
-      toast({ publish: "Commentaire publié sur la MR.", approve: "Review publiée et MR approuvée.", retry: "Review relancée.", dismiss: "Review ignorée." }[action]);
+      toast({ start: "Review lancée.", publish: "Commentaire publié sur la MR.", approve: "Review publiée et MR approuvée.", retry: "Review relancée.", dismiss: "Review ignorée." }[action]);
     }
     await showReview(id);
     refreshHeader();
@@ -1115,6 +1123,13 @@ function renderSettings() {
       </section>
 
       <section class="card-section">
+        <h2>Déclenchement des reviews</h2>
+        <p class="desc">Quelles demandes de fusion où tu es relecteur lancent l'agent. Le réglage s'applique au cycle de détection suivant, sans redémarrer.</p>
+        <div class="radios">${Object.entries(TRIGGER).map(([k, [label, help]]) => `
+          <label class="radio"><input type="radio" name="reviewTrigger" value="${k}" ${s.reviewTrigger === k ? "checked" : ""}><span><b>${label}</b><small>${help}</small></span></label>`).join("")}</div>
+      </section>
+
+      <section class="card-section">
         <h2>Modèles</h2>
         <p class="desc">Le plafond (Sonnet 5.5, effort élevé) est imposé par le code, quelle que soit la connexion.</p>
         <div class="sub-title">Connexion à Claude</div>
@@ -1253,6 +1268,7 @@ function collectSettings() {
   const agent = (p) => ({ model: f[`${p}.model`].value, effort: f[`${p}.effort`].value, maxTurns: num(`${p}.maxTurns`), timeoutMin: num(`${p}.timeoutMin`) });
   return {
     actionMode: f.actionMode.value,
+    reviewTrigger: f.reviewTrigger.value,
     agentAuth: f.agentAuth.value,
     budget: { monthlyUsd: Number(f["budget.monthlyUsd"].value) || 0 },
     review: agent("review"),
@@ -1467,7 +1483,7 @@ document.addEventListener("click", async (e) => {
     await api(`/api/tasks/${state.taskId}/cleanup`, {}).then(() => toast("Dossier supprimé.")).catch((err) => toast(err.message, true));
     return showTask(state.taskId);
   }
-  if (["publish", "approve", "retry", "dismiss", "agree", "disagree"].includes(act)) return reviewAction(act, t);
+  if (["start", "publish", "approve", "retry", "dismiss", "agree", "disagree"].includes(act)) return reviewAction(act, t);
 });
 
 document.addEventListener("keydown", (e) => {
