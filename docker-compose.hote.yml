@@ -2,7 +2,8 @@
 # L'outil lui-même est lancé par systemd (deploy/review-agent.service) sous un utilisateur dédié avec Docker sans root, pour pouvoir
 # lancer les agents dans des conteneurs jetables (AGENT_RUNTIME=docker) sans donner un accès root à la machine.
 # Utilisation : COMPOSE_FILE=docker-compose.hote.yml docker compose up -d   (variables lues dans le .env à côté de ce fichier)
-# Même nom de projet et même volume que docker-compose.yml : on peut passer de l'un à l'autre sans perdre la base.
+# Même nom de projet et même nom de volume que docker-compose.yml : sur le MÊME démon Docker, on passe de l'un à l'autre sans perdre la base.
+# Avec Docker sans root (un autre démon que celui de la machine) le volume est neuf : voir docs/deploiement.md, section 11, « Migrer depuis le déploiement des sections 1 à 8 ».
 name: review-agent
 
 services:

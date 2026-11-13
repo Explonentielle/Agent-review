@@ -133,7 +133,7 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
 
 **Pourquoi** : avec Docker « sans root » (rootless), le démon tourne sous un utilisateur ordinaire. Une évasion d'un conteneur ou une compromission de l'outil ne donne que les droits de cet utilisateur, pas ceux de root. Le Docker de rag-saas (avec root) n'est pas touché : c'est un second démon, séparé, qui ne voit ni ses conteneurs ni ses volumes.
 
-**Ce qui change** : l'application n'est plus dans un conteneur. `docker-compose.hote.yml` ne contient que la base (publiée sur `127.0.0.1:5433`, même volume que la variante complète), l'outil tourne sous systemd (`deploy/review-agent.service`) sous l'utilisateur `review`, et chaque agent tourne dans un conteneur jetable (section 10). Avec `AGENT_CONTAINER_USER=auto` (défaut), l'outil détecte Docker sans root et lance alors le conteneur en « root du conteneur » : pour la machine, c'est l'utilisateur `review`, le seul à pouvoir écrire dans le dossier de travail (l'UID 1000 du conteneur serait un sous-UID sans droit d'écriture). Toutes les capacités Linux sont retirées : ce « root » n'a que les droits de `review` sur ses propres fichiers.
+**Ce qui change** : l'application n'est plus dans un conteneur. `docker-compose.hote.yml` ne contient que la base (publiée sur `127.0.0.1:5433` ; même nom de volume que la variante complète, mais sur le Docker sans root c'est un volume neuf : voir « Migrer depuis le déploiement des sections 1 à 8 » plus bas), l'outil tourne sous systemd (`deploy/review-agent.service`) sous l'utilisateur `review`, et chaque agent tourne dans un conteneur jetable (section 10). Avec `AGENT_CONTAINER_USER=auto` (défaut), l'outil détecte Docker sans root et lance alors le conteneur en « root du conteneur » : pour la machine, c'est l'utilisateur `review`, le seul à pouvoir écrire dans le dossier de travail (l'UID 1000 du conteneur serait un sous-UID sans droit d'écriture). Toutes les capacités Linux sont retirées : ce « root » n'a que les droits de `review` sur ses propres fichiers.
 
 **Mise en place (une fois).** Les étapes 1 et 2 demandent `sudo`, les suivantes se font en tant que `review`.
 
@@ -189,6 +189,23 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
    ```
    Le fichier est copié dans le dossier des services de l'utilisateur, `daemon-reload` le prend en compte, `enable --now` le lance et le programme au démarrage, `journalctl -f` suit le journal : on y lit `app.started`.
 9. **Contrôles** : `ss -tlnp | grep -E '4321|5433'` ne montre que `127.0.0.1`. Dans le dashboard : Paramètres > Modèles > **Clé API**, puis Paramètres > Agents dans des conteneurs > **Tester les conteneurs** (section 10) : les sept contrôles doivent être `ok` (il revérifie l'écriture dans le dossier de travail et les plafonds de l'étape 4, avec la vraie configuration). Lance ensuite une review : `docker ps` montre un conteneur `ra-agent-...` pendant la tâche, et plus rien après.
+
+**Migrer depuis le déploiement des sections 1 à 8** (application déjà lancée dans son conteneur)
+
+À savoir avant de commencer :
+- **Le Docker sans root est un autre démon** : ses volumes sont séparés de ceux du Docker de la machine. Le `pgdata` actuel n'y est pas vu : sans les étapes ci-dessous, la base démarre vide (projets, réglages et jetons enregistrés à ressaisir). Le volume `appdata` (copies de dépôts, journaux, session de la CLI) ne suit pas non plus : les copies de dépôts se recréent seules.
+- **Le port 4321 est pris** par le conteneur `app` actuel : il faut l'arrêter avant l'étape 8, sinon le service ne démarre pas.
+- **Le mode conteneur exige le mode clé API** (section 10) : la session d'abonnement du déploiement actuel ne sert plus. Il faut une clé Anthropic facturée à l'usage (Paramètres > Modèles > Clé API).
+- **Le `.env`** : reprends celui du déploiement actuel avec la **même** `SECRETS_MASTER_KEY` (sinon les jetons enregistrés sont illisibles), et ajoute les lignes de l'étape 6. Ne supprime pas `AGENT_RUNTIME` : sans cette ligne l'outil retombe sur le mode machine, sans conteneurs.
+
+Ordre :
+1. **Sauvegarder et arrêter l'ancien déploiement**, dans son dossier, avec l'utilisateur qui le lance : `bash scripts/backup.sh` puis `docker compose down`. `backup.sh` écrit `backups/review_agent_<date>.sql.gz`. `down` supprime les conteneurs et réseaux mais **garde les volumes** : n'ajoute jamais `-v` ni `--volumes`, qui supprimeraient la base. Les volumes restent le filet de sécurité tant que la variante n'a pas fait ses preuves.
+2. **Étapes 1 à 8** de la mise en place ci-dessus. Le service démarre sur une base vide et applique ses migrations.
+3. **Copier la sauvegarde chez `review`** (sudo) : `sudo install -d -o review -g review -m 700 /home/review/review-agent/backups` puis `sudo install -o review -g review -m 600 backups/review_agent_<date>.sql.gz /home/review/review-agent/backups/`. `install -d` crée le dossier avec son propriétaire et ses droits, `install -o -g -m` copie le fichier en fixant propriétaire, groupe et droits en une commande.
+4. **Restaurer**, en tant que `review` dans `~/review-agent` : `COMPOSE_FILE=docker-compose.hote.yml APP_UNIT=review-agent bash scripts/restore.sh backups/review_agent_<date>.sql.gz --yes`. Le script arrête le service, recrée la base, recharge la sauvegarde et relance le service (il faut donc que le service de l'étape 8 existe déjà).
+5. **Contrôles** de l'étape 9.
+
+Retour arrière : `systemctl --user stop review-agent` (libère le port 4321), puis `docker compose up -d` dans le dossier de l'ancien déploiement. Garde les anciens volumes quelques jours avant de les supprimer.
 
 **Au quotidien dans cette variante**
 - **Accès** : tunnel SSH comme à la section 6.
