@@ -27,8 +27,8 @@ export interface Quest {
   hint: string;
   done: boolean;
   xp: number;
-  /** Où mener la quête dans le dashboard. */
-  action: "settings" | "terminal" | "tickets" | "reviews";
+  /** Où mener la quête : dans le dashboard, ou à la forge (l'Architecte). */
+  action: "settings" | "terminal" | "tickets" | "reviews" | "architect";
 }
 
 export interface Achievement {
@@ -64,6 +64,30 @@ const MAX_LEVEL = 99;
 
 /** XP pour de petites actions plafonnées, afin qu'on ne monte pas de niveau en ajoutant des projets à la chaîne. */
 const XP = { forge: 50, forgeCap: 2, claude: 100, project: 20, projectCap: 5, devProject: 30, devProjectCap: 3, review: 10, reviewPublished: 5, forged: 40, blocked: 5, blockedCap: 10 };
+
+/** XP d'une salle gardée, plafonnée : on ne monte pas de niveau en dessinant des salles à la chaîne. */
+const ROOM_XP = 40;
+const ROOM_XP_CAP = 3;
+
+/**
+ * Quêtes de l'atelier : celles qui ne sont pas des étapes de départ (connecter, configurer) mais des créations. Elles viennent APRÈS les quêtes de départ et
+ * ne changent pas leur liste.
+ * @param customRooms Nombre de salles que la personne a dessinées et gardées.
+ * @returns Les quêtes de l'atelier.
+ */
+export function roomQuests(customRooms: number): Quest[] {
+  return [{
+    id: "room",
+    title: "Dessiner ta première salle",
+    hint: "Parle à l'Architecte, en bas à gauche de la forge : décris ta salle (et un jeu, si tu veux), visite-la, puis garde-la.",
+    done: customRooms > 0,
+    xp: ROOM_XP,
+    action: "architect",
+  }];
+}
+
+/** XP gagnée avec les salles gardées (à ajouter à l'XP bonus du héros). */
+export const roomXp = (customRooms: number): number => Math.min(Math.max(0, customRooms), ROOM_XP_CAP) * ROOM_XP;
 
 const TITLES: [number, string][] = [
   [1, "Apprenti forgeron"],

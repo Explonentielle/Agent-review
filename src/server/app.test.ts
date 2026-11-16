@@ -137,11 +137,13 @@ describe("API du dashboard sur le connecteur", () => {
     const save = (name: string, payload: object, headers: Record<string, string> = WRITE) => app.inject({ method: "POST", url: `/api/secrets/${name}`, headers, payload });
 
     const initial = await app.inject({ method: "GET", url: "/api/secrets" });
+    // L'adresse de GitLab n'est pas un secret : elle est renvoyée (`value`). Les jetons et la clé API ne le sont JAMAIS (`value` toujours nul).
     expect(initial.json()).toEqual({
       secrets: [
-        { name: "gitlab.token", label: "Jeton GitLab", source: "env", updatedAt: null, live: false },
-        { name: "github.token", label: "Jeton GitHub", source: null, updatedAt: null, live: false },
-        { name: "anthropic.api_key", label: "Clé API Anthropic", source: null, updatedAt: null, live: true },
+        { name: "gitlab.url", label: "Adresse de GitLab", secret: false, value: "https://forge.example", source: "env", updatedAt: null, live: false },
+        { name: "gitlab.token", label: "Jeton GitLab", secret: true, value: null, source: "env", updatedAt: null, live: false },
+        { name: "github.token", label: "Jeton GitHub", secret: true, value: null, source: null, updatedAt: null, live: false },
+        { name: "anthropic.api_key", label: "Clé API Anthropic", secret: true, value: null, source: null, updatedAt: null, live: true },
       ],
     });
 
@@ -158,10 +160,12 @@ describe("API du dashboard sur le connecteur", () => {
 
     const listed = await app.inject({ method: "GET", url: "/api/secrets" });
     expect(listed.json<{ secrets: { name: string; source: string | null }[] }>().secrets.map((s) => [s.name, s.source])).toEqual([
+      ["gitlab.url", "env"],
       ["gitlab.token", "env"],
       ["github.token", "vault"],
       ["anthropic.api_key", null],
     ]);
+    expect(listed.json<{ secrets: { secret: boolean; value: string | null }[] }>().secrets.filter((s) => s.secret).every((s) => s.value === null)).toBe(true);
     for (const url of ["/api/secrets", "/api/stats", "/api/settings"]) expect((await app.inject({ method: "GET", url })).body).not.toContain("SAISIE_AU_DASHBOARD");
 
     // La clé API sert tout de suite, sans redémarrage

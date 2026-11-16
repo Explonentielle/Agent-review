@@ -26,11 +26,13 @@ import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from
 import type { TenantContext, TenantDeps } from "../tenants/manager.js";
 import { computeArmory } from "../game/armory.js";
 import { LOOT_CATALOG, computeDrops } from "../game/loot.js";
-import { computeHero, REVIEW_DONE, TASK_FORGED } from "../game/hero.js";
+import { computeHero, REVIEW_DONE, roomQuests, roomXp, TASK_FORGED } from "../game/hero.js";
 import { computePrestige, computeProgress } from "../game/progress.js";
 import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
 import { registerPiece, summarizePieces } from "../dev/pieceRoutes.js";
 import { registerRooms } from "../rooms/routes.js";
+import { registerUserRooms } from "../rooms/userRoutes.js";
+import { createRoomStore } from "../rooms/userRooms.js";
 import { registerScribe } from "../scribe/routes.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
 import type { AgentRunner } from "../agent/runner.js";
@@ -320,6 +322,8 @@ export function buildServer(base: ServerDeps) {
       pieceGrades: armory.loot.map((i) => i.grade),
       weaponLevels: armory.weapons.map((w) => w.level),
     });
+    // Les salles que la personne a dessinées : une quête de l'atelier et un peu d'XP
+    const customRooms = await createRoomStore(path.join(base.config.dataDir, "rooms"), who.workspaceId).count(who.userId);
     const hero = computeHero({
       forges: forgeKinds,
       claudeConnected,
@@ -327,9 +331,9 @@ export function buildServer(base: ServerDeps) {
       devProjects: projects.filter((p) => p.devEnabled).length,
       reviews,
       tasks: taskCounts,
-      bonusXp: progress.bonusXp,
+      bonusXp: progress.bonusXp + roomXp(customRooms),
     });
-    return { forges: forgeKinds, ...hero, progress, prestige: computePrestige(hero.level, hero.xp), workers };
+    return { forges: forgeKinds, ...hero, extraQuests: roomQuests(customRooms), progress, prestige: computePrestige(hero.level, hero.xp), workers };
   });
 
   /** L'armurerie : un projet = une arme (niveau et qualité d'après le travail réel), une demande de fusion ouverte = une pièce à vendre. */
@@ -445,6 +449,15 @@ export function buildServer(base: ServerDeps) {
 
   // --- Salles du monde de la forge (données validées, lecture seule) -------------------------------
   registerRooms(app);
+  // Salles créées par les personnes : fichiers partagés par toute l'installation (dossier de données de base, pas celui d'une personne), rangés par espace
+  registerUserRooms(app, {
+    root: path.join(base.config.dataDir, "rooms"),
+    whoIs: (req) => req.session ?? base.local,
+    userName: async (id) => (await deps.accounts.getUser(id))?.name ?? "Quelqu'un",
+    fail,
+    deps,
+    runner: base.scribeRunner,
+  });
 
   // --- Scribe : tickets d'un projet, brouillons, création de tickets et de projets ------------------
   registerScribe(app, { deps, whoIs: (req) => req.session ?? base.local, fail, forgeOf, classify: classifyIssue, runner: base.scribeRunner });

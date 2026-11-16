@@ -167,7 +167,7 @@
       return `<div class="fg-slots">${PARTS.map((part) => {
         const item = cat.get(save().equip[part]);
         const icon = item ? `<img class="fg-ithumb sm" src="${thumb(item)}" alt="">` : `<span class="fg-ithumb sm blank"></span>`;
-        return `<div class="fg-slot ${item ? "" : "bare"}" ${item ? `style="--rc:${color(item.rarity)}"` : ""}>${icon}<div><small>${PART_NAME[part]}</small><b>${item ? esc(item.name) : "Vide"}</b></div>${item ? `<button type="button" class="fg-mini" data-it-unequip="${part}" title="Retirer" aria-label="Retirer ${esc(item.name)}">×</button>` : ""}</div>`;
+        return `<div class="fg-slot ${item ? "" : "bare"}" ${item ? `style="--rc:${color(item.rarity)}"` : ""}>${icon}<div><small>${PART_NAME[part]}</small><b>${item ? esc(item.name) : "Vide"}</b></div>${item ? `<button type="button" class="fg-xs" data-it-unequip="${part}" title="Retirer" aria-label="Retirer ${esc(item.name)}"></button>` : ""}</div>`;
       }).join("")}</div>`;
     }
 

@@ -85,6 +85,12 @@ La salle fait **24 colonnes sur 15 rangées**, numérotées à partir de 0.
 - La jouabilité : depuis l'arrivée, on peut atteindre chaque personnage, chaque objet à lire et chaque porte.
 - Les portes mènent à la forge ou à une salle qui existe. Fichier de 64 Ko au plus, 50 salles au plus.
 
+## Un jeu dans une salle, et les salles des utilisateurs
+
+Une salle peut avoir un champ `game` (une carte, des objets, une physique, des règles, une victoire) et un personnage `"plays": true` qui le propose : voir **`docs/jeux.md`**. L'Architecte (en bas à gauche de la forge) crée une salle à partir d'une description : un agent sans outil l'écrit, le code la valide, la personne la visite puis la garde.
+
+Les salles créées par les personnes ne sont **pas** dans `public/rooms/` : elles sont rangées en fichiers sous `DATA_DIR/rooms/<espace>/<auteur>/`, **privées par défaut**, partageables à l'équipe (les membres du même espace). Le code impose : l'identifiant (`u<auteur>-nom`), pas de porte magique dans la forge, des portes qui ne mènent qu'à la forge. Un espace ne voit jamais les salles d'un autre.
+
 ## Pour la suite
 
 Aujourd'hui les salles sont celles du dépôt. Les salles d'autres personnes (leurs dépôts, propriétaires, public ou privé avec code) viendront ensuite : voir la roadmap, annexe B.

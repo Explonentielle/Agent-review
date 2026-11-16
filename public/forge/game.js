@@ -45,7 +45,7 @@
 
   const g = {
     root: null, stage: null, canvas: null, c: null, el: {},
-    pieces: [], piecesAt: -999,
+    pieces: [], piecesAt: -999, play: false,
     roomId: "forge", rooms: { catalog: null, list: [], byId: new Map(), problems: [], template: null, at: -999 }, deco: [], transition: false,
     running: false, raf: 0, last: 0, time: 0, poll: 0,
     save: loadSave(), data: { hero: null, armory: { weapons: [], loot: [] }, forges: [] }, firstRefresh: true, done: null,
@@ -59,9 +59,11 @@
 
   /* ---------- données réelles ---------- */
   const flag = (id) => g.data.hero?.quests.some((q) => q.id === id && q.done) ?? false;
+  /** Quêtes de départ puis quêtes de l'atelier (dessiner une salle...) : une seule liste à l'affichage. */
+  const allQuests = (h) => [...(h?.quests ?? []), ...(h?.extraQuests ?? [])];
   const lit = (kind) => g.data.forges.includes(kind);
   const hasLoot = () => g.data.armory.loot.length > 0 || g.save.sold.length > 0;
-  const modal = () => Boolean(g.dlg || g.popup || g.custom || g.transition);
+  const modal = () => Boolean(g.dlg || g.popup || g.custom || g.transition || g.play);
 
   /* ---------- série, missions, prestige : ce qui donne envie de revenir (calculé par le serveur) ---------- */
   const progress = () => g.data.hero?.progress ?? null;
@@ -294,6 +296,8 @@
       review: ["Va voir le Maître de fusion : il contrôle les lames des autres, les revues de demandes de fusion."],
     }[h?.nextQuest ?? ""];
     if (lines) return say("Maître Brann", lines);
+    const atelier = (h?.extraQuests ?? []).find((q) => !q.done);
+    if (atelier) return say("Maître Brann", ["Ma forge est allumée, bravo. Maintenant, laisse parler ton imagination : va voir l'Architecte, en bas à gauche.", "Dis-lui la salle que tu rêves, et même un jeu : il la dessine, tu la visites, tu y joues. Elle reste à toi tant que tu ne la partages pas."]);
     const forged = g.data.armory.loot.length, pg = progress(), pr = prestige();
     const out = [`Niveau ${h?.level ?? 1}, rang ${pr?.rank.name ?? "Fer"}, ${forged} pièce${forged > 1 ? "s" : ""} forgée${forged > 1 ? "s" : ""}. Ma forge n'a jamais tourné aussi bien.`];
     const waiting = claimable().length;
@@ -360,9 +364,9 @@
   async function architectTalk() {
     if (!g.rooms.catalog) await loadRooms();
     await say("Architecte", [
-      "Je dessine les salles de ce monde. La salle du trône, c'est presque mon œuvre.",
-      "Une salle, ce n'est qu'un fichier de données : une grille de 24 sur 15, des meubles, des personnages, des portes.",
-      "Un jour, tu me diras ce que tu veux et je la dessinerai pour toi. Pour l'instant, voici mon mode d'emploi.",
+      "Je dessine les salles de ce monde. Dis-moi ce que tu veux : un décor, des personnages, et même un jeu à jouer.",
+      "Je ne fais pas de code : je décris ta salle avec une carte, des objets et des règles, et le moteur de la forge la fait vivre.",
+      "Tu la visites, tu y joues, puis tu la gardes. Elle reste privée tant que tu ne la partages pas à ton équipe.",
     ]);
     openPopup("architect");
   }
@@ -407,13 +411,44 @@
       E.push({
         id: "npc-" + n.id, always: true, solid: true, name: n.name, verb: "Parler", tiles: [[n.x, n.y]], z: (n.y + 1) * T, lx: n.x + 0.5, ly: n.y - 0.65,
         draw: (c) => S.person(c, n.x * T, n.y * T, { ...(S.LOOKS[n.look] ?? S.LOOKS.brann), dir: n.dir }),
-        interact: () => say(n.name, n.lines.map(fillName)),
+        interact: async () => {
+          await say(n.name, n.lines.map(fillName));
+          if (n.plays && room.game) {
+            const answer = await choose(n.name, "Jouer à « " + room.game.title + " » ?", ["Jouer", "Plus tard"]);
+            if (answer === 0) await playRoomGame(room);
+          }
+        },
       });
     }
     room.doors.forEach((d, i) => {
       E.push({ id: "door-" + i, always: true, solid: true, decor: true, name: d.label, verb: "Sortir", tiles: [[d.x, 14], [d.x + 1, 14]], z: 0, lx: d.x + 1, ly: 13.7, draw: (c) => S.doorBottom(c, d.x, H), interact: () => doorTo(d) });
     });
     return E;
+  }
+
+  /** Lance le jeu d'une salle (moteur à règles : public/forge/engine.js). Le meilleur score de chaque salle est gardé dans le navigateur. */
+  let gameplay = null;
+  async function playRoomGame(room) {
+    gameplay ??= window.ForgeGameplay.create({
+      stage: g.el.stage, sfx: A.sfx, look: playerLook,
+      onKeysCaptured: (on) => { g.play = on; if (on) { g.keys = []; g.player.path = []; } },
+    });
+    const best = g.save.bests?.[room.id] ?? 0;
+    const result = await gameplay.start(room.game, { theme: room.theme, best });
+    if (result.best > best) { g.save.bests = { ...(g.save.bests || {}), [room.id]: result.best }; persist(); }
+    if (result.state === "won") { A.sfx.fanfare(); banner("Gagné ! Score : " + result.score + "."); }
+  }
+
+  /** Visite une salle (un brouillon de l'Architecte ou une salle d'utilisateur) : elle est connue du monde le temps de la visite. */
+  async function visitRoom(room) {
+    g.rooms.byId.set(room.id, room);
+    window.ForgePopups.close(true);
+    await enterRoom(room.id, null);
+  }
+  /** Joue directement au jeu d'une salle (sans y entrer). */
+  function playRoom(room) {
+    if (!room.game) { banner("Cette salle n'a pas de jeu."); return; }
+    return playRoomGame(room);
   }
 
   async function portalTalk(room) {
@@ -490,7 +525,7 @@
   }
   function afterRefresh() {
     const hero = g.data.hero;
-    const doneNow = new Set(hero.quests.filter((q) => q.done).map((q) => q.id));
+    const doneNow = new Set(allQuests(hero).filter((q) => q.done).map((q) => q.id));
     const visible = g.roomId === "forge" ? g.entities.filter((e) => !e.worker && !e.decor && isVisible(e)) : [];
     if (g.firstRefresh) {
       for (const e of visible) if (!g.save.seen.includes(e.id)) g.save.seen.push(e.id);
@@ -504,7 +539,7 @@
         A.sfx.spawn();
         banner(e.portal ? `Une porte s'est ouverte : ${e.name}.` : `${e.name} est arrivé dans la forge.`);
       }
-      for (const q of hero.quests) if (doneNow.has(q.id) && !g.done.has(q.id)) { A.sfx.fanfare(); banner(`Quête accomplie : ${q.title} (+${q.xp} XP)`); }
+      for (const q of allQuests(hero)) if (doneNow.has(q.id) && !g.done.has(q.id)) { A.sfx.fanfare(); banner(`Quête accomplie : ${q.title} (+${q.xp} XP)`); }
       if (hero.level > g.save.lastLevel) { A.sfx.fanfare(); banner(`Niveau ${hero.level} : ${hero.title} !`); }
       g.save.lastLevel = hero.level;
     }
@@ -549,7 +584,7 @@
 
   function renderHud() {
     const h = g.data.hero, e = g.el;
-    const next = h?.quests.find((q) => !q.done);
+    const next = allQuests(h).find((q) => !q.done);
     // Un seul bouton : toute la barre ouvre le profil (équipement, sac, quêtes, rang, série...)
     e.hud.title = `${h?.title ?? ""} · ${h?.xp ?? 0} XP · Ouvrir ton profil (touche P)`;
     const fresh = items.freshCount();
@@ -582,7 +617,7 @@
     const rank = rk ? `<span class="fg-rank" ${rk.rank.aura ? `style="--aura:${rk.rank.aura}"` : ""} title="Rang de prestige">${esc(rk.rank.name)}${rk.stars ? " " + "★".repeat(Math.min(rk.stars, 5)) : ""}</span>` : "";
     const nextRank = rk?.next ? `Encore ${rk.next.xpLeft} XP pour le rang ${esc(rk.next.name)} (niveau ${rk.next.level}).` : "";
     const col = items.collection();
-    const next = h.quests.find((q) => !q.done);
+    const next = allQuests(h).find((q) => !q.done);
     const tile = (label, value, note, cls = "") => `<div class="fg-tile ${cls}"><small>${label}</small><b>${value}</b><small>${note}</small></div>`;
     // Toujours trois tuiles : la grille reste alignée même quand la série n'existe pas encore
     const tiles = [
@@ -593,7 +628,7 @@
     const claim = pending.length ? `<button type="button" class="fg-btn fg-block" data-pf-board>${pending.length} récompense${pending.length > 1 ? "s" : ""} à réclamer : ${pending.reduce((n, m) => n + m.gold, 0)} or</button>` : "";
     const quest = next
       ? `<div class="fg-quest-row next"><span class="chk"></span><div><b>${esc(next.title)}</b><small>${esc(next.hint)}</small></div><span class="xp">+${next.xp} XP</span></div>`
-      : `<div class="fg-quest-row done"><span class="chk">✓</span><div><b>Toutes les quêtes de départ sont accomplies</b><small>Les missions du jour et de la semaine continuent au tableau.</small></div></div>`;
+      : `<div class="fg-quest-row done"><span class="chk">✓</span><div><b>Toutes les quêtes sont accomplies</b><small>Les missions du jour et de la semaine continuent au tableau.</small></div></div>`;
     return `<div class="fg-pf">
       <div class="fg-box fg-pf-head">
         <div class="fg-pf-id"><div><span class="fg-pf-name">${esc(g.save.name || "Forgeron")}</span> ${rank}<small>${esc(h.heroClass)} ${esc(h.specialty.toLowerCase())}</small></div><button type="button" class="fg-mini" data-pf-tab="look">Modifier</button></div>
@@ -621,7 +656,7 @@
     const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Sac"], ["look", "Apparence"], ["trade", "Échange"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
     // Hors création du personnage, le popup a toujours la même taille : aperçu et équipement à gauche, l'onglet choisi à droite
     el.innerHTML = `<div class="fg-card ${first ? "" : "wide"}">
-      ${first ? "" : `<button type="button" class="fg-x" data-cancel aria-label="Fermer" title="Fermer sans enregistrer l'apparence (Échap)">×</button>`}
+      ${first ? "" : `<button type="button" class="fg-x" data-cancel aria-label="Fermer" title="Fermer sans enregistrer l'apparence (Échap)"></button>`}
       <h2>${first ? "Qui es-tu, forgeron ?" : "Ton forgeron"}</h2>
       ${tabs}
       <div class="fg-side"><canvas class="fg-preview" width="32" height="40"></canvas><div class="fg-worn" ${first ? "hidden" : ""}></div></div>
@@ -806,7 +841,7 @@
   /* ---------- clavier et souris ---------- */
   const typing = (t) => t && (t.matches?.("input, textarea, select") || t.isContentEditable);
   function onKeyDown(ev) {
-    if (!g.running || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if (!g.running || g.play || ev.ctrlKey || ev.metaKey || ev.altKey) return; // pendant un jeu, les touches sont à lui
     A.start();
     const key = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
     if (typing(ev.target)) { if (key === "Escape") { if (g.popup) window.ForgePopups.close(); else g.customUi?.close?.(); } return; }
@@ -929,6 +964,7 @@
     persist, say, choose, banner, refresh, renderHud, weaponType, items, claim, claimable, claimKey, goldBonus, rankIndex, rankOrder: RANK_ORDER,
     setPopup(open) { g.popup = open; if (open) { g.keys = []; g.player.path = []; } },
     openCustomizer: () => openCustomizer(false),
+    visitRoom, playRoom,
   };
 
   window.ForgeGame = {

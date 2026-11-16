@@ -132,9 +132,10 @@ export function createAttachmentStore(root: string, workspaceId: number) {
       if (!entry) throw new AttachmentError("Un des fichiers n'existe plus : envoie-le de nouveau.", 404);
       staged.push(publicInfo(entry));
     }
-    const existing: AttachmentInfo[] = [];
-    for (const owner of owners) existing.push(...(await readAll(ownerDir(owner))));
-    checkTotals([...existing, ...staged]);
+    // Un fichier copié garde son identifiant : présent chez deux propriétaires, il ne compte qu'une fois
+    const existing = new Map<string, AttachmentInfo>();
+    for (const owner of owners) for (const entry of await readAll(ownerDir(owner))) existing.set(entry.id, entry);
+    checkTotals([...existing.values(), ...staged]);
     return staged;
   }
 
@@ -194,21 +195,23 @@ export function createAttachmentStore(root: string, workspaceId: number) {
     },
 
     /**
-     * Copie les fichiers d'un propriétaire vers un autre (ticket vers tâche, tâche vers reprise ou relance), sous de nouveaux identifiants.
-     * @returns Les fichiers copiés.
+     * Copie les fichiers d'un propriétaire vers un autre (ticket vers tâche, tâche vers reprise ou relance). Chaque copie GARDE l'identifiant
+     * d'origine : l'ordre d'envoi est conservé (les fichiers hérités restent avant les nouveaux) et recopier deux fois ne crée pas de doublon.
+     * @returns Les fichiers copiés (ceux que la destination a déjà sont ignorés).
      */
     async copy(from: AttachmentOwner, to: AttachmentOwner): Promise<AttachmentInfo[]> {
       const source = await readAll(ownerDir(from));
       if (source.length === 0) return [];
-      const existing = await readAll(ownerDir(to));
-      checkTotals([...existing, ...source]);
       const dir = ownerDir(to);
+      const existing = await readAll(dir);
+      const have = new Set(existing.map((e) => e.id));
+      const toCopy = source.filter((e) => !have.has(e.id));
+      checkTotals([...existing, ...toCopy]);
       const copied: AttachmentInfo[] = [];
-      for (const entry of source) {
-        const id = newId();
-        await mkdir(path.join(dir, id), { recursive: true });
-        await copyFile(entry.file, path.join(dir, id, entry.name));
-        copied.push({ id, name: entry.name, size: entry.size, kind: entry.kind });
+      for (const entry of toCopy) {
+        await mkdir(path.join(dir, entry.id), { recursive: true });
+        await copyFile(entry.file, path.join(dir, entry.id, entry.name));
+        copied.push({ id: entry.id, name: entry.name, size: entry.size, kind: entry.kind });
       }
       return copied;
     },

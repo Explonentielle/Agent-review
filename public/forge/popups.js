@@ -15,7 +15,9 @@
   function questsBody(source = game) {
     const h = source.data.hero;
     const quest = (q) => `<div class="fg-quest-row ${q.done ? "done" : q.id === h.nextQuest ? "next" : ""}"><span class="chk">${q.done ? "✓" : ""}</span><div><b>${esc(q.title)}</b><small>${esc(q.hint)}</small></div><span class="xp">+${q.xp} XP</span></div>`;
+    const extra = h.extraQuests ?? [];
     return `<h4>Quêtes de départ (${h.quests.filter((q) => q.done).length}/${h.quests.length})</h4>${h.quests.map(quest).join("")}
+      ${extra.length ? `<h4>Quêtes de l'atelier (${extra.filter((q) => q.done).length}/${extra.length})</h4>${extra.map(quest).join("")}` : ""}
       <h4>Hauts faits (${h.achievements.filter((a) => a.unlocked).length}/${h.achievements.length})</h4>
       <div class="fg-achv">${h.achievements.map((a) => `<div class="${a.unlocked ? "" : "locked"}"><b>${esc(a.title)}</b><small>${esc(a.description)}</small></div>`).join("")}</div>
       <details><summary>Comment gagner de l'XP ?</summary><ul>${h.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>`;
@@ -213,43 +215,6 @@
             <p class="fg-note">Au-delà du dernier rang, une étoile ★ tous les 10 niveaux. Les tenues de prestige sont offertes chez le marchand.</p>`;
         } else body = questsBody();
         return { title: "Tableau des quêtes", html: header + body };
-      },
-    },
-
-    /** L'Architecte : mode d'emploi pour créer une salle (fichier de données), avec les vraies salles du monde, leurs erreurs et le catalogue. */
-    architect: {
-      async render() {
-        const r = game.rooms;
-        if (!r?.catalog) return { title: "L'Architecte", html: `<p class="fg-note">Les plans ne sont pas disponibles : le serveur n'a pas répondu. Réessaie dans un instant.</p>` };
-        const cat = r.catalog, lim = cat.limits;
-        const code = (t) => `<code>${esc(t)}</code>`;
-        const steps = [
-          `<b>Copie le modèle</b> : une salle complète et jouable. <button type="button" class="fg-btn" data-fg-copy-room>Copier le modèle</button>`,
-          `Enregistre-le dans le dépôt sous ${code("public/rooms/<id>.json")}. L'identifiant (minuscules, chiffres et tirets) est aussi le nom du fichier.`,
-          `Adapte-le : une grille de ${cat.grid.width} colonnes sur ${cat.grid.height} rangées (mur du fond rangées 0 à 2, sol 3 à ${cat.grid.floorBottom}, portes en bas), des objets du catalogue, des personnages et leurs répliques.`,
-          `Contrôle-le : ${code("npx tsx scripts/check-rooms.ts")}. Chaque erreur est dite en français.`,
-          `Pousse, puis redéploie : ${code("git pull && docker compose up -d --build")}. Avec ${code('"hub": true')}, une porte magique apparaît dans le mur du fond de la forge (trois salles au plus).`,
-        ];
-        const rooms = r.list.length
-          ? r.list.map((x) => `<div class="fg-item no-icon"><div><b>${esc(x.name)}</b> ${x.hub ? `<span class="fg-tag ok">porte dans la forge</span>` : ""}<small>${code(x.id)} · ${x.objects.length} objet${x.objects.length > 1 ? "s" : ""} · ${x.npcs.length} personnage${x.npcs.length > 1 ? "s" : ""} · thème ${esc(x.theme)}</small></div></div>`).join("")
-          : `<p class="fg-note">Aucune salle pour l'instant.</p>`;
-        const problems = r.problems?.length
-          ? `<h4>À corriger</h4>${r.problems.map((p) => `<div class="fg-err"><b>${esc(p.file)}</b> : ${p.errors.map(esc).join(" ; ")}</div>`).join("")}`
-          : "";
-        const objects = Object.entries(cat.objects).map(([type, o]) => {
-          const bits = [o.resizable ? "taille libre" : `${o.w} × ${o.h}`, o.where === "wall" ? "mur" : "sol", o.solid ? "plein" : "traversable", o.text ? "texte" : null, o.color ? "couleur" : null].filter(Boolean);
-          return `<span class="fg-tag" title="${esc(bits.join(", "))}">${esc(type)} · ${esc(bits.slice(0, 2).join(" "))}</span>`;
-        }).join(" ");
-        const tpl = r.template ? `<details><summary>Voir le modèle (si la copie est refusée par le navigateur)</summary><pre class="fg-pre">${esc(JSON.stringify(r.template, null, 2))}</pre></details>` : "";
-        return {
-          title: "L'Architecte",
-          html: `<p class="fg-note">Une salle est un simple fichier de données : ni code, ni image. Le navigateur la dessine avec les objets du catalogue. <b>Le générateur automatique arrive plus tard</b> : en attendant, on la décrit à la main.</p>
-            <h4>Créer une salle, pas à pas</h4><ol class="fg-steps">${steps.map((s) => `<li>${s}</li>`).join("")}</ol>${tpl}
-            <h4>Les salles de ton monde (${r.list.length})</h4>${rooms}${problems}
-            <h4>Ce que tu peux poser</h4><div class="fg-chips">${objects}</div>
-            <p class="fg-note">Thèmes : ${cat.themes.map(esc).join(", ")}. Apparences de personnages : ${cat.looks.map(esc).join(", ")}. Couleurs : ${cat.colors.map(esc).join(", ")}.</p>
-            <p class="fg-note">Limites : ${lim.objects} objets, ${lim.npcs} personnages et ${lim.doors} portes par salle, ${lim.lineLength} caractères par réplique ou texte, ${Math.round(lim.fileBytes / 1024)} Ko par fichier, ${lim.files} salles au plus. Le détail est dans ${code("docs/salles.md")}.</p>`,
-        };
       },
     },
 
@@ -488,6 +453,15 @@
     launch: (info) => launchTicket(info),
   });
   defs.scribe = scribe.def;
+  const architect = window.ForgeArchitect.create({
+    game: () => game,
+    rerender: () => render(),
+    sel: () => current?.sel,
+    setSel: (sel) => { if (current) current.sel = sel; },
+    isOpen: () => current?.id === "architect",
+    sfx: A.sfx,
+  });
+  defs.architect = architect.def;
 
   /* ---------- ouverture, fermeture ---------- */
   async function render() {
@@ -516,9 +490,9 @@
     if (settings) settings.innerHTML = "";
     const back = document.createElement("div");
     back.className = "fg-popup-back";
-    back.innerHTML = `<div class="fg-popup ${def.wide ? "wide" : ""}" role="dialog" aria-modal="true"><button type="button" class="fg-x" aria-label="Fermer">✕</button><h3>…</h3><div class="fg-pbody"><p class="fg-note">Un instant…</p></div></div>`;
+    back.innerHTML = `<div class="fg-popup ${def.wide ? "wide" : ""}" role="dialog" aria-modal="true"><button type="button" class="fg-x" aria-label="Fermer"></button><h3>…</h3><div class="fg-pbody"><p class="fg-note">Un instant…</p></div></div>`;
     back.addEventListener("click", onClick);
-    back.addEventListener("input", (ev) => { if (current?.id === "scribe") scribe.handleInput(ev); });
+    back.addEventListener("input", (ev) => { if (current?.id === "scribe") scribe.handleInput(ev); else if (current?.id === "architect") architect.handleInput(ev); });
     document.querySelector(".fg-popups").append(back);
     current = { id, params, def, el: back, sel: undefined };
     game.setPopup(true);
@@ -583,6 +557,7 @@
     const by = (attr) => t.closest(`[${attr}]`);
     let el;
     if (current?.id === "scribe" && scribe.handleClick(ev)) return;
+    if (current?.id === "architect" && architect.handleClick(ev)) return;
     if ((el = by("data-fg-deltask"))) return deleteTask(el.dataset.fgDeltask);
     if ((el = by("data-fg-piece-review"))) return reviewPiece(el.dataset.fgPieceReview, el.dataset.again === "1");
     if ((el = by("data-fg-piece-merge"))) return el.disabled ? undefined : mergePiece(el.dataset.fgPieceMerge, el.dataset.target);

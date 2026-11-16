@@ -161,26 +161,31 @@ describe("stockage des pièces jointes", () => {
     expect(await one.list({ task: 1 })).toHaveLength(1);
   });
 
-  it("copie les fichiers d'un ticket vers une tâche sous de nouveaux identifiants", async () => {
+  it("copie les fichiers d'un ticket vers une tâche en gardant leur identifiant : l'ordre d'envoi est conservé et recopier ne crée pas de doublon", async () => {
     const store = createAttachmentStore(root, 1);
     const ticket = { ticket: { source: "gitlab", projectId: 12, iid: 4 } };
     await store.attach(ticket, [(await store.stage("maquette.png", PNG)).id]);
     const copied = await store.copy(ticket, { task: 9 });
     expect(copied).toHaveLength(1);
-    expect(copied[0]!.id).not.toBe((await store.list(ticket))[0]!.id);
-    expect((await store.list({ task: 9 })).map((f) => f.name)).toEqual(["maquette.png"]);
+    expect(copied[0]!.id).toBe((await store.list(ticket))[0]!.id);
+    // Un fichier envoyé après reste après les fichiers hérités
+    await store.attach({ task: 9 }, [(await store.stage("donnees.csv", text("a;b\n1;2\n"))).id]);
+    expect((await store.list({ task: 9 })).map((f) => f.name)).toEqual(["maquette.png", "donnees.csv"]);
+    expect(await store.copy(ticket, { task: 9 })).toEqual([]); // déjà là : rien n'est dupliqué
+    expect(await store.list({ task: 9 })).toHaveLength(2);
     expect(await store.copy({ task: 404 }, { task: 10 })).toEqual([]); // rien à copier : pas d'erreur
   });
 
-  it("pose les fichiers à plat dans un dossier, avec un suffixe pour deux noms identiques", async () => {
+  it("pose les fichiers à plat dans un dossier, avec un suffixe pour deux noms identiques (casse comprise, comme sous Windows)", async () => {
     const store = createAttachmentStore(root, 1);
     const a = await store.stage("capture.png", PNG);
     const b = await store.stage("Capture.PNG", Buffer.concat([PNG, Buffer.from("2")]));
     await store.attach({ task: 5 }, [a.id, b.id]);
     const dest = path.join(root, "worktree", ".ra-attachments");
     const placed = await store.materialize({ task: 5 }, dest);
-    expect(placed.map((f) => f.name)).toEqual(["capture.png", "capture (2).png"]);
-    expect((await readdir(dest)).sort()).toEqual(["capture (2).png", "capture.png"]);
+    // Le deuxième fichier garde la casse envoyée (« Capture ») : seule l'extension est mise en minuscules
+    expect(placed.map((f) => f.name)).toEqual(["capture.png", "Capture (2).png"]);
+    expect((await readdir(dest)).sort()).toEqual(["Capture (2).png", "capture.png"]);
     expect((await readFile(placed[1]!.path)).length).toBe(PNG.length + 1);
     expect(await store.materialize({ task: 999 }, path.join(root, "autre"))).toEqual([]);
     expect(existsSync(path.join(root, "autre"))).toBe(false); // rien à poser : aucun dossier créé
