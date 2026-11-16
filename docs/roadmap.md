@@ -123,6 +123,13 @@ Note : `~/.local/bin` n'est pas dans le PATH des shells non interactifs. La conf
 - le nombre de tours (`REVIEW_MAX_TURNS=40` est une estimation) ;
 - l'usage effectif de `Grep`/`Glob`. La doc indique que le jeu d'outils par défaut les exclut sous Linux/WSL ; ici, ils sont demandés explicitement via `--tools`.
 
+**Implémenté (2026-11-16), review en échec sur une issue supprimée (ticket 6)** : la review d'une MR ne cible pas une issue, elle lit tous les `#N` cités dans le titre et la description de la MR (`findLinkedIssueIids`, `src/review/context.ts`). La review de l'issue #4 a donc interrogé l'issue #2 parce que le texte de la MR la mentionnait ; GitHub a répondu 410 (issue supprimée) et l'erreur brute faisait échouer toute la review. Correctif :
+- `src/github/client.ts` : un 410 est traité comme un 404 (`null`), comme pour les autres lectures optionnelles ;
+- `src/review/pipeline.ts` (`fetchLinkedTickets`) : un ticket cité supprimé ou inexistant est ignoré et tracé (`review.linked_ticket_missing`, avec le numéro) ; toute autre erreur échoue en nommant le ticket (« Impossible de lire le ticket #N cité dans la MR !M ») ;
+- `src/dev/pipeline.ts` : le message « Ticket #N introuvable » précise « supprimé ou inexistant sur la forge ».
+
+Testé : `src/github/client.test.ts` (410). Non testé contre le vrai GitHub : relance de la review de l'issue #4 et commentaire de test dans la roadmap (actions réelles sur la forge, à faire par la personne).
+
 ### 7. Portage du prompt de review d'origine : ✅ Fait
 
 `prompts/review-system.md` reprend les règles mûries dans l'outil de review d'origine : sévérités, anti-hallucination, cohérence texte/niveau, bugs corrigés par le diff, CI, volume. Adaptations :

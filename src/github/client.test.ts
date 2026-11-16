@@ -75,6 +75,11 @@ describe("client GitHub : transport", () => {
     await expect(client().removeIssueLabel("acme/projet", 7, "absent")).resolves.toBeNull();
   });
 
+  it("une issue supprimée (410) donne null comme une issue introuvable", async () => {
+    stubFetch(() => reply({ message: "This issue was deleted" }, 410));
+    expect(await client().getIssue("acme/projet", 2)).toBeNull();
+  });
+
   it("mais une autre erreur sur ces mêmes appels reste une exception", async () => {
     stubFetch(() => reply({ message: "Server Error" }, 500));
     await expect(client().getIssue("acme/projet", 99)).rejects.toBeInstanceOf(GithubError);

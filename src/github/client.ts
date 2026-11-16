@@ -214,12 +214,12 @@ export class GithubClient {
     return (await res.json()) as T;
   }
 
-  /** Comme `request`, mais renvoie null quand la ressource n'existe pas (404). */
+  /** Comme `request`, mais renvoie null quand la ressource n'existe pas (404) ou a été supprimée (410, cas d'une issue supprimée). */
   private async requestOrNull<T>(path: string, method = "GET"): Promise<T | null> {
     try {
       return await this.request<T>(method, path);
     } catch (err) {
-      if (err instanceof GithubError && err.status === 404) return null;
+      if (err instanceof GithubError && (err.status === 404 || err.status === 410)) return null;
       throw err;
     }
   }
