@@ -152,10 +152,10 @@
           : `<p class="fg-note">Aucun projet de ${esc(forgeName(source()))} sur le râtelier. <button type="button" class="fg-btn ghost" data-fg-open="rack">Ouvrir le râtelier</button> ou crée un projet avec l'onglet « Nouveau projet ».</p>`)
         : "";
       const hint = tab() === "ticket"
-        ? "Dicte ton idée : « un export CSV des rapports mensuels ». Le Scribe rédige un ticket (contexte, comportement attendu, critères d'acceptation) que tu relis avant l'envoi."
+        ? "Raconte ce que tu aimerais, avec tes mots. Ex. : « je voudrais récupérer mes rapports du mois dans un tableur ». Le Scribe prépare un brouillon, tu le relis et tu le corriges avant qu'il soit envoyé."
         : "Dicte ton idée de projet : « un outil de suivi des rapports ». Le Scribe propose un nom, une description et les premiers tickets pour démarrer.";
       return `<p class="fg-note">${esc(hint)}</p>${forgeSel}${projectSel}
-        <label class="fg-field-in">Ton idée<textarea data-sc="idea" rows="4" maxlength="4000" placeholder="${tab() === "ticket" ? "Ex. permettre d'exporter les rapports du mois en CSV" : "Ex. un outil de suivi des rapports clients"}">${esc(s.idea)}</textarea></label>
+        <label class="fg-field-in">Ton idée<textarea data-sc="idea" rows="4" maxlength="4000" placeholder="${tab() === "ticket" ? "Ex. je voudrais récupérer mes rapports du mois dans un tableur" : "Ex. un outil de suivi des rapports clients"}">${esc(s.idea)}</textarea></label>
         <div class="fg-inline"><button type="button" class="fg-btn" data-sc-act="draft">Rédiger avec le Scribe</button></div>
         <p class="fg-note">Le Scribe n'écrit rien chez ${esc(forgeName(source()))} tant que tu n'as pas validé. Il ne voit pas ton code : il rédige d'après ton idée et les titres des tickets déjà ouverts.</p>`;
     }
