@@ -284,6 +284,21 @@
   .tags button:hover { border-style: solid; color: var(--accent-text); }
 
   /* ---------- Dialogue + toasts ---------- */
+  /* Pièces jointes (captures, maquettes, données) */
+  .att-zone { margin-top: 10px; border: 1.5px dashed var(--border-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--text-2); font-size: 12.5px; text-align: left; }
+  .att-zone.drag { border-color: #7c6cf0; background: var(--hover); }
+  .att-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .att-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; }
+  .att-chip .att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+  .att-chip small { color: var(--muted); }
+  .att-chip.busy { opacity: .6; }
+  .att-chip button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 6px; }
+  .att-chip button:hover { color: var(--text); }
+  .att-add { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 8px; padding: 4px 10px; font: inherit; font-weight: 600; cursor: pointer; margin-right: 8px; }
+  .att-add:hover { background: var(--hover); }
+  .att-err { color: #e0553a; margin-top: 6px; }
+  .att-saved { display: flex; flex-wrap: wrap; gap: 6px; }
+
   dialog { border: 1px solid var(--border); border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px)); background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
   dialog::backdrop { background: rgba(10, 12, 18, .45); }
   .dlg-body { padding: 20px 22px 8px; }
@@ -569,20 +584,155 @@ function toast(message, isError = false) {
   setTimeout(() => el.remove(), isError ? 8000 : 3500);
 }
 
-/** Dialogue de confirmation. `html` doit être construit avec esc() pour tout contenu externe. */
-function ask({ title, html = "", okLabel = "Confirmer", input = false, placeholder = "" }) {
+/* =====================================================================
+   Pièces jointes : captures d'écran, maquettes et données, pour l'agent dev et pour les tickets du Scribe.
+   Un fichier envoyé reste « en attente » côté serveur jusqu'à ce qu'on le rattache à une tâche ou à un ticket.
+   ===================================================================== */
+const ATT = { maxBytes: 8 * 1024 * 1024, maxFiles: 8, accept: ".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.xml" };
+const attBoxes = new Map();
+let attSeq = 0;
+
+const fmtSize = (n) => (n < 1024 ? `${n} o` : n < 1048576 ? `${Math.round(n / 1024)} Ko` : `${(n / 1048576).toFixed(1).replace(".", ",")} Mo`);
+
+/** Envoie un fichier au serveur : il est contrôlé là-bas (type, taille, contenu réel). @returns { id, name, size, kind } */
+async function sendAttachment(file) {
+  const res = await fetch(`/api/attachments?name=${encodeURIComponent(file.name)}`, {
+    method: "POST", headers: { "Content-Type": "application/octet-stream", "x-review-agent": "1" }, body: file,
+  });
+  if (res.status === 401) { location.href = "/login"; throw new Error("Connexion requise"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+  return data;
+}
+
+/**
+ * Zone de pièces jointes : bouton, glisser-déposer et collage d'une capture (Ctrl+V). `html()` donne le rendu, `onChange` est appelé à chaque
+ * changement pour le redessiner. Les fichiers d'une capture collée reçoivent un nom daté.
+ * @param onChange Appelé quand la liste, l'envoi ou l'erreur changent.
+ * @returns { id, ids(), busy, files, add(list), remove(id), discardAll(), reset(), dispose(), html() }
+ */
+function createAttachments(onChange = () => {}) {
+  const id = `att${++attSeq}`;
+  const box = { id, files: [], pending: [], error: "" };
+  const changed = () => { try { onChange(); } catch { /* la zone n'est plus affichée */ } };
+  const stamp = () => new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+
+  box.add = async (list) => {
+    box.error = "";
+    for (const original of list) {
+      // Une capture collée s'appelle « image.png » : on lui donne un nom daté, unique
+      const file = !original.name || /^image\.(png|jpe?g|gif|webp)$/i.test(original.name)
+        ? new File([original], `capture-${stamp()}-${box.files.length + box.pending.length + 1}.${(original.type.split("/")[1] || "png").replace("jpeg", "jpg")}`, { type: original.type })
+        : original;
+      if (box.files.length + box.pending.length >= ATT.maxFiles) { box.error = `${ATT.maxFiles} fichiers au plus.`; break; }
+      if (file.size > ATT.maxBytes) { box.error = `« ${file.name} » est trop gros (${fmtSize(file.size)} ; ${fmtSize(ATT.maxBytes)} au plus).`; continue; }
+      const pending = { key: `${id}-${box.pending.length}-${Date.now()}`, name: file.name };
+      box.pending.push(pending);
+      changed();
+      try { box.files.push(await sendAttachment(file)); }
+      catch (err) { box.error = err.message; }
+      box.pending = box.pending.filter((p) => p !== pending);
+      changed();
+    }
+  };
+  box.remove = (fileId) => {
+    box.files = box.files.filter((f) => f.id !== fileId);
+    api(`/api/attachments/${fileId}/discard`, {}).catch(() => undefined);
+    changed();
+  };
+  /** Retire du serveur les fichiers en attente (la personne a annulé). */
+  box.discardAll = () => { for (const f of box.files) api(`/api/attachments/${f.id}/discard`, {}).catch(() => undefined); box.files = []; };
+  /** Vide la liste sans rien supprimer : les fichiers ont été rattachés à une tâche ou à un ticket. */
+  box.reset = () => { box.files = []; box.error = ""; changed(); };
+  box.dispose = () => attBoxes.delete(id);
+  box.ids = () => box.files.map((f) => f.id);
+  Object.defineProperty(box, "busy", { get: () => box.pending.length > 0 });
+  box.html = () => {
+    const chips = [
+      ...box.files.map((f) => `<span class="att-chip" title="${esc(f.name)}"><span class="att-name">${esc(f.name)}</span> <small>${fmtSize(f.size)}</small><button type="button" data-att-del="${esc(f.id)}" data-att-box="${id}" aria-label="Retirer ${esc(f.name)}">×</button></span>`),
+      ...box.pending.map((p) => `<span class="att-chip busy"><span class="att-name">${esc(p.name)}</span> <small>envoi…</small></span>`),
+    ].join("");
+    return `<div class="att-zone" data-att-box="${id}">${chips ? `<div class="att-list">${chips}</div>` : ""}<button type="button" class="att-add" data-att-add data-att-box="${id}">＋ Joindre des fichiers</button>
+      <span class="att-hint">ou glisse-les ici, ou colle une capture (Ctrl+V). Images, PDF, texte, CSV, JSON : ${fmtSize(ATT.maxBytes)} au plus chacun.</span>${box.error ? `<div class="att-err" role="alert">${esc(box.error)}</div>` : ""}</div>`;
+  };
+  attBoxes.set(id, box);
+  return box;
+}
+
+// Écouteurs communs à toutes les zones (le tableau de bord, la forge et le Scribe redessinent leur HTML : on délègue au document)
+document.addEventListener("click", (ev) => {
+  const add = ev.target.closest?.("[data-att-add]");
+  if (add) {
+    const box = attBoxes.get(add.dataset.attBox);
+    if (!box) return;
+    const input = document.createElement("input");
+    input.type = "file"; input.multiple = true; input.accept = ATT.accept;
+    input.addEventListener("change", () => box.add([...input.files]));
+    input.click();
+    return;
+  }
+  const del = ev.target.closest?.("[data-att-del]");
+  if (del) attBoxes.get(del.dataset.attBox)?.remove(del.dataset.attDel);
+});
+for (const type of ["dragenter", "dragover"]) {
+  document.addEventListener(type, (ev) => {
+    const zone = ev.target.closest?.(".att-zone");
+    if (!zone || !ev.dataTransfer?.types?.includes("Files")) return;
+    ev.preventDefault();
+    zone.classList.add("drag");
+  });
+}
+document.addEventListener("dragleave", (ev) => ev.target.closest?.(".att-zone")?.classList.remove("drag"));
+document.addEventListener("drop", (ev) => {
+  const zone = ev.target.closest?.(".att-zone");
+  if (!zone) return;
+  ev.preventDefault();
+  zone.classList.remove("drag");
+  attBoxes.get(zone.dataset.attBox)?.add([...ev.dataTransfer.files]);
+});
+// Une capture collée (Ctrl+V) va dans la zone du dialogue ouvert, sinon dans la dernière zone visible
+document.addEventListener("paste", (ev) => {
+  const files = [...(ev.clipboardData?.files ?? [])];
+  if (!files.length) return;
+  const zone = document.querySelector("dialog[open] .att-zone") ?? [...document.querySelectorAll(".att-zone")].filter((z) => z.offsetParent !== null).pop();
+  if (!zone) return;
+  ev.preventDefault();
+  attBoxes.get(zone.dataset.attBox)?.add(files);
+});
+
+/**
+ * Dialogue de confirmation. `html` doit être construit avec esc() pour tout contenu externe. Avec `attach`, le dialogue propose de joindre des
+ * fichiers (captures, maquettes, données) : le résultat porte alors `attachments`, la liste des identifiants envoyés.
+ */
+function ask({ title, html = "", okLabel = "Confirmer", input = false, placeholder = "", attach = false }) {
   const dlg = document.getElementById("dialog");
   document.getElementById("dlg-title").textContent = title;
-  document.getElementById("dlg-text").innerHTML = html;
-  document.getElementById("dlg-ok").textContent = okLabel;
+  document.getElementById("dlg-text").innerHTML = html + (attach ? '<div id="dlg-attach"></div>' : "");
+  const ok = document.getElementById("dlg-ok");
+  ok.textContent = okLabel;
+  ok.disabled = false;
   const area = document.getElementById("dlg-input");
   area.hidden = !input;
   area.value = "";
   area.placeholder = placeholder;
+  let box = null;
+  if (attach) {
+    const paint = () => {
+      const holder = document.getElementById("dlg-attach");
+      if (holder) holder.innerHTML = box.html();
+      ok.disabled = box.busy; // pas de validation pendant un envoi : le fichier serait oublié
+    };
+    box = createAttachments(paint);
+    paint();
+  }
   dlg.showModal();
   if (input) area.focus();
   return new Promise((resolve) => {
-    dlg.addEventListener("close", () => resolve(dlg.returnValue === "ok" ? { value: area.value.trim() } : null), { once: true });
+    dlg.addEventListener("close", () => {
+      const accepted = dlg.returnValue === "ok";
+      if (box) { if (!accepted) box.discardAll(); box.dispose(); }
+      resolve(accepted ? { value: area.value.trim(), attachments: box ? box.ids() : [] } : null);
+    }, { once: true });
   });
 }
 
@@ -726,6 +876,7 @@ async function launchAgent(source, projectId, iid) {
     title: `Lancer l'agent sur #${i.iid}`,
     okLabel: "Lancer l'agent",
     input: true,
+    attach: true,
     placeholder: "Consignes supplémentaires (optionnel) : piste à explorer, fichiers concernés, contraintes...",
     html: `<p><b>${esc(i.title)}</b></p>
       <dl class="kv">
@@ -738,7 +889,7 @@ async function launchAgent(source, projectId, iid) {
   });
   if (!answer) return;
   try {
-    const { id } = await api("/api/tasks", { source, projectId, issueIid: iid, extraInstructions: answer.value });
+    const { id } = await api("/api/tasks", { source, projectId, issueIid: iid, extraInstructions: answer.value, attachments: answer.attachments });
     toast("Agent lancé.");
     state.issues = null;
     go(`#dev/${id}`);
@@ -830,6 +981,8 @@ async function showTask(id) {
 
       ${taskCallout(t)}
 
+      <div id="task-attachments"></div>
+
       ${t.extra_instructions ? `<section class="block"><h2>${t.mode === "followup" ? "Consignes de la reprise" : "Tes consignes"}</h2><div class="panel md">${md(t.extra_instructions)}</div></section>` : ""}
 
       ${res && res.status === "done" ? `
@@ -845,6 +998,7 @@ async function showTask(id) {
       ${t.mr_iid && t.branch && !live ? `<section class="block"><h2>Reprendre avec des consignes</h2><div class="panel">
         <p>L'agent repart de la branche <code>${esc(t.branch)}</code> telle qu'elle est sur la forge (tes commits manuels compris), lit les commentaires de la MR, applique tes consignes, puis l'outil pousse <b>un nouveau commit</b> sur la même MR (jamais de --force) et y ajoute son rapport en commentaire. S'il se bloque, rien n'est poussé.</p>
         <textarea class="area" id="followup-text" placeholder="Ex. : ajoute les docblocks complets sur toutes les méthodes créées, aligne le style des accolades sur Model_Price_Rule, et contrôle réellement les plages annoncées dans la feuille Aide (adultes 0-99, stock max ≥ stock min)."></textarea>
+        <div id="followup-attach"></div>
         <div class="actions-inline" style="margin-top:10px"><button class="btn primary" data-act="task-followup">Lancer la reprise</button></div></div></section>` : ""}
 
       <section class="block"><h2>Journal ${live ? '<span class="pill accent"><span class="pulse"></span>en direct</span>' : ""}</h2>
@@ -865,6 +1019,33 @@ async function showTask(id) {
   refreshTasks();
   if (live) taskTimer = setTimeout(() => tickTask(id), 2500);
   loadPiece(id);
+  loadTaskAttachments(id);
+  mountFollowupAttachments(id);
+}
+
+/** Fichiers joints à la tâche (captures, maquettes, données que l'agent a reçus), sous le titre. */
+async function loadTaskAttachments(id) {
+  const holder = document.getElementById("task-attachments");
+  if (!holder) return;
+  const { attachments } = await api(`/api/tasks/${id}/attachments`).catch(() => ({ attachments: [] }));
+  if (state.taskId !== id || !attachments.length) return;
+  holder.innerHTML = `<section class="block"><h2>Pièces jointes de l'agent</h2><div class="panel"><div class="att-saved">${attachments.map((f) => `<span class="att-chip" title="${esc(f.name)}"><span class="att-name">${esc(f.name)}</span> <small>${fmtSize(f.size)}</small></span>`).join("")}</div>
+    <p class="note" style="margin-top:8px">L'agent les ouvre pour comprendre le besoin, puis elles sont retirées de son dossier de travail : elles ne partent jamais dans la MR.</p></div></section>`;
+}
+
+/** Zone de pièces jointes de la reprise : la même tant qu'on reste sur la même tâche, pour ne pas perdre les fichiers déjà envoyés. */
+function mountFollowupAttachments(id) {
+  const holder = document.getElementById("followup-attach");
+  if (!holder) return;
+  if (state.followupFor !== id || !state.followupBox) {
+    state.followupBox?.dispose();
+    state.followupFor = id;
+    state.followupBox = createAttachments(() => {
+      const el = document.getElementById("followup-attach");
+      if (el && state.followupFor === state.taskId) el.innerHTML = state.followupBox.html();
+    });
+  }
+  holder.innerHTML = state.followupBox.html();
 }
 
 /* La pièce (la MR de l'agent) : relecture par le Maître de fusion, état de la CI, fusion dans la branche cible du projet. */
@@ -1826,9 +2007,11 @@ document.addEventListener("click", async (e) => {
   if (act === "task-followup") {
     const instructions = document.getElementById("followup-text").value.trim();
     if (!instructions) return toast("Écris d'abord les consignes de la reprise.", true);
+    if (state.followupBox?.busy) return toast("Un fichier est encore en cours d'envoi : attends quelques secondes.", true);
     if (!(await ask({ title: "Lancer la reprise ?", html: "<p>L'agent repart de la branche telle qu'elle est sur la forge. Si tout est bon, l'outil pousse un nouveau commit sur la MR et y ajoute un commentaire. S'il se bloque, rien n'est poussé.</p>", okLabel: "Lancer" }))) return;
-    const res = await api(`/api/tasks/${state.taskId}/followup`, { instructions }).catch((err) => { toast(err.message, true); return null; });
+    const res = await api(`/api/tasks/${state.taskId}/followup`, { instructions, attachments: state.followupBox?.ids() ?? [] }).catch((err) => { toast(err.message, true); return null; });
     if (!res) return;
+    state.followupBox?.reset();
     toast("Reprise lancée.");
     refreshHeader();
     return go(`#dev/${res.id}`);
@@ -1853,9 +2036,10 @@ document.addEventListener("click", async (e) => {
   if (act === "task-relaunch") {
     const task = await api(`/api/tasks/${state.taskId}`).catch((err) => { toast(err.message, true); return null; });
     if (!task) return;
-    if (!(await ask({ title: `Relancer l'agent sur #${task.issue_iid} ?`, html: "<p>Une nouvelle tâche démarre sur le même ticket, avec les mêmes consignes. Si la branche d'un essai précédent existe encore chez la forge sans MR, l'outil crée une nouvelle branche (suffixe -2, -3...) sans toucher à l'ancienne.</p>", okLabel: "Relancer" }))) return;
+    const again = await ask({ title: `Relancer l'agent sur #${task.issue_iid} ?`, html: "<p>Une nouvelle tâche démarre sur le même ticket, avec les mêmes consignes et les mêmes pièces jointes. Si la branche d'un essai précédent existe encore chez la forge sans MR, l'outil crée une nouvelle branche (suffixe -2, -3...) sans toucher à l'ancienne.</p>", okLabel: "Relancer", attach: true });
+    if (!again) return;
     try {
-      const { id } = await api("/api/tasks", { source: task.source, projectId: task.project_id, issueIid: task.issue_iid, extraInstructions: task.extra_instructions || "" });
+      const { id } = await api("/api/tasks", { source: task.source, projectId: task.project_id, issueIid: task.issue_iid, extraInstructions: task.extra_instructions || "", retryOf: task.id, attachments: again.attachments });
       toast("Agent relancé.");
       state.issues = null;
       refreshHeader();

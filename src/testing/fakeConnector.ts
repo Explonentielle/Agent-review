@@ -124,6 +124,18 @@ export class FakeConnector implements ForgeConnector {
     return [...new Set([...this.tickets.values(), ...created])].filter((t) => t.projectId === projectId);
   }
 
+  /** Fichiers envoyés pour des tickets (comme le ferait GitLab). */
+  uploadedFiles: Array<{ projectId: number; name: string; size: number }> = [];
+  /** Mettre à faux pour simuler une forge sans envoi de fichier (GitHub). */
+  supportsUploads = true;
+
+  async uploadTicketFile(projectId: number, name: string, bytes: Uint8Array): Promise<{ markdown: string } | null> {
+    this.throwIfFailing();
+    if (!this.supportsUploads) return null;
+    this.uploadedFiles.push({ projectId, name, size: bytes.byteLength });
+    return { markdown: `![${name}](/uploads/0123456789abcdef0123456789abcdef/${name})` };
+  }
+
   async createTicket(projectId: number, input: NewTicket): Promise<Ticket> {
     this.throwIfFailing();
     const iid = this.nextIid++;

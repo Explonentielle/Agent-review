@@ -189,6 +189,10 @@ export class GitlabConnector implements ForgeConnector {
     return toTicket(await this.client.createIssue(projectId, { title: input.title, description: input.description, labels: input.labels }));
   }
 
+  async uploadTicketFile(projectId: number, name: string, bytes: Uint8Array): Promise<{ markdown: string } | null> {
+    return this.client.uploadFile(projectId, name, bytes);
+  }
+
   async listAssignedTickets(): Promise<Ticket[]> {
     return (await this.client.listAssignedIssues()).map(toTicket);
   }

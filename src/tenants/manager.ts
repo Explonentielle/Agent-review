@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createAttachmentStore, type AttachmentStore } from "../attachments/store.js";
 import type { Config } from "../config.js";
 import { auditConnector, auditWorkspace } from "../connectors/audited.js";
 import { createForges } from "../connectors/factory.js";
@@ -21,6 +22,8 @@ import type { ConcurrencyLimiter } from "./limiter.js";
 /** Tout ce que les routes du serveur utilisent pour servir UNE personne dans UN espace. */
 export interface TenantDeps extends PipelineDeps {
   tasks: DevTaskRepo;
+  /** Pièces jointes de cet espace (captures, maquettes, données), rangées dans des fichiers sous le dossier de données de la personne. */
+  attachments?: AttachmentStore;
   /** Journal des écritures de cette personne sur les forges. */
   audit: AuditRepo;
   vault: Vault;
@@ -172,9 +175,10 @@ export class TenantManager {
     const tasks = createDevTaskRepo(db, ctx.workspaceId);
     const settings = createSettingsStore(db, ctx.workspaceId);
     const costs = createCostRepo(db, ctx.workspaceId);
+    const attachments = createAttachmentStore(path.join(config.dataDir, "attachments"), ctx.workspaceId);
 
     const reviewDeps: PipelineDeps = { config, forges, costs, reviews, settings, tasks };
-    const devDeps: DevDeps = { config, forges, costs, settings, tasks };
+    const devDeps: DevDeps = { config, forges, costs, settings, tasks, attachments };
     // Deux files séparées : une review n'attend pas la fin d'une tâche de dev (et inversement) ; la limite commune borne la machine entière
     const reviewQueue = new SerialQueue((id) => limits.review.run(() => (hooks.runReview ?? runReview)(id, reviewDeps)));
     const devQueue = new SerialQueue((id) => limits.dev.run(() => (hooks.runDevTask ?? runDevTask)(id, devDeps)));
@@ -210,6 +214,7 @@ export class TenantManager {
       deps: {
         ...reviewDeps,
         tasks,
+        attachments,
         audit,
         vault,
         enqueueReview: (id) => reviewQueue.push(id),

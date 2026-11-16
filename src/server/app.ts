@@ -7,6 +7,8 @@ import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 import type { ForgeKind } from "../connectors/types.js";
 import { diagnoseAgentRuntime, type RuntimeDiagnostic } from "../agent/dockerDiagnostic.js";
 import { allowedImages, imageFor } from "../agent/imageName.js";
+import { attachmentIds, failAttachment, giveAttachments, planAttachments, registerAttachments } from "../attachments/routes.js";
+import type { AttachmentOwner } from "../attachments/store.js";
 import { registerAuth, type AuthRuntime } from "../auth/routes.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
 import { currentMonth } from "../db/costs.js";
@@ -461,7 +463,7 @@ export function buildServer(base: ServerDeps) {
     return await deps.tasks.events(Number(req.params.id), Number(req.query.after ?? 0));
   });
 
-  app.post<{ Body: { source?: string; projectId: number; issueIid: number; extraInstructions?: string } }>("/api/tasks", async (req, reply) => {
+  app.post<{ Body: { source?: string; projectId: number; issueIid: number; extraInstructions?: string; attachments?: string[]; retryOf?: number } }>("/api/tasks", async (req, reply) => {
     try {
       const { projectId, issueIid } = req.body;
       const source = forgeOf(req.body.source);
@@ -473,6 +475,13 @@ export function buildServer(base: ServerDeps) {
       const issue = await deps.forges.get(source).connector.getTicket(Number(projectId), Number(issueIid));
       if (!issue) return reply.code(404).send({ error: "Ticket introuvable" });
 
+      // Pièces jointes (captures, maquettes, données) : celles envoyées maintenant, plus celles du ticket (créées avec le Scribe) ou, pour une
+      // relance, celles de l'essai précédent. Tout est vérifié avant de créer la tâche : un refus ne crée rien.
+      const ids = attachmentIds(req.body.attachments);
+      const retryOf = typeof req.body.retryOf === "number" && Number.isInteger(req.body.retryOf) && req.body.retryOf > 0 ? req.body.retryOf : null;
+      const copyFrom: AttachmentOwner[] = retryOf ? [{ task: retryOf }] : [{ ticket: { source, projectId: project.projectId, iid: issue.iid } }];
+      await planAttachments(deps, copyFrom, ids);
+
       const id = await deps.tasks.insert({
         source,
         projectId: project.projectId,
@@ -482,16 +491,18 @@ export function buildServer(base: ServerDeps) {
         issueUrl: issue.url,
         extraInstructions: req.body.extraInstructions?.trim() || null,
       });
+      const files = await giveAttachments(deps, id, { copyFrom, ids });
       await deps.tasks.addEvent(id, "step", "Tâche créée, en attente de l'agent");
+      if (files.length > 0) await deps.tasks.addEvent(id, "step", `Pièces jointes : ${files.join(", ")}`);
       deps.enqueueDev(id);
       return { id };
     } catch (err) {
-      return fail(reply, err);
+      return failAttachment(reply, err, fail);
     }
   });
 
   /** Reprise : relance l'agent sur la branche de la MR créée par cette tâche, avec des consignes. */
-  app.post<IdParams & { Body: { instructions?: string } }>("/api/tasks/:id/followup", async (req, reply) => {
+  app.post<IdParams & { Body: { instructions?: string; attachments?: string[] } }>("/api/tasks/:id/followup", async (req, reply) => {
     try {
       const origin = await deps.tasks.get(Number(req.params.id));
       if (!origin) return reply.code(404).send({ error: "Tâche introuvable" });
@@ -505,6 +516,11 @@ export function buildServer(base: ServerDeps) {
       if (await deps.tasks.findActive(origin.source, origin.project_id, origin.issue_iid)) {
         return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
       }
+
+      // La reprise garde les pièces jointes de la tâche reprise (captures, maquettes) et peut en recevoir de nouvelles
+      const ids = attachmentIds(req.body?.attachments);
+      const copyFrom: AttachmentOwner[] = [{ task: origin.id }];
+      await planAttachments(deps, copyFrom, ids);
 
       const id = await deps.tasks.insert({
         source: origin.source,
@@ -523,11 +539,13 @@ export function buildServer(base: ServerDeps) {
           mrUrl: origin.mr_url,
         },
       });
+      const files = await giveAttachments(deps, id, { copyFrom, ids });
       await deps.tasks.addEvent(id, "step", `Reprise de la MR !${origin.mr_iid} (tâche #${origin.id}), en attente de l'agent`);
+      if (files.length > 0) await deps.tasks.addEvent(id, "step", `Pièces jointes : ${files.join(", ")}`);
       deps.enqueueDev(id);
       return { id };
     } catch (err) {
-      return fail(reply, err);
+      return failAttachment(reply, err, fail);
     }
   });
 
@@ -583,12 +601,16 @@ export function buildServer(base: ServerDeps) {
       }
       const outcome = await deps.tasks.delete(id);
       if (outcome === "active") return reply.code(409).send({ error: "L'agent travaille encore sur cette tâche : arrête-le d'abord" });
+      await deps.attachments?.remove({ task: id }).catch((err: unknown) => log.warn("task.delete_attachments_failed", { taskId: id, error: errorMessage(err) }));
       log.info("task.deleted", { taskId: id, status: task.status });
       return { ok: true };
     } catch (err) {
       return fail(reply, err);
     }
   });
+
+  // --- Pièces jointes (captures, maquettes, données) envoyées à l'agent dev --------------------------
+  registerAttachments(app, { deps, fail });
 
   // --- La pièce : relecture par le Gardien, puis fusion --------------------------------------------
   registerPiece(app, { deps, fail });

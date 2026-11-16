@@ -93,3 +93,16 @@ export function cleanIdea(idea: unknown): string {
   if (text.length > LIMITS.idea) throw new ScribeInputError(`L'idée est trop longue (${LIMITS.idea} caractères au plus).`);
   return text;
 }
+
+/** Lien de fichier tel que GitLab le renvoie : `![nom](/uploads/<secret>/nom.png)` ou `[nom](/uploads/<secret>/nom.csv)`. */
+const UPLOAD_MARKDOWN = /^!?\[[^\]\n<>]{0,200}\]\(\/uploads\/[0-9a-f]{8,64}\/[^\n<>`]{1,300}\)$/;
+
+/**
+ * Contrôle le Markdown renvoyé par la forge après l'envoi d'un fichier, avant de l'écrire dans la description d'un ticket : il doit être un
+ * lien vers `/uploads/` du projet, rien d'autre (ni HTML, ni lien vers un autre site, ni plusieurs lignes).
+ * @param markdown Texte renvoyé par la forge.
+ * @returns Le texte, ou null s'il n'a pas la forme attendue.
+ */
+export function cleanUploadMarkdown(markdown: unknown): string | null {
+  return typeof markdown === "string" && UPLOAD_MARKDOWN.test(markdown.trim()) ? markdown.trim() : null;
+}

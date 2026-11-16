@@ -195,10 +195,14 @@
 .fg-side { display: grid; justify-items: center; gap: 8px; align-content: start; }
 .fg-worn { width: 100%; text-align: left; }
 .fg-worn[hidden] { display: none; }
-.fg-card.wide { width: min(96%, 860px); max-height: 94%; overflow: hidden; display: grid; grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; column-gap: 18px; justify-items: stretch; align-items: start; }
+.fg-card { position: relative; }
+.fg-card.wide { width: min(96%, 860px); height: min(94%, 620px); overflow: hidden; display: grid; grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; column-gap: 18px; justify-items: stretch; align-items: start; }
 .fg-card.wide > h2, .fg-card.wide > .fg-tabs, .fg-card.wide > [data-ok] { grid-column: 1 / -1; justify-self: center; }
 .fg-card.wide > .fg-side { grid-column: 1; grid-row: 3; min-height: 0; max-height: 100%; overflow-y: auto; }
+.fg-card.wide > .fg-look { grid-column: 2; grid-row: 3; min-height: 0; max-height: 100%; overflow-y: auto; align-content: start; padding-right: 6px; }
 .fg-card.wide > .fg-panel { grid-column: 2; grid-row: 3; min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 6px; }
+.fg-x { position: absolute; top: 8px; right: 10px; width: 28px; height: 28px; border: 2px solid var(--border-strong); border-radius: 6px; background: var(--surface-2); color: var(--text); font: 800 18px/1 "Courier New", monospace; cursor: pointer; }
+.fg-x:hover { border-color: #c97c1a; }
 .fg-card.wide .fg-preview { width: 80px; height: 100px; }
 /* Onglet Profil */
 .fg-pf { display: grid; gap: 4px; }

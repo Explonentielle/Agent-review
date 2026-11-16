@@ -598,10 +598,12 @@
     el.className = "fg-custom";
     const swatches = (key, list) => `<div class="fg-swatches" data-key="${key}">${list.map((c) => `<button type="button" class="fg-sw ${look[key] === c ? "on" : ""}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>`;
     const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Sac"], ["look", "Apparence"], ["trade", "Échange"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
-    el.innerHTML = `<div class="fg-card">
+    // Hors création du personnage, le popup a toujours la même taille : aperçu et équipement à gauche, l'onglet choisi à droite
+    el.innerHTML = `<div class="fg-card ${first ? "" : "wide"}">
+      ${first ? "" : `<button type="button" class="fg-x" data-cancel aria-label="Fermer" title="Fermer sans enregistrer l'apparence (Échap)">×</button>`}
       <h2>${first ? "Qui es-tu, forgeron ?" : "Ton forgeron"}</h2>
       ${tabs}
-      <div class="fg-side"><canvas class="fg-preview" width="32" height="40"></canvas><div class="fg-worn" hidden></div></div>
+      <div class="fg-side"><canvas class="fg-preview" width="32" height="40"></canvas><div class="fg-worn" ${first ? "hidden" : ""}></div></div>
       <div class="fg-look">
         <label>Ton nom<input maxlength="24" value="${esc(g.save.name)}" placeholder="Aldric" autocomplete="off"></label>
         <div class="fg-row"><span>Peau</span>${swatches("skin", SKINS)}</div>
@@ -620,20 +622,16 @@
     };
     /** Affiche l'onglet courant : l'apparence, ou le panneau des objets (sac, échange). */
     const show = () => {
-      const card = el.querySelector(".fg-card"), panel = el.querySelector(".fg-panel");
+      const panel = el.querySelector(".fg-panel"), pane = el.querySelector(".fg-look");
       el.querySelectorAll("[data-ctab]").forEach((b) => b.classList.toggle("on", b.dataset.ctab === current));
-      el.querySelector(".fg-look").hidden = current !== "look";
+      pane.hidden = current !== "look";
       panel.hidden = current === "look";
-      const worn = el.querySelector(".fg-worn");
-      worn.hidden = current === "look";
-      card.classList.toggle("wide", current !== "look");
-      if (current !== "look") {
-        // Un changement d'équipement redessine l'onglet : on garde la position dans la liste, sauf quand on change d'onglet
-        const keep = shown === current ? panel.scrollTop : 0;
-        panel.innerHTML = current === "profile" ? profileHtml() : current === "quests" ? window.ForgePopups.questsHtml(api2) : items.panelHtml(current);
-        worn.innerHTML = items.equippedHtml();
-        panel.scrollTop = keep;
-      }
+      if (!first) el.querySelector(".fg-worn").innerHTML = items.equippedHtml();
+      // Un changement d'équipement redessine l'onglet : on garde la position dans la liste, sauf quand on change d'onglet
+      const scroller = current === "look" ? pane : panel;
+      const keep = shown === current ? scroller.scrollTop : 0;
+      if (current !== "look") panel.innerHTML = current === "profile" ? profileHtml() : current === "quests" ? window.ForgePopups.questsHtml(api2) : items.panelHtml(current);
+      scroller.scrollTop = keep;
       shown = current;
       if (current === "inv") seenBag = true;
     };
@@ -653,6 +651,7 @@
     el.addEventListener("click", (ev) => {
       const t = ev.target.closest("[data-ctab], [data-pf-tab]");
       if (t) { current = t.dataset.ctab ?? t.dataset.pfTab; A.sfx.select(); show(); return; }
+      if (ev.target.closest("[data-cancel]")) { close(); return; }
       if (ev.target.closest("[data-pf-board]")) { close(); openPopup("board"); return; }
       if (items.onClick(ev)) return;
       const sw = ev.target.closest(".fg-sw");

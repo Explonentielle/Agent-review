@@ -51,3 +51,29 @@ describe("client GitLab : ticket créé par le Scribe", () => {
     expect(JSON.parse(String(calls[0]!.init?.body)).assignee_ids).toBeUndefined();
   });
 });
+
+describe("client GitLab : fichier joint à un ticket", () => {
+  it("envoie le fichier en multipart au projet, avec le jeton, et rend le Markdown de GitLab", async () => {
+    const calls = stubFetch(() => reply({ alt: "capture", url: "/uploads/ab12/capture.png", markdown: "![capture](/uploads/ab12/capture.png)" }, 201));
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const out = await client().uploadFile(65, "capture.png", bytes);
+
+    expect(out).toEqual({ markdown: "![capture](/uploads/ab12/capture.png)" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(`${BASE}/api/v4/projects/65/uploads`);
+    expect(calls[0]!.init?.method).toBe("POST");
+    expect((calls[0]!.init?.headers as Record<string, string>)["PRIVATE-TOKEN"]).toBe("jeton-de-test");
+    const form = calls[0]!.init?.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    const file = form.get("file") as File;
+    expect(file.name).toBe("capture.png");
+    expect(file.size).toBe(4);
+  });
+
+  it("un refus de GitLab remonte avec son code, une réponse sans lien est une erreur", async () => {
+    stubFetch(() => reply({ message: "403 Forbidden" }, 403));
+    await expect(client().uploadFile(65, "a.png", new Uint8Array([1]))).rejects.toThrow(/403/);
+    stubFetch(() => reply({ alt: "a" }, 201));
+    await expect(client().uploadFile(65, "a.png", new Uint8Array([1]))).rejects.toThrow(/lien du fichier/);
+  });
+});

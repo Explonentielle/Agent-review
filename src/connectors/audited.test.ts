@@ -60,6 +60,22 @@ describe("journal d'audit des écritures sur les forges", () => {
     expect(JSON.stringify(await audit.list())).not.toContain("confidentiel"); // la description d'un ticket n'est jamais gardée
   });
 
+  it("l'envoi d'un fichier pour un ticket est tracé par son nom et son poids, jamais son contenu ; une forge sans envoi est tracée aussi", async () => {
+    const forge = new FakeConnector({ cloneUrl: "file:///x" }, "gitlab");
+    const connector = auditConnector(forge, audit);
+    const sent = await connector.uploadTicketFile(5, "capture.png", new Uint8Array([9, 9, 9]));
+    forge.supportsUploads = false;
+    const skipped = await connector.uploadTicketFile(5, "regles.csv", new Uint8Array([1, 2]));
+
+    expect(sent?.markdown).toContain("capture.png");
+    expect(skipped).toBeNull();
+    expect(forge.uploadedFiles).toEqual([{ projectId: 5, name: "capture.png", size: 3 }]);
+    expect(await entries()).toEqual([
+      { action: "ticket_file_upload", source: "gitlab", target: "5", outcome: "ok", error: null, detail: { name: "capture.png", size: 3, sent: true }, user: h.local.userId },
+      { action: "ticket_file_upload", source: "gitlab", target: "5", outcome: "ok", error: null, detail: { name: "regles.csv", size: 2, sent: false }, user: h.local.userId },
+    ]);
+  });
+
   it("sortir une MR du brouillon et la fusionner sont tracés, avec le commit fusionné ; un refus aussi", async () => {
     const forge = new FakeConnector({ cloneUrl: "file:///x" }, "github");
     const connector = auditConnector(forge, audit);

@@ -80,6 +80,8 @@
     const weapons = () => game().data.armory.weapons.filter((w) => w.source === source());
     const weapon = () => weapons().find((w) => w.key === sc.key) ?? weapons()[0] ?? null;
     const busy = (phase) => phase === "drafting" || phase === "creating";
+    /** Zone de pièces jointes du ticket en cours (créée à la demande ; la fenêtre se redessine à chaque changement). */
+    const attOf = (s) => (s.att ??= createAttachments(() => { if (ctx.isOpen()) ctx.rerender(); }));
 
     async function loadNamespaces() {
       const s = sc.project;
@@ -122,8 +124,9 @@
       ctx.rerender();
       try {
         if (tab() === "ticket") {
-          const out = await api("/api/scribe/tickets", { source: source(), projectId: w.projectId, title: s.title, description: s.desc, labels: s.labels });
+          const out = await api("/api/scribe/tickets", { source: source(), projectId: w.projectId, title: s.title, description: s.desc, labels: s.labels, attachments: attOf(s).ids() });
           s.result = out;
+          attOf(s).reset(); // les fichiers ont été rattachés au ticket
           ctx.invalidateTickets();
         } else {
           s.result = await api("/api/scribe/projects", {
@@ -166,7 +169,8 @@
       const questions = s.draft.questions.length ? `<div class="fg-questions"><b>Le Scribe se demande :</b>${list(s.draft.questions)}</div>` : "";
       return `${questions}<div class="fg-sc-card"><div class="fg-sc-card-head">Aperçu du ticket · ${esc(weapon()?.path ?? "")}</div>
         <h4>${esc(s.title) || "<i>(sans titre)</i>"}</h4>${chips}<div class="fg-md">${preview(s.desc) || "<p><i>(description vide)</i></p>"}</div></div>
-        <div class="fg-inline"><button type="button" class="fg-btn" data-sc-act="create">Valider et créer chez ${esc(forgeName(source()))}</button><button type="button" class="fg-btn ghost" data-sc-act="edit">Modifier</button><button type="button" class="fg-btn ghost" data-sc-act="again">Refaire le brouillon</button></div>
+        <div class="fg-note"><b>Pièces jointes</b> (captures d'écran, maquettes, données) : elles accompagnent le ticket, et l'agent les lira quand tu lui confieras ce ticket.</div>${attOf(s).html()}
+        <div class="fg-inline"><button type="button" class="fg-btn" data-sc-act="create" ${attOf(s).busy ? "disabled" : ""}>Valider et créer chez ${esc(forgeName(source()))}</button><button type="button" class="fg-btn ghost" data-sc-act="edit">Modifier</button><button type="button" class="fg-btn ghost" data-sc-act="again">Refaire le brouillon</button></div>
         <p class="fg-note">Rien n'est envoyé tant que tu n'as pas cliqué sur « Valider et créer ». Une fois créé, le ticket t'est assigné (il apparaît dans « Mes tickets ») et il est visible de toute l'équipe.</p>`;
     }
 
@@ -214,8 +218,10 @@
 
     function doneHtml(s) {
       if (tab() === "ticket") {
-        const r = s.result, w = weapon();
-        return `<div class="fg-done"><b>Ticket #${r.iid} créé</b> : ${link(r.url, r.title)}</div>
+        const r = s.result, w = weapon(), a = r.attachments;
+        const files = a && a.files > 0
+          ? `<p class="fg-note">${a.files} fichier${a.files > 1 ? "s" : ""} joint${a.files > 1 ? "s" : ""} : ${a.uploaded > 0 ? "ajouté" + (a.uploaded > 1 ? "s" : "") + " au ticket chez " + esc(forgeName(source())) + " et " : "pas ajouté au ticket (" + esc(forgeName(source())) + " ne permet pas de joindre un fichier à un ticket), mais "}gardé${a.files > 1 ? "s" : ""} pour l'agent, qui ${a.files > 1 ? "les" : "le"} recevra quand tu lui confieras ce ticket.</p>` : "";
+        return `<div class="fg-done"><b>Ticket #${r.iid} créé</b> : ${link(r.url, r.title)}</div>${files}
           <div class="fg-inline">${w?.devEnabled ? `<button type="button" class="fg-btn" data-sc-act="forge" data-iid="${r.iid}">Confier à l'apprenti</button>` : ""}
           <button type="button" class="fg-btn ghost" data-sc-act="reset">Un autre ticket</button><button type="button" class="fg-btn ghost" data-sc-act="rack">Voir les tickets du projet</button></div>`;
       }

@@ -1,6 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { createRunner, type AgentRunner } from "../agent/index.js";
+import { ATTACHMENTS_DIRNAME } from "../attachments/rules.js";
+import type { AttachmentStore } from "../attachments/store.js";
 import { agentRunConfig, ProcessCancelledError } from "../claude/process.js";
 import type { Config } from "../config.js";
 import { assertBudgetAvailable } from "../budget.js";
@@ -12,11 +14,11 @@ import { errorMessage, log } from "../logger.js";
 import { loadSystemPrompt } from "../prompts.js";
 import type { ProjectSettings, Settings } from "../settings/schema.js";
 import type { SettingsStore } from "../settings/store.js";
-import { buildDevPrompt, buildFollowupPrompt } from "./context.js";
+import { buildAttachmentsBlock, buildDevPrompt, buildFollowupPrompt } from "./context.js";
 import { Journal } from "./journal.js";
 import { DevResultSchema, runDevAgent, type DevEngineOutput, type DevResult } from "./engine.js";
 import { FileGuardError, checkChangedFiles } from "./fileGuard.js";
-import { assertBranchAllowed, isSecretFile, isSensitiveFile } from "./guard.js";
+import { assertBranchAllowed, isAttachmentFile, isSecretFile, isSensitiveFile } from "./guard.js";
 import { cleanCommitSubject, ensureDraftTitle, renderTemplate, slugify } from "./templates.js";
 
 export interface DevDeps {
@@ -28,6 +30,8 @@ export interface DevDeps {
   tasks: DevTaskRepo;
   /** Exécuteur d'agent imposé (tests). Par défaut : celui qui correspond aux réglages. */
   runner?: AgentRunner;
+  /** Pièces jointes de l'espace (captures, maquettes, données) à mettre à disposition de l'agent. Absent : aucune. */
+  attachments?: AttachmentStore;
 }
 
 /** Contexte commun aux deux modes (nouveau ticket, reprise de MR). */
@@ -274,19 +278,30 @@ async function runFollowup(c: RunContext): Promise<void> {
 async function runAgent(c: RunContext, worktree: string, prompt: string): Promise<DevEngineOutput> {
   const { tasks } = c.deps;
   const commands = resolveCommands(c.project.allowedCommands, worktree);
-  const out = await runDevAgent({
-    cwd: worktree,
-    systemPrompt: await loadDevSystemPrompt(c.settings, c.project, commands),
-    prompt,
-    engine: agentRunConfig(c.settings.dev),
-    runner: c.deps.runner ?? createRunner(c.deps.config, c.settings, c.project),
-    allowedCommands: commands,
-    signal: c.signal,
-    onEvent: (kind, text) => void c.journal.event(kind, text),
-    onSession: (sessionId) => void c.journal.update({ session_id: sessionId }),
-  });
-  await tasks.update(c.task.id, { result_json: JSON.stringify(out.result), cost_usd: out.costUsd, num_turns: out.numTurns });
-  return out;
+
+  // Pièces jointes (captures, maquettes, données) : posées dans le dossier de travail le temps du passage de l'agent, puis supprimées quoi
+  // qu'il arrive. Elles ne sont jamais committées (voir `commitAgentWork`).
+  const attachDir = path.join(worktree, ATTACHMENTS_DIRNAME);
+  const placed = c.deps.attachments ? await c.deps.attachments.materialize({ task: c.task.id }, attachDir) : [];
+  if (placed.length > 0) await c.step(`Pièces jointes mises à disposition de l'agent : ${placed.map((f) => f.name).join(", ")}`);
+  try {
+    const out = await runDevAgent({
+      cwd: worktree,
+      systemPrompt: await loadDevSystemPrompt(c.settings, c.project, commands),
+      prompt: prompt + buildAttachmentsBlock(placed),
+      engine: agentRunConfig(c.settings.dev),
+      runner: c.deps.runner ?? createRunner(c.deps.config, c.settings, c.project),
+      allowedCommands: commands,
+      signal: c.signal,
+      onEvent: (kind, text) => void c.journal.event(kind, text),
+      onSession: (sessionId) => void c.journal.update({ session_id: sessionId }),
+    });
+    await tasks.update(c.task.id, { result_json: JSON.stringify(out.result), cost_usd: out.costUsd, num_turns: out.numTurns });
+    return out;
+  } finally {
+    // Même si l'agent a planté ou a été arrêté : rien de l'utilisateur ne reste dans le dossier de travail
+    await rm(attachDir, { recursive: true, force: true }).catch((err: unknown) => log.warn("dev.attachments_cleanup_failed", { taskId: c.task.id, error: errorMessage(err) }));
+  }
 }
 
 async function markBlocked(c: RunContext): Promise<void> {
@@ -309,6 +324,11 @@ async function commitAgentWork(
   }
   const changed = await workspace.changedFiles(worktree);
   if (changed.length === 0) throw new Error("L'agent n'a modifié aucun fichier");
+  // Une pièce jointe (capture, maquette, données de la personne) ne part jamais dans une MR : même si le nettoyage a échoué ou si l'agent en a recopié une
+  const attached = changed.filter(isAttachmentFile);
+  if (attached.length > 0) {
+    throw new Error(`Pièces jointes présentes parmi les fichiers modifiés (${attached.join(", ")}) : push refusé. Le travail reste dans le dossier local.`);
+  }
   const secrets = changed.filter(isSecretFile);
   if (secrets.length > 0) {
     throw new Error(`Fichiers sensibles modifiés (${secrets.join(", ")}) : push refusé. Le travail reste dans le dossier local.`);

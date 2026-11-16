@@ -23,6 +23,8 @@ const CONNECTOR_WRITES: Record<string, (args: unknown[], result: unknown) => Des
     const created = result as { iid?: number; url?: string } | undefined;
     return { action: "ticket_create", target: `${projectId}/${created?.iid ?? "?"}`, detail: { title: ticket.title, labels: ticket.labels ?? [], url: created?.url } };
   },
+  // Le contenu du fichier n'est jamais noté : seulement son nom et son poids
+  uploadTicketFile: ([projectId, name, bytes], result) => ({ action: "ticket_file_upload", target: String(projectId), detail: { name, size: (bytes as Uint8Array).byteLength, sent: result !== null && result !== undefined } }),
   createProject: ([input], result) => {
     const project = input as { name: string; namespaceId?: string; private: boolean };
     const created = result as { path?: string; url?: string } | undefined;

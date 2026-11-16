@@ -194,6 +194,24 @@ export class GitlabClient {
     });
   }
 
+  /**
+   * Envoie un fichier au projet (`POST /projects/:id/uploads`, formulaire multipart). GitLab répond avec le Markdown à coller dans un ticket.
+   * @param projectId Projet.
+   * @param name Nom du fichier (déjà assaini).
+   * @param bytes Contenu.
+   * @returns Le Markdown du fichier envoyé (par exemple `![capture](/uploads/ab12.../capture.png)`).
+   */
+  async uploadFile(projectId: number, name: string, bytes: Uint8Array): Promise<{ markdown: string }> {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(bytes)]), name);
+    const path = `/projects/${projectId}/uploads`;
+    const res = await fetch(`${this.baseUrl}/api/v4${path}`, { method: "POST", headers: { "PRIVATE-TOKEN": this.token }, body: form });
+    if (!res.ok) throw new GitlabError("POST", path, res.status, await res.text());
+    const data = (await res.json()) as { markdown?: unknown };
+    if (typeof data.markdown !== "string") throw new Error("GitLab n'a pas renvoyé le lien du fichier envoyé");
+    return { markdown: data.markdown };
+  }
+
   private meId: number | null | undefined;
   /** Identifiant de l'utilisateur du jeton (lu une fois), ou null s'il ne peut pas être lu. */
   private async tokenUserId(): Promise<number | null> {

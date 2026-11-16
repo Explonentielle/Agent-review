@@ -189,6 +189,11 @@ export interface ForgeConnector {
   getTicket(projectId: number, iid: number): Promise<Ticket | null>;
   /** Crée un ticket (écriture chez la forge). */
   createTicket(projectId: number, input: NewTicket): Promise<Ticket>;
+  /**
+   * Envoie un fichier chez la forge pour l'insérer dans un ticket (écriture chez la forge). Retourne le Markdown à insérer dans la description,
+   * ou `null` si cette forge n'offre pas d'envoi de fichier pour les tickets (GitHub n'en propose pas par son API).
+   */
+  uploadTicketFile(projectId: number, name: string, bytes: Uint8Array): Promise<{ markdown: string } | null>;
   /** Discussion du ticket, dans l'ordre chronologique. */
   getTicketComments(projectId: number, iid: number): Promise<Comment[]>;
   addTicketLabels(projectId: number, iid: number, labels: string[]): Promise<void>;

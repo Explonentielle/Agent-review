@@ -241,6 +241,11 @@ export class GithubConnector implements ForgeConnector {
     return toTicket(issue, repo.id, repo.full_name);
   }
 
+  /** GitHub n'a pas d'API publique pour joindre un fichier à un ticket : le fichier reste côté outil, à la disposition de l'agent dev. */
+  async uploadTicketFile(): Promise<null> {
+    return null;
+  }
+
   async listAssignedTickets(): Promise<Ticket[]> {
     const tickets: Ticket[] = [];
     for (const issue of await this.client.listAssignedIssues()) {

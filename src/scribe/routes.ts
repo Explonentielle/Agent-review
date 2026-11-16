@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createRunner } from "../agent/index.js";
 import type { AgentRunner } from "../agent/runner.js";
+import { attachmentIds, failAttachment, planAttachments } from "../attachments/routes.js";
+import type { AttachmentStore } from "../attachments/store.js";
 import { agentRunConfig } from "../claude/process.js";
 import type { Config } from "../config.js";
 import type { ForgeRegistry } from "../connectors/registry.js";
@@ -12,7 +14,7 @@ import { errorMessage, log } from "../logger.js";
 import { loadSystemPrompt } from "../prompts.js";
 import type { SettingsStore } from "../settings/store.js";
 import type { Settings } from "../settings/schema.js";
-import { ScribeInputError, cleanIdea, cleanProject, cleanTicket } from "./clean.js";
+import { ScribeInputError, cleanIdea, cleanProject, cleanTicket, cleanUploadMarkdown } from "./clean.js";
 import { draftProject, draftTicket } from "./engine.js";
 import { ScribeForgeError, explainForgeError } from "./errors.js";
 import { HOURLY, ScribeLimitError, createLimiter } from "./limiter.js";
@@ -21,7 +23,7 @@ import { buildProjectPrompt, buildTicketPrompt } from "./prompt.js";
 /** Ce que les routes du Scribe empruntent au serveur. */
 export interface ScribeContext {
   /** Dépôts et connexions de la personne servie (résolus à chaque requête). */
-  deps: { config: Config; forges: ForgeRegistry; settings: SettingsStore; tasks: DevTaskRepo; reviews: ReviewRepo };
+  deps: { config: Config; forges: ForgeRegistry; settings: SettingsStore; tasks: DevTaskRepo; reviews: ReviewRepo; attachments?: AttachmentStore | undefined };
   whoIs: (req: FastifyRequest) => { userId: number };
   fail: (reply: FastifyReply, err: unknown, code?: number) => unknown;
   forgeOf: (value: unknown) => ForgeKind;
@@ -180,14 +182,47 @@ export function registerScribe(app: FastifyInstance, ctx: ScribeContext): void {
       const source = ctx.forgeOf(b.source);
       const projectId = projectIdOf(b.projectId);
       const ticket = cleanTicket({ title: b.title, description: b.description, labels: b.labels });
+      // Fichiers joints (captures, maquettes, données) : tout est vérifié avant d'écrire quoi que ce soit chez la forge
+      const ids = attachmentIds(b.attachments);
+      await planAttachments(deps, [], ids);
       limiter.take(`${ctx.whoIs(req).userId}:ticket`, HOURLY.tickets, "tickets créés");
-      const created = await deps.forges.get(source).connector.createTicket(projectId, ticket).catch((err: unknown) => {
+
+      const connector = deps.forges.get(source).connector;
+      // Chez GitLab, chaque fichier est envoyé au projet et son lien est ajouté à la description. GitHub n'a pas d'envoi de fichier pour les
+      // tickets : rien n'est envoyé, mais les fichiers sont gardés pour l'agent dev.
+      let uploaded = 0;
+      if (ids.length > 0 && deps.attachments) {
+        const lines: string[] = [];
+        for (const file of await deps.attachments.readStaged(ids)) {
+          const sent = await connector.uploadTicketFile(projectId, file.name, file.bytes).catch((err: unknown) => {
+            throw explainForgeError(source, "ticket", err);
+          });
+          if (!sent) break;
+          const markdown = cleanUploadMarkdown(sent.markdown);
+          if (markdown) {
+            lines.push(markdown);
+            uploaded++;
+          }
+        }
+        if (lines.length > 0) ticket.description = [ticket.description, "## Pièces jointes", lines.join("\n\n")].join("\n\n").trim();
+      }
+      const created = await connector.createTicket(projectId, ticket).catch((err: unknown) => {
         throw explainForgeError(source, "ticket", err);
       });
-      log.info("scribe.ticket_created", { source, projectId, iid: created.iid });
-      return { source, projectId, iid: created.iid, title: created.title, url: created.url, projectPath: created.projectPath };
+      log.info("scribe.ticket_created", { source, projectId, iid: created.iid, files: ids.length, uploaded });
+
+      // Les fichiers suivent le ticket : l'agent dev les recevra quand une tâche sera lancée dessus (aussi chez GitHub)
+      let kept = 0;
+      if (ids.length > 0 && deps.attachments) {
+        try {
+          kept = (await deps.attachments.attach({ ticket: { source, projectId, iid: created.iid } }, ids)).length;
+        } catch (err) {
+          log.warn("scribe.attachments_not_kept", { source, projectId, iid: created.iid, error: errorMessage(err) });
+        }
+      }
+      return { source, projectId, iid: created.iid, title: created.title, url: created.url, projectPath: created.projectPath, attachments: { files: ids.length, uploaded, kept } };
     } catch (err) {
-      return failScribe(reply, err);
+      return failAttachment(reply, err, (r, e) => failScribe(r, e));
     }
   });
 

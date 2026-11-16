@@ -375,13 +375,14 @@
       title: `Lancer l'agent sur #${info.iid}`,
       okLabel: "Forger",
       input: true,
+      attach: true,
       placeholder: "Consignes supplémentaires (optionnel) : piste à explorer, fichiers concernés, contraintes...",
       html: `<p><b>${esc(info.title)}</b></p><dl class="kv"><dt>Projet</dt><dd>${esc(info.projectPath)}</dd></dl>
         <p class="note">L'agent lit le ticket, code sur une branche créée pour lui, puis l'outil la pousse et ouvre une MR <b>Draft</b>. Aucune autre branche n'est touchée.</p>`,
     });
     if (!answer) return;
     try {
-      await api("/api/tasks", { source: info.source, projectId: Number(info.projectId), issueIid: Number(info.iid), extraInstructions: answer.value });
+      await api("/api/tasks", { source: info.source, projectId: Number(info.projectId), issueIid: Number(info.iid), extraInstructions: answer.value, attachments: answer.attachments });
       state.issues = null;
       ticketCache.clear();
       close(true);
@@ -509,13 +510,14 @@
       title: `Lancer l'agent sur #${i.iid}`,
       okLabel: "Forger",
       input: true,
+      attach: true,
       placeholder: "Consignes supplémentaires (optionnel) : piste à explorer, fichiers concernés, contraintes...",
       html: `<p><b>${esc(i.title)}</b></p><dl class="kv"><dt>Projet</dt><dd>${esc(i.projectPath)}</dd><dt>Branche créée</dt><dd><code>${esc(i.branchPreview)}</code></dd><dt>MR Draft vers</dt><dd><code>${esc(i.targetBranch)}</code></dd></dl>
         <p class="note">L'agent lit le ticket, code sur cette branche, puis l'outil la pousse et ouvre une MR <b>Draft</b>. Aucune autre branche n'est touchée.</p>`,
     });
     if (!answer) return;
     try {
-      await api("/api/tasks", { source, projectId: Number(projectId), issueIid: Number(iid), extraInstructions: answer.value });
+      await api("/api/tasks", { source, projectId: Number(projectId), issueIid: Number(iid), extraInstructions: answer.value, attachments: answer.attachments });
       state.issues = null;
       close(true);
       game.setPopup(false);
