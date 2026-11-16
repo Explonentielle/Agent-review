@@ -539,16 +539,15 @@
   function renderHud() {
     const h = g.data.hero, e = g.el;
     const next = h?.quests.find((q) => !q.done);
-    e.hud.title = `${h?.title ?? ""} · ${h?.xp ?? 0} XP`;
-    e.hud.innerHTML = `<button type="button" class="fg-name" data-fg="custom" title="Changer d'apparence">${esc(g.save.name || "Forgeron")}</button><span>Niv. ${h?.level ?? 1}</span><span class="fg-bar"><i style="width:${h?.percent ?? 0}%"></i></span><span class="fg-gold">${g.save.gold} or</span>`;
-    // Deuxième ligne : rang de prestige, série de jours, récompenses à réclamer (les trois mènent au tableau)
-    const rk = prestige(), pg = progress(), pending = claimable().length;
-    const aura = rk?.rank.aura;
+    // Un seul bouton : toute la barre ouvre le profil (équipement, sac, quêtes, rang, série...)
+    e.hud.title = `${h?.title ?? ""} · ${h?.xp ?? 0} XP · Ouvrir ton profil (touche P)`;
+    const fresh = items.freshCount();
+    e.hud.innerHTML = `<span class="fg-name">${esc(g.save.name || "Forgeron")}</span><span>Niv. ${h?.level ?? 1}</span><span class="fg-bar"><i style="width:${h?.percent ?? 0}%"></i></span><span class="fg-gold">${g.save.gold} or</span>${fresh ? `<span class="fg-pending" title="Objets nouveaux dans ton sac">${fresh} nouveau${fresh > 1 ? "x" : ""}</span>` : ""}`;
+    // Deuxième ligne : seulement ce qui demande une action (récompenses à réclamer au tableau, série qui va s'éteindre)
+    const pg = progress(), pending = claimable().length;
     const parts = [];
-    if (rk) parts.push(`<span class="fg-rank" ${aura ? `style="--aura:${aura}"` : ""} title="Rang de prestige : +${rk.rank.goldBonusPct} % d'or aux ventes">${esc(rk.rank.name)}${rk.stars ? " " + "★".repeat(Math.min(rk.stars, 5)) : ""}</span>`);
-    if (pg && (pg.streak.current > 0 || pg.streak.best > 0)) parts.push(`<span class="fg-streak ${pg.streak.atRisk ? "risk" : ""}" title="${pg.streak.atRisk ? "Fais une pièce ou une review avant minuit pour garder ta série" : "Jours de suite avec du travail de tes agents"} (record ${pg.streak.best})">Série ${pg.streak.current} j</span>`);
-    parts.push(`<button type="button" class="fg-pending fg-bag" data-fg="bag" title="Ton sac : objets, équipement, échanges (touche I)">Sac${items.freshCount() ? ` <b>${items.freshCount()}</b>` : ""}</button>`);
     if (pending) parts.push(`<button type="button" class="fg-pending" data-fg="board" title="Récompenses de missions à réclamer au tableau">${pending} à réclamer</button>`);
+    if (pg?.streak.atRisk) parts.push(`<span class="fg-streak risk" title="Fais une pièce ou une review avant minuit pour garder ta série">Série ${pg.streak.current} j en danger</span>`);
     e.hud2.innerHTML = parts.join("");
     e.hud2.hidden = parts.length === 0;
     e.quest.title = next ? `${next.title} : ${next.hint}` : "";
@@ -558,19 +557,51 @@
       <button type="button" class="fg-tool ${pr.music ? "on" : ""}" data-fg="music" title="Musique">Musique</button>`;
   }
 
-  /* ---------- page du personnage : apparence, sac, échange ---------- */
-  function openCustomizer(first, tab = "look") {
+  /** Page « Profil » : identité, niveau, or, rang, série, collection, quête en cours et travail réel (tout est lu, rien n'est modifiable ici). */
+  function profileHtml() {
+    const h = g.data.hero;
+    if (!h) return `<p class="fg-note">Les données du forgeron arrivent…</p>`;
+    const rk = prestige(), pg = progress(), pending = claimable();
+    const rank = rk ? `<span class="fg-rank" ${rk.rank.aura ? `style="--aura:${rk.rank.aura}"` : ""} title="Rang de prestige">${esc(rk.rank.name)}${rk.stars ? " " + "★".repeat(Math.min(rk.stars, 5)) : ""}</span>` : "";
+    const nextRank = rk?.next ? `Encore ${rk.next.xpLeft} XP pour le rang ${esc(rk.next.name)} (niveau ${rk.next.level}).` : "";
+    const col = items.collection();
+    const next = h.quests.find((q) => !q.done);
+    const tile = (label, value, note, cls = "") => `<div class="fg-tile ${cls}"><small>${label}</small><b>${value}</b><small>${note}</small></div>`;
+    const tiles = [
+      tile("Or", `${g.save.gold}`, rk ? `+${rk.rank.goldBonusPct} % aux ventes` : "à dépenser chez le marchand"),
+      pg ? tile("Série", `${pg.streak.current} j`, pg.streak.atRisk ? "s'éteint à minuit !" : `record ${pg.streak.best} j`, pg.streak.atRisk ? "risk" : "") : "",
+      tile("Collection", `${col.owned}/${col.total}`, "objets différents"),
+    ].join("");
+    const claim = pending.length ? `<button type="button" class="fg-btn" data-pf-board>${pending.length} récompense${pending.length > 1 ? "s" : ""} à réclamer : ${pending.reduce((n, m) => n + m.gold, 0)} or</button>` : "";
+    const quest = next
+      ? `<div class="fg-quest-row next"><span class="chk"></span><div><b>${esc(next.title)}</b><small>${esc(next.hint)}</small></div><span class="xp">+${next.xp} XP</span></div>`
+      : `<p class="fg-note">Toutes les quêtes de départ sont accomplies.</p>`;
+    return `<div class="fg-pf">
+      <div class="fg-pf-id"><div><b>${esc(g.save.name || "Forgeron")}</b> ${rank}<small>${esc(h.heroClass)} ${esc(h.specialty.toLowerCase())}</small></div><button type="button" class="fg-mini" data-pf-tab="look">Modifier</button></div>
+      <div>Niveau ${h.level} · ${esc(h.title)} · ${h.xp} XP</div>
+      <div class="fg-pbar"><i style="width:${Math.max(0, Math.min(100, h.percent))}%"></i></div>
+      ${nextRank ? `<small class="fg-note">${nextRank}</small>` : ""}
+      <div class="fg-tiles">${tiles}</div>
+      ${claim}
+      <h4>Quête en cours <button type="button" class="fg-mini" data-pf-tab="quests">Toutes les quêtes</button></h4>${quest}
+      <h4>Ton travail</h4><div class="fg-stats">${h.stats.map((s) => `<span><b>${s.value}</b> ${esc(s.label.toLowerCase())}</span>`).join("")}</div>
+    </div>`;
+  }
+
+  /** Popup du profil : un seul endroit pour le forgeron (profil, sac, apparence, échange, quêtes). Le jeu garde l'aperçu et l'équipement visibles à gauche. */
+  function openCustomizer(first, tab = "profile") {
     if (g.custom) return;
     const look = { ...g.save.look };
     let current = first ? "look" : tab;
+    let seenBag = false, shown = null;
     const el = document.createElement("div");
     el.className = "fg-custom";
     const swatches = (key, list) => `<div class="fg-swatches" data-key="${key}">${list.map((c) => `<button type="button" class="fg-sw ${look[key] === c ? "on" : ""}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>`;
-    const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["look", "Apparence"], ["inv", "Sac"], ["trade", "Échange"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
+    const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Sac"], ["look", "Apparence"], ["trade", "Échange"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
     el.innerHTML = `<div class="fg-card">
       <h2>${first ? "Qui es-tu, forgeron ?" : "Ton forgeron"}</h2>
       ${tabs}
-      <canvas class="fg-preview" width="32" height="40"></canvas>
+      <div class="fg-side"><canvas class="fg-preview" width="32" height="40"></canvas><div class="fg-worn" hidden></div></div>
       <div class="fg-look">
         <label>Ton nom<input maxlength="24" value="${esc(g.save.name)}" placeholder="Aldric" autocomplete="off"></label>
         <div class="fg-row"><span>Peau</span>${swatches("skin", SKINS)}</div>
@@ -578,7 +609,7 @@
         <div class="fg-row"><span>Tunique</span>${swatches("tunic", TUNICS)}</div>
       </div>
       <div class="fg-panel" hidden></div>
-      <button type="button" class="fg-btn" data-ok>${first ? "Entrer dans la forge" : "Enregistrer"}</button></div>`;
+      <button type="button" class="fg-btn" data-ok>${first ? "Entrer dans la forge" : "Enregistrer et fermer"}</button></div>`;
     g.el.stage.append(el);
     g.custom = el;
     const draw = () => {
@@ -593,15 +624,36 @@
       el.querySelectorAll("[data-ctab]").forEach((b) => b.classList.toggle("on", b.dataset.ctab === current));
       el.querySelector(".fg-look").hidden = current !== "look";
       panel.hidden = current === "look";
+      const worn = el.querySelector(".fg-worn");
+      worn.hidden = current === "look";
       card.classList.toggle("wide", current !== "look");
-      if (current !== "look") panel.innerHTML = items.panelHtml(current);
+      if (current !== "look") {
+        // Un changement d'équipement redessine l'onglet : on garde la position dans la liste, sauf quand on change d'onglet
+        const keep = shown === current ? panel.scrollTop : 0;
+        panel.innerHTML = current === "profile" ? profileHtml() : current === "quests" ? window.ForgePopups.questsHtml(api2) : items.panelHtml(current);
+        worn.innerHTML = items.equippedHtml();
+        panel.scrollTop = keep;
+      }
+      shown = current;
+      if (current === "inv") seenBag = true;
     };
-    g.customUi = { redraw: draw, rerender: show };
+    /** Ferme le popup : les objets nouveaux ne sont marqués « vus » que si le sac a été ouvert. L'équipement, lui, est déjà enregistré à chaque clic. */
+    const close = () => {
+      if (seenBag) items.markSeen();
+      persist();
+      el.remove();
+      g.custom = null;
+      g.customUi = null;
+      A.sfx.open();
+      renderHud();
+    };
+    g.customUi = { redraw: draw, rerender: show, close: first ? null : close };
     draw();
     show();
     el.addEventListener("click", (ev) => {
-      const t = ev.target.closest("[data-ctab]");
-      if (t) { current = t.dataset.ctab; A.sfx.select(); show(); return; }
+      const t = ev.target.closest("[data-ctab], [data-pf-tab]");
+      if (t) { current = t.dataset.ctab ?? t.dataset.pfTab; A.sfx.select(); show(); return; }
+      if (ev.target.closest("[data-pf-board]")) { close(); openPopup("board"); return; }
       if (items.onClick(ev)) return;
       const sw = ev.target.closest(".fg-sw");
       if (sw) { look[sw.parentElement.dataset.key] = sw.dataset.c; sw.parentElement.querySelectorAll(".fg-sw").forEach((b) => b.classList.toggle("on", b === sw)); A.sfx.select(); draw(); return; }
@@ -609,13 +661,7 @@
         g.save.name = el.querySelector("input").value.trim() || "Forgeron";
         g.save.look = look;
         g.save.created = true;
-        items.markSeen();
-        persist();
-        el.remove();
-        g.custom = null;
-        g.customUi = null;
-        A.sfx.open();
-        renderHud();
+        close();
         if (first) startAdventure();
       }
     });
@@ -740,14 +786,15 @@
     if (!g.running || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     A.start();
     const key = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
-    if (typing(ev.target)) { if (key === "Escape" && g.popup) window.ForgePopups.close(); return; }
+    if (typing(ev.target)) { if (key === "Escape") { if (g.popup) window.ForgePopups.close(); else g.customUi?.close?.(); } return; }
     if (key === "Escape") {
-      if (g.dlg) { endDialog(-1); ev.preventDefault(); } else if (g.popup) { window.ForgePopups.close(); ev.preventDefault(); }
+      if (g.dlg) { endDialog(-1); ev.preventDefault(); } else if (g.popup) { window.ForgePopups.close(); ev.preventDefault(); } else if (g.customUi?.close) { g.customUi.close(); ev.preventDefault(); }
       return;
     }
     if (key === "m") { A.toggleAll(); renderHud(); return; }
     if (g.popup || g.custom) return;
     if (key === "i" && !g.dlg) { ev.preventDefault(); openCustomizer(false, "inv"); return; }
+    if (key === "p" && !g.dlg) { ev.preventDefault(); openCustomizer(false, "profile"); return; }
     if (g.dlg) {
       if (key === "e" || key === " " || key === "Enter") { ev.preventDefault(); advance(); }
       else if (g.dlg.options && (key === "ArrowUp" || key === "ArrowDown" || key === "z" || key === "s" || key === "w")) {
@@ -784,9 +831,8 @@
       const what = t.dataset.fg;
       if (what === "sfx") A.set("sfx", !A.prefs().sfx);
       if (what === "music") A.set("music", !A.prefs().music);
-      if (what === "custom") openCustomizer(false);
+      if (what === "profile" && !modal()) openCustomizer(false, "profile");
       if (what === "board" && !modal()) openPopup("board");
-      if (what === "bag" && !modal()) openCustomizer(false, "inv");
       renderHud();
       return;
     }
@@ -800,8 +846,8 @@
     root.innerHTML = `<div class="fg-wrap"><div class="fg-stage">
       <canvas class="fg-canvas" width="${W * T}" height="${H * T}" tabindex="0"></canvas>
       <div class="fg-labels"></div>
-      <div class="fg-hud"></div><div class="fg-hud2"></div><div class="fg-quest"></div><div class="fg-tools"></div>
-      <div class="fg-help">Flèches ou ZQSD : marcher · E : parler, toucher · clic : aller là · I : sac · M : couper le son</div>
+      <div class="fg-hud" data-fg="profile" role="button"></div><div class="fg-hud2"></div><div class="fg-quest"></div><div class="fg-tools"></div>
+      <div class="fg-help">Flèches ou ZQSD : marcher · E : parler, toucher · clic : aller là · P : profil · I : sac · M : couper le son</div>
       <div class="fg-dialog" hidden><span class="fg-who"></span><div class="fg-text"></div><div class="fg-options"></div><span class="fg-more" hidden>▼ E</span></div>
       <div class="fg-banners"></div>
     </div><div class="fg-popups"></div></div>`;

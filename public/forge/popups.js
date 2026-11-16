@@ -11,6 +11,16 @@
   const weaponImg = (type, grade, cls = "") => `<img class="fg-wicon ${cls}" src="${S.icon(type, grade)}" alt="">`;
   const fmtKind = (k) => (k === "github" ? "GitHub" : "GitLab");
 
+  /** Quêtes de départ, hauts faits et règles de l'XP : le tableau et la page du profil les affichent de la même façon. */
+  function questsBody(source = game) {
+    const h = source.data.hero;
+    const quest = (q) => `<div class="fg-quest-row ${q.done ? "done" : q.id === h.nextQuest ? "next" : ""}"><span class="chk">${q.done ? "✓" : ""}</span><div><b>${esc(q.title)}</b><small>${esc(q.hint)}</small></div><span class="xp">+${q.xp} XP</span></div>`;
+    return `<h4>Quêtes de départ (${h.quests.filter((q) => q.done).length}/${h.quests.length})</h4>${h.quests.map(quest).join("")}
+      <h4>Hauts faits (${h.achievements.filter((a) => a.unlocked).length}/${h.achievements.length})</h4>
+      <div class="fg-achv">${h.achievements.map((a) => `<div class="${a.unlocked ? "" : "locked"}"><b>${esc(a.title)}</b><small>${esc(a.description)}</small></div>`).join("")}</div>
+      <details><summary>Comment gagner de l'XP ?</summary><ul>${h.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>`;
+  }
+
   /* ---------- contenus ---------- */
   const defs = {
     /** Un four = une forge connectée : adresse et jeton, les vrais réglages de connexion. */
@@ -201,13 +211,7 @@
             ${next ? `<p class="fg-note">Prochain : <b>${esc(next.name)}</b> au niveau ${next.level}. Encore ${next.levelsLeft} niveau${next.levelsLeft > 1 ? "x" : ""}, soit ${next.xpLeft} XP.</p>` : ""}
             <h4>Les rangs</h4>${pr.ranks.map((r) => `<div class="fg-rankrow ${r.reached ? "done" : ""}"><span class="sw" style="background:${r.aura || "#6b6f7b"}"></span><div><b>${esc(r.name)}</b> · niveau ${r.from}<small>${esc(perks(r))}</small></div><span class="chk">${r.reached ? "✓" : ""}</span></div>`).join("")}
             <p class="fg-note">Au-delà du dernier rang, une étoile ★ tous les 10 niveaux. Les tenues de prestige sont offertes chez le marchand.</p>`;
-        } else {
-          const quest = (q) => `<div class="fg-quest-row ${q.done ? "done" : q.id === h.nextQuest ? "next" : ""}"><span class="chk">${q.done ? "✓" : ""}</span><div><b>${esc(q.title)}</b><small>${esc(q.hint)}</small></div><span class="xp">+${q.xp} XP</span></div>`;
-          body = `<h4>Quêtes de départ (${h.quests.filter((q) => q.done).length}/${h.quests.length})</h4>${h.quests.map(quest).join("")}
-            <h4>Hauts faits (${h.achievements.filter((a) => a.unlocked).length}/${h.achievements.length})</h4>
-            <div class="fg-achv">${h.achievements.map((a) => `<div class="${a.unlocked ? "" : "locked"}"><b>${esc(a.title)}</b><small>${esc(a.description)}</small></div>`).join("")}</div>
-            <details><summary>Comment gagner de l'XP ?</summary><ul>${h.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>`;
-        }
+        } else body = questsBody();
         return { title: "Tableau des quêtes", html: header + body };
       },
     },
@@ -587,6 +591,8 @@
   window.ForgePopups = {
     open,
     close: () => close(),
+    /** Quêtes et hauts faits, pour la page du profil (le jeu fournit ses données : aucun popup n'a forcément été ouvert avant). */
+    questsHtml: (source) => questsBody(source),
     /** Redessine les popups « vivants » (tableau, marchand) quand les données ont changé. */
     update() {
       if (!current?.def.live) return;

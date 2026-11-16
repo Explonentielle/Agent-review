@@ -9,7 +9,9 @@
 .fg-label.bubble { background: #fff; color: #151922; border: 1px solid #cfd5df; border-radius: 8px; padding: 2px 8px; font: 500 clamp(8px, 1.05cqw, 12px) / 1.35 ui-sans-serif, system-ui, sans-serif; white-space: normal; max-width: 14%; text-align: center; }
 .fg-hud, .fg-quest, .fg-tools { position: absolute; background: rgba(20, 16, 12, .86); border: 2px solid #c9a35b; border-radius: 6px; color: #f5e9c8; font: 700 clamp(9px, 1.2cqw, 14px) / 1.45 "Courier New", monospace; z-index: 6; }
 .fg-hud { top: .8%; left: .8%; display: flex; align-items: center; gap: .7em; padding: .2em .6em; max-width: 44%; }
-.fg-name { background: none; border: 0; padding: 0; color: #ffd37a; font: inherit; font-weight: 800; cursor: pointer; text-decoration: underline dotted; }
+.fg-hud { cursor: pointer; }
+.fg-hud:hover { border-color: #ffd37a; }
+.fg-name { color: #ffd37a; font: inherit; font-weight: 800; }
 .fg-bar { width: 6em; flex: none; height: .6em; background: #3a3128; border-radius: 4px; overflow: hidden; }
 .fg-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ff9f45, #ffd37a); transition: width .6s ease; }
 .fg-gold { color: #ffd37a; }
@@ -189,7 +191,35 @@
 .fg-btn[disabled] { opacity: .5; cursor: not-allowed; }
 
 /* Page du personnage : onglets, sac, échange */
-.fg-card.wide { width: min(96%, 760px); max-height: 94%; overflow: auto; }
+/* Sac et échange : l'aperçu et ce qui est porté restent à gauche, la liste des objets défile seule à droite (elle n'est plus repoussée sous la ligne de flottaison) */
+.fg-side { display: grid; justify-items: center; gap: 8px; align-content: start; }
+.fg-worn { width: 100%; text-align: left; }
+.fg-worn[hidden] { display: none; }
+.fg-card.wide { width: min(96%, 860px); max-height: 94%; overflow: hidden; display: grid; grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; column-gap: 18px; justify-items: stretch; align-items: start; }
+.fg-card.wide > h2, .fg-card.wide > .fg-tabs, .fg-card.wide > [data-ok] { grid-column: 1 / -1; justify-self: center; }
+.fg-card.wide > .fg-side { grid-column: 1; grid-row: 3; min-height: 0; max-height: 100%; overflow-y: auto; }
+.fg-card.wide > .fg-panel { grid-column: 2; grid-row: 3; min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 6px; }
+.fg-card.wide .fg-preview { width: 80px; height: 100px; }
+/* Onglet Profil */
+.fg-pf { display: grid; gap: 4px; }
+.fg-pf-id { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; font-size: 15px; }
+.fg-pf-id small { display: block; color: var(--text-2); font-weight: 400; font-size: 12px; }
+.fg-pf h4 { display: flex; justify-content: space-between; align-items: center; }
+.fg-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; margin: 6px 0; }
+.fg-tile { border: 2px solid var(--border); border-radius: 8px; background: var(--surface-2); padding: 6px 10px; display: grid; gap: 1px; }
+.fg-tile small { color: var(--text-2); font-size: 11px; }
+.fg-tile b { font: 800 18px "Courier New", monospace; color: var(--text); }
+.fg-tile.risk { border-color: #e0553a; }
+.fg-worn .fg-slots { grid-template-columns: 1fr; margin-bottom: 0; }
+.fg-worn .fg-slot { min-height: 0; grid-template-columns: 1fr auto; align-items: center; }
+.fg-worn .fg-slot small { grid-column: 1 / -1; }
+.fg-worn .fg-slot b, .fg-worn .fg-slot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-height: 720px) {
+  .fg-card.wide .fg-preview { width: 48px; height: 60px; }
+  .fg-worn .fg-slots { gap: 4px; }
+  .fg-worn .fg-slot { padding: 2px 8px; gap: 0 6px; }
+  .fg-card.wide { padding-top: 12px; padding-bottom: 12px; gap: 6px; }
+}
 .fg-ctabs { justify-content: center; margin: 0; padding-bottom: 6px; }
 .fg-look { display: grid; gap: 10px; width: 100%; }
 .fg-look[hidden], .fg-panel[hidden] { display: none; }
@@ -221,4 +251,9 @@
 .fg-pick small { display: block; color: var(--text-2); font-size: 11px; }
 .fg-pick img { width: 40px; height: 40px; image-rendering: pixelated; border-radius: 6px; object-fit: contain; background: #3a3345; }
 .fg-bag b { background: #231a10; color: #ffd37a; border-radius: 8px; padding: 0 5px; }
-@media (max-width: 640px) { .fg-slots { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) {
+  .fg-card.wide { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+  .fg-card.wide > .fg-side { grid-row: 3; max-height: none; }
+  .fg-card.wide > .fg-panel { grid-column: 1; grid-row: 4; }
+  .fg-worn .fg-slots { grid-template-columns: repeat(2, 1fr); }
+}

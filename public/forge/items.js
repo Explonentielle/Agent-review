@@ -181,7 +181,7 @@
           <div><b>${esc(item.name)}</b>${count(item.id) > 1 ? ` <em>×${count(item.id)}</em>` : ""} ${isNew ? '<span class="fg-new">nouveau</span>' : ""}<small>${tag(item.rarity)} ${PART_NAME[item.part] ?? ""}</small><small>${sources(item.id)}</small></div>
           <button type="button" class="fg-mini" data-it-${worn ? "unequip" : "equip"}="${worn ? item.part : esc(item.id)}">${worn ? "Retirer" : "Équiper"}</button></div>`;
       }).join("");
-      return `${slotsHtml(cat)}<div class="fg-prog">${progress}</div><div class="fg-fchips">${filters}</div>
+      return `<div class="fg-prog">${progress}</div><div class="fg-fchips">${filters}</div>
         <div class="fg-igrid">${cards || `<p class="fg-note">Rien ici pour l'instant. Les objets s'obtiennent en forgeant des pièces, en faisant relire et fusionner tes pièces (butin aléatoire), chez le marchand, ou par échange.</p>`}</div>`;
     }
 
@@ -201,6 +201,15 @@
         ${targetRarity ? `<h4>Je reçois (${esc(rarityName(targetRarity).toLowerCase())})</h4><div class="fg-igrid">${want}</div>` : ""}
         <div class="fg-inline"><button type="button" class="fg-btn" data-it-trade ${check.ok ? "" : "disabled"}>Échanger</button>${check.ok || !ui.give.length ? "" : `<span class="fg-note">${esc(check.why)}</span>`}</div>`;
     }
+
+    /** Avancement de la collection : objets différents possédés sur le total du catalogue. */
+    function collection() {
+      const all = [...catalog().values()];
+      return { owned: all.filter((i) => owns(i.id)).length, total: all.length };
+    }
+
+    /** Ce que le forgeron porte, emplacement par emplacement : affiché à côté de son aperçu, sur les onglets du profil. */
+    const equippedHtml = () => slotsHtml(catalog());
 
     /** Contenu des onglets « Inventaire » et « Échange » de la page du personnage. */
     function panelHtml(tab) {
@@ -243,7 +252,7 @@
     const freshCount = () => save().fresh.length;
     function markSeen() { save().fresh = []; }
 
-    return { catalog, migrate, count, owns, isEquipped, add, equip, unequip, look, claim, tradeValidity, trade, thumb, panelHtml, onClick, freshCount, markSeen, rarityName, color, ui };
+    return { catalog, migrate, count, owns, isEquipped, add, equip, unequip, look, claim, tradeValidity, trade, thumb, panelHtml, equippedHtml, collection, onClick, freshCount, markSeen, rarityName, color, ui };
   }
 
   window.ForgeItems = { create, RARITIES, NEXT, PART_NAME, TRADE_COUNT };
