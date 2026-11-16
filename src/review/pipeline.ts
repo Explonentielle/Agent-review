@@ -5,7 +5,7 @@ import { assertBudgetAvailable } from "../budget.js";
 import type { CostRepo } from "../db/costs.js";
 import type { ReviewRepo, ReviewRow } from "../db/reviews.js";
 import type { ForgeRegistry } from "../connectors/registry.js";
-import type { Ticket } from "../connectors/types.js";
+import type { ChangeRequest, ForgeConnector, Ticket } from "../connectors/types.js";
 import { errorMessage, log } from "../logger.js";
 import { loadSystemPrompt } from "../prompts.js";
 import { compileRules, type SettingsStore } from "../settings/store.js";
@@ -59,7 +59,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
     const [commits, statuses, issues] = await Promise.all([
       connector.getChangeRequestCommits(row.project_id, row.mr_iid),
       connector.getCheckStatuses(row.project_id, mr.headSha),
-      Promise.all(findLinkedIssueIids(mr).map((iid) => connector.getTicket(row.project_id, iid))),
+      fetchLinkedTickets(connector, row, mr),
     ]);
 
     const checkout = await workspace.checkoutChangeRequest(row.project_id, project.cloneUrl, row.mr_iid, mr.headSha, connector.changeRequestHeadRef(row.mr_iid));
@@ -76,7 +76,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
       prompt: buildReviewPrompt({
         project,
         mr,
-        issues: issues.filter((i): i is Ticket => i !== null),
+        issues,
         diffs,
         commits,
         statuses,
@@ -113,6 +113,26 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
   } finally {
     await cleanup?.();
   }
+}
+
+/**
+ * Tickets cités (`#N`) dans le titre ou la description de la MR, donnés à l'agent comme contexte.
+ * Un ticket supprimé ou inexistant (404, 410) n'est qu'une mention périmée : il est ignoré et tracé,
+ * il ne doit pas faire échouer la review. Toute autre erreur échoue en nommant le ticket concerné.
+ */
+async function fetchLinkedTickets(connector: ForgeConnector, row: ReviewRow, mr: ChangeRequest): Promise<Ticket[]> {
+  const tickets = await Promise.all(
+    findLinkedIssueIids(mr).map(async (iid) => {
+      try {
+        const ticket = await connector.getTicket(row.project_id, iid);
+        if (!ticket) log.warn("review.linked_ticket_missing", { reviewId: row.id, ticket: iid, reason: "supprimé ou inexistant, mention ignorée" });
+        return ticket;
+      } catch (err) {
+        throw new Error(`Impossible de lire le ticket #${iid} cité dans la MR !${row.mr_iid} : ${errorMessage(err)}`);
+      }
+    }),
+  );
+  return tickets.filter((t): t is Ticket => t !== null);
 }
 
 function requireResult(row: ReviewRow) {

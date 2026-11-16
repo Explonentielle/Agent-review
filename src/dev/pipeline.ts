@@ -125,7 +125,7 @@ async function runNewTicket(c: RunContext): Promise<void> {
     connector.getCurrentUser(),
     connector.getProtectedBranches(task.project_id),
   ]);
-  if (!issue) throw new Error(`Ticket #${task.issue_iid} introuvable`);
+  if (!issue) throw new Error(`Ticket #${task.issue_iid} introuvable : supprimé ou inexistant sur la forge`);
 
   // --- Branche -------------------------------------------------------------
   const wanted = renderTemplate(settings.templates.branch, { iid: issue.iid, title: issue.title, slug: slugify(issue.title) });
@@ -227,7 +227,7 @@ async function runFollowup(c: RunContext): Promise<void> {
     connector.getCurrentUser(),
     connector.getProtectedBranches(task.project_id),
   ]);
-  if (!issue) throw new Error(`Ticket #${task.issue_iid} introuvable`);
+  if (!issue) throw new Error(`Ticket #${task.issue_iid} introuvable : supprimé ou inexistant sur la forge`);
   if (mr.state !== "opened") throw new Error(`La MR !${mr.iid} n'est plus ouverte (${mr.state}) : reprise impossible`);
   if (mr.sourceBranch !== branch) throw new Error(`La MR !${mr.iid} ne part plus de « ${branch} » mais de « ${mr.sourceBranch} »`);
 
