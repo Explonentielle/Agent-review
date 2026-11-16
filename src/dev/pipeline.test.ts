@@ -137,6 +137,53 @@ describe.each(BACKENDS)("agent dev, de bout en bout, base %s (faux connecteur, v
     expect(h.remoteBranchSha(BRANCH)).toBe("");
   });
 
+  it("relance après un essai échoué qui a laissé sa branche (sans MR) : une nouvelle branche est créée au lieu de bloquer", async () => {
+    // Le premier essai a poussé sa branche puis a échoué avant la MR
+    h.connector.existingBranches.add(BRANCH);
+    const first = await newTask();
+    await h.tasks.update(first, { status: "error", branch: BRANCH, error: "création de la MR refusée" });
+
+    const runner = runnerThat((cwd) => writeFileSync(path.join(cwd, "app.js"), "export const x = 3;\n"));
+    const id = await newTask();
+    await runDevTask(id, deps(runner));
+
+    const task = (await h.tasks.get(id))!;
+    expect(task.error).toBeNull();
+    expect(task.status).toBe("mr_created");
+    expect(task.branch).toBe(`${BRANCH}-2`);
+    expect(h.remoteBranchSha(`${BRANCH}-2`)).not.toBe("");
+    expect(h.connector.createdChangeRequests[0]).toMatchObject({ sourceBranch: `${BRANCH}-2`, targetBranch: "develop" });
+    expect((await h.tasks.events(id)).map((e) => e.text)).toContain(`La branche « ${BRANCH} » existe déjà (essai précédent, sans MR) : nouvelle branche « ${BRANCH}-2 »`);
+    expect((await h.tasks.get(first))!.status).toBe("error"); // l'ancien essai n'est pas touché
+  });
+
+  it("la branche d'un essai précédent qui a déjà une MR reste refusée : c'est « Reprendre la MR » qu'il faut", async () => {
+    h.connector.existingBranches.add(BRANCH);
+    const first = await newTask();
+    await h.tasks.update(first, { status: "mr_created", branch: BRANCH, mr_iid: 5, mr_url: "https://forge.example/mr/5" });
+
+    const runner = runnerThat((cwd) => writeFileSync(path.join(cwd, "app.js"), "x\n"));
+    const id = await newTask();
+    await runDevTask(id, deps(runner));
+
+    expect((await h.tasks.get(id))!.error).toMatch(/existe déjà/);
+    expect(runner.requests).toHaveLength(0);
+  });
+
+  it("les neuf noms de branche sont pris : message clair, rien n'est poussé", async () => {
+    const first = await newTask();
+    await h.tasks.update(first, { status: "error", branch: BRANCH });
+    h.connector.existingBranches.add(BRANCH);
+    for (let n = 2; n <= 9; n++) h.connector.existingBranches.add(`${BRANCH}-${n}`);
+
+    const runner = runnerThat(() => undefined);
+    const id = await newTask();
+    await runDevTask(id, deps(runner));
+
+    expect((await h.tasks.get(id))!.error).toMatch(/existent toutes déjà/);
+    expect(runner.requests).toHaveLength(0);
+  });
+
   it("reprise : nouveau commit par-dessus la branche de la MR, commentaire de rapport, jamais de réécriture", async () => {
     const first = runnerThat((cwd) => writeFileSync(path.join(cwd, "app.js"), "export const x = 2;\n"));
     const originId = await newTask();

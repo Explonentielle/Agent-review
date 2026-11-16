@@ -70,6 +70,7 @@
     if (hat === "helmet") { px(c, x + 3, yb - 20, 10, 4, "#9aa0ab"); px(c, x + 7, yb - 23, 2, 3, "#c0392b"); px(c, x + 3, yb - 17, 10, 1, "#5d626c"); }
     if (hat === "copper") { px(c, x + 3, yb - 20, 10, 4, "#c97c3a"); px(c, x + 3, yb - 17, 10, 1, "#8a4a1c"); px(c, x + 7, yb - 21, 2, 2, "#e8a05a"); }
     if (hat === "turban") { px(c, x + 3, yb - 21, 10, 5, "#2f9a6a"); px(c, x + 6, yb - 23, 4, 2, "#2f9a6a"); px(c, x + 7, yb - 20, 2, 1, "#ffd37a"); }
+    if (hat === "crown") { px(c, x + 3, yb - 21, 10, 3, "#f0d078"); px(c, x + 3, yb - 23, 2, 2, "#f0d078"); px(c, x + 7, yb - 24, 2, 3, "#f0d078"); px(c, x + 11, yb - 23, 2, 2, "#f0d078"); px(c, x + 7, yb - 20, 2, 1, "#c0392b"); }
     if (hat === "scribe") { px(c, x + 3, yb - 20, 10, 2, "#2d2a4a"); px(c, x + 5, yb - 23, 6, 3, "#2d2a4a"); }
     if (item === "hammer") { const up = frame ? 3 : 0; px(c, x + 13, yb - 12 - up, 1, 8, WOOD); px(c, x + 11, yb - 14 - up, 5, 3, "#9aa0ab"); }
     if (item === "book") { px(c, x + 11, yb - 8, 5, 4, "#7a2a20"); px(c, x + 12, yb - 7, 3, 2, "#f5e9c8"); }
@@ -84,6 +85,9 @@
     gardien: { hair: "#3a2a1c", tunic: "#3a5fa0", apron: "#9aa0ab", hat: "helmet", item: "shield" },
     scribe: { hair: "#8a5a3a", tunic: "#4a3a7a", apron: "#d8cfa8", hat: "scribe", item: "book", skin: "#d9a066" },
     marchand: { hair: "#222", tunic: "#2f7a5a", apron: "#d8b04a", hat: "turban", skin: "#d9a066" },
+    king: { hair: "#8a6a3a", tunic: "#7a1f2e", apron: "#f0d078", hat: "crown", skin: "#e0b088", beard: true },
+    queen: { hair: "#3a2a1c", tunic: "#4a2f8a", apron: "#e8e4da", hat: "crown", skin: "#f2c9a0" },
+    noble: { hair: "#222", tunic: "#2f6a8a", apron: "#c9c4b0", skin: "#d9a066" },
   };
 
   /** Sol, murs, tapis, torches et porte d'une salle de w x h tuiles. */
@@ -183,5 +187,128 @@
     px(c, x - 2, y + b, 5, 1, "#ffd37a"); px(c, x - 1, y + b + 1, 3, 1, "#ffd37a"); px(c, x, y + b + 2, 1, 1, "#ffd37a");
   }
 
-  window.ForgeSprites = { T, px, GRADE, TYPES, weapon, icon, person, LOOKS, room, furnace, anvil, board, stone, rack, stall, barrel, crate, sparks, sparkle, pointer };
+
+  /* ---------- salles décrites par des données : thèmes, décors, porte du fond ---------- */
+  const THEMES = {
+    forge: { f1: "#4b4452", f2: "#453e4c", spot: "#3b3542", w1: "#2b2732", w2: "#1d1a22", trim: null },
+    castle: { f1: "#6b708a", f2: "#626780", spot: "#565a72", w1: "#3a3f58", w2: "#2a2e44", trim: "#c9a35b" },
+    tavern: { f1: "#7a5530", f2: "#704e2c", spot: "#5e3f22", w1: "#4a3320", w2: "#33220f", trim: "#a06a2c" },
+  };
+  /** Sol et murs d'une salle (sans tapis ni porte : ils viennent des objets de la salle). */
+  function roomShell(c, t, w, h, theme) {
+    const p = THEMES[theme] || THEMES.forge;
+    for (let y = 3; y < h - 1; y++) for (let x = 0; x < w; x++) {
+      px(c, x * T, y * T, T, T, (x + y) % 2 ? p.f1 : p.f2);
+      if ((x * 7 + y * 13) % 11 === 0) px(c, x * T + 4, y * T + 5, 3, 2, p.spot);
+    }
+    for (let y = 0; y < 3; y++) for (let x = 0; x < w; x++) {
+      px(c, x * T, y * T, T, T, p.w1); px(c, x * T, y * T + T - 1, T, 1, p.w2); px(c, x * T + (y % 2 ? 8 : 0), y * T, 1, T - 1, p.w2);
+    }
+    if (p.trim) { px(c, 0, 3 * T - 3, w * T, 2, p.trim); px(c, 0, 3 * T - 1, w * T, 1, p.w2); }
+    for (let x = 0; x < w; x++) px(c, x * T, (h - 1) * T, T, T, p.w1);
+  }
+  /** Porte de deux tuiles dans le mur du bas. */
+  function doorBottom(c, tx, h = 15) {
+    const dx = tx, y = (h - 1) * T;
+    px(c, dx * T - 4, y - 4, 2 * T + 8, T + 4, "#3a2a1c"); px(c, dx * T, y, 2 * T, T, "#7a4a1c"); px(c, dx * T + T - 1, y, 2, T, "#4a2a10"); px(c, dx * T + 4, y + 8, 3, 3, "#ffd37a");
+    px(c, dx * T, y - 2, 2 * T, 2, "#ffe9a0");
+  }
+  /** Porte magique dans le mur du fond de la forge, qui mène à une salle (2 x 2 tuiles à partir de (tx, ty)). */
+  function hubDoor(c, tx, ty, t = 0) {
+    const x = tx * T, y = ty * T;
+    px(c, x, y, 32, 32, "#6e6a7a"); px(c, x + 2, y + 2, 28, 30, "#4a4756"); px(c, x + 5, y + 6, 22, 26, "#1b1430");
+    px(c, x + 3, y, 26, 4, "#8a8698"); px(c, x + 11, y - 2, 10, 3, "#a9a6b4");
+    for (let i = 0; i < 4; i++) { const f = Math.floor(t * 3 + i) % 3; px(c, x + 8 + i * 5, y + 9 + f * 6, 2, 3, "#8a6aff"); px(c, x + 10 + i * 4, y + 12 + ((f + 1) % 3) * 5, 1, 2, "#c4b0ff"); }
+    c.fillStyle = "rgba(138,106,255,.10)"; c.beginPath(); c.arc(x + 16, y + 22, 26, 0, Math.PI * 2); c.fill();
+  }
+
+  const CLOTH = {
+    red: ["#7a2a3a", "#9a3a4c", "#f0d078"], blue: ["#2a3f7a", "#3a56a0", "#f0d078"], green: ["#2a6a4a", "#3a8a60", "#f0d078"],
+    purple: ["#5a2a7a", "#7a3aa0", "#f0d078"], gold: ["#b8903a", "#d8b04a", "#fff0b0"],
+  };
+  const OBJECT_NAME = { throne: "Trône", statue: "Statue", table: "Table", chest: "Coffre", window: "Fenêtre", bookshelf: "Bibliothèque" };
+
+  /** Tapis : posé au sol, sous les meubles. */
+  function carpet(c, tx, ty, w, h, color) {
+    const [a, b, e] = CLOTH[color] || CLOTH.red, X = tx * T, Y = ty * T, Wd = w * T, Hd = h * T;
+    px(c, X, Y, Wd, Hd, a); px(c, X + 3, Y + 3, Wd - 6, Hd - 6, b);
+    px(c, X, Y, Wd, 2, e); px(c, X, Y + Hd - 2, Wd, 2, e);
+    for (let i = 0; i < w * 2; i++) px(c, X + 2 + i * 8, Y + Hd, 3, 2, e);
+  }
+  function pillar(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    px(c, x + 2, y + 27, 12, 5, "#8a8794"); px(c, x + 3, y + 5, 10, 22, "#a9a6b4"); px(c, x + 10, y + 5, 3, 22, "#8a8794"); px(c, x + 4, y + 5, 2, 22, "#c8c5d2");
+    px(c, x + 1, y + 1, 14, 5, "#b9b6c4"); px(c, x + 1, y + 5, 14, 1, "#8a8794");
+  }
+  function statue(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    px(c, x + 2, y + 22, 12, 10, "#7d7a88"); px(c, x + 2, y + 22, 12, 2, "#9a97a6"); px(c, x + 5, y + 9, 6, 13, "#a9a6b4"); px(c, x + 9, y + 9, 2, 13, "#8a8794");
+    px(c, x + 6, y + 3, 5, 6, "#b9b6c4"); px(c, x + 3, y + 10, 3, 8, "#a9a6b4"); px(c, x + 11, y + 10, 3, 8, "#8a8794");
+  }
+  function throne(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    px(c, x + 4, y, 24, 22, "#c9a35b"); px(c, x + 8, y + 4, 16, 16, "#7a2a3a"); px(c, x + 10, y + 6, 12, 12, "#9a3a4c");
+    px(c, x + 4, y - 3, 4, 4, "#f0d078"); px(c, x + 14, y - 5, 4, 6, "#f0d078"); px(c, x + 24, y - 3, 4, 4, "#f0d078");
+    px(c, x + 2, y + 16, 5, 14, "#c9a35b"); px(c, x + 25, y + 16, 5, 14, "#c9a35b");
+    px(c, x + 6, y + 20, 20, 8, "#7a2a3a"); px(c, x + 6, y + 20, 20, 2, "#b04a5c"); px(c, x + 2, y + 28, 28, 4, "#8a8794");
+  }
+  function table(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    px(c, x + 3, y + 22, 4, 10, "#5a3a1c"); px(c, x + 41, y + 22, 4, 10, "#5a3a1c");
+    px(c, x, y + 6, 48, 13, "#8a5a2c"); px(c, x, y + 6, 48, 2, "#a06a2c"); px(c, x, y + 19, 48, 4, "#5a3a1c");
+    px(c, x + 8, y + 9, 5, 4, "#d8c48a"); px(c, x + 24, y + 8, 3, 5, "#9aa0ab"); px(c, x + 34, y + 8, 3, 5, "#9aa0ab");
+  }
+  function chair(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    px(c, x + 3, y + 1, 10, 8, "#6a4220"); px(c, x + 3, y + 8, 10, 4, "#8a5a2c"); px(c, x + 3, y + 12, 2, 4, "#5a3a1c"); px(c, x + 11, y + 12, 2, 4, "#5a3a1c");
+  }
+  function chest(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    px(c, x + 1, y + 6, 14, 10, "#8a5a2c"); px(c, x + 1, y + 3, 14, 4, "#a06a2c"); px(c, x + 1, y + 6, 14, 1, "#5a3a1c");
+    px(c, x + 3, y + 3, 2, 13, "#c9a35b"); px(c, x + 11, y + 3, 2, 13, "#c9a35b"); px(c, x + 7, y + 7, 2, 3, "#ffd37a");
+  }
+  function banner(c, tx, ty, color) {
+    const [a, b, e] = CLOTH[color] || CLOTH.red, x = tx * T, y = ty * T;
+    px(c, x + 1, y + 1, 14, 2, "#c9a35b");
+    px(c, x + 3, y + 3, 10, 19, a); px(c, x + 4, y + 22, 8, 2, a); px(c, x + 6, y + 24, 4, 3, a); px(c, x + 3, y + 3, 3, 19, b);
+    px(c, x + 7, y + 8, 2, 9, e); px(c, x + 5, y + 11, 6, 2, e);
+  }
+  function windowSprite(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    px(c, x + 2, y + 1, 28, 31, "#c9a35b"); px(c, x + 4, y + 3, 24, 28, "#16204a");
+    px(c, x + 8, y + 7, 2, 2, "#fff"); px(c, x + 20, y + 12, 2, 2, "#fff"); px(c, x + 13, y + 20, 1, 1, "#cfd6e0"); px(c, x + 24, y + 6, 1, 1, "#cfd6e0");
+    px(c, x + 17, y + 7, 6, 6, "#f5e9c8"); px(c, x + 19, y + 7, 4, 6, "#16204a");
+    px(c, x + 15, y + 3, 2, 28, "#5a4a2a"); px(c, x + 4, y + 16, 24, 2, "#5a4a2a");
+  }
+  function bookshelf(c, tx, ty) {
+    const x = tx * T, y = ty * T, cols = ["#8a3b3b", "#3b6a8a", "#4a8a4a", "#c9a35b", "#6a3b8a", "#b07a3a"];
+    px(c, x, y, 32, 32, "#5a3a1c"); px(c, x + 2, y + 2, 28, 28, "#3e2a18");
+    for (let s = 0; s < 3; s++) {
+      const sy = y + 3 + s * 9;
+      for (let i = 0; i < 9; i++) { const hgt = 5 + ((i * 5 + s * 3 + tx) % 3); px(c, x + 3 + i * 3, sy + (8 - hgt), 2, hgt, cols[(i + s * 2 + tx) % cols.length]); }
+      px(c, x + 2, sy + 8, 28, 1, "#7a4a1c");
+    }
+  }
+  /** Dessine un objet de salle (voir src/rooms/catalog.ts). Un type inconnu devient une caisse : jamais d'erreur. */
+  function drawObject(c, o, t = 0) {
+    const w = o.w || 1, h = o.h || 1;
+    switch (o.type) {
+      case "carpet": return carpet(c, o.x, o.y, w, h, o.color);
+      case "pillar": return pillar(c, o.x, o.y);
+      case "statue": return statue(c, o.x, o.y);
+      case "throne": return throne(c, o.x, o.y);
+      case "table": return table(c, o.x, o.y);
+      case "chair": return chair(c, o.x, o.y);
+      case "chest": return chest(c, o.x, o.y);
+      case "barrel": return barrel(c, o.x, o.y);
+      case "crate": return crate(c, o.x, o.y);
+      case "torch": return torch(c, o.x, o.y, t + o.x * 0.3);
+      case "banner": return banner(c, o.x, o.y, o.color);
+      case "window": return windowSprite(c, o.x, o.y);
+      case "bookshelf": return bookshelf(c, o.x, o.y);
+      default: return crate(c, o.x, o.y);
+    }
+  }
+
+  window.ForgeSprites = { T, px, GRADE, TYPES, weapon, icon, person, LOOKS, room, roomShell, doorBottom, hubDoor, drawObject, OBJECT_NAME, torch, furnace, anvil, board, stone, rack, stall, barrel, crate, sparks, sparkle, pointer };
 })();

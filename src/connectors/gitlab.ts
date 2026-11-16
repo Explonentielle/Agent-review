@@ -100,6 +100,9 @@ export const toCommit = (c: GitlabCommit): Commit => ({ shortId: c.short_id, tit
 export const toCheckStatus = (s: GitlabCommitStatus): CheckStatus => ({ name: s.name, status: s.status });
 export const toBranch = (b: GitlabBranch): Branch => ({ name: b.name, isDefault: b.default, isProtected: b.protected });
 
+/** Préfixes de brouillon reconnus par GitLab dans le titre d'une MR. */
+const DRAFT_TITLE = /^\s*(?:\[(?:draft|wip)\]|\((?:draft|wip)\)|(?:draft|wip):)\s*/i;
+
 // --- Connecteur ---------------------------------------------------------------------
 
 /** Connecteur GitLab (API v4) : enveloppe `GitlabClient` et traduit ses réponses. */
@@ -246,5 +249,18 @@ export class GitlabConnector implements ForgeConnector {
 
   async approveChangeRequest(projectId: number, iid: number, headSha: string): Promise<void> {
     await this.client.approveMergeRequest(projectId, iid, headSha);
+  }
+
+  /** GitLab sort une MR du brouillon en retirant « Draft: » (ou [Draft], (Draft), WIP:) du titre. */
+  async markChangeRequestReady(projectId: number, iid: number): Promise<void> {
+    const mr = await this.client.getMergeRequest(projectId, iid);
+    if (!mr.draft) return;
+    const title = mr.title.replace(DRAFT_TITLE, "").trim();
+    const updated = await this.client.updateMergeRequestTitle(projectId, iid, title || mr.title);
+    if (updated.draft) throw new Error(`La MR !${iid} reste en brouillon : retire-lui son statut de brouillon chez GitLab`);
+  }
+
+  async mergeChangeRequest(projectId: number, iid: number, headSha: string): Promise<void> {
+    await this.client.mergeMergeRequest(projectId, iid, headSha);
   }
 }

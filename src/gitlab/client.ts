@@ -144,6 +144,16 @@ export class GitlabClient {
     return this.request("PUT", `/projects/${projectId}/issues/${issueIid}`, { add_labels: labels.join(",") });
   }
 
+  /** Change le titre d'une MR (c'est ainsi que GitLab sort une MR du brouillon : le préfixe « Draft: » disparaît). */
+  updateMergeRequestTitle(projectId: number, mrIid: number, title: string): Promise<GitlabMergeRequest> {
+    return this.request("PUT", `/projects/${projectId}/merge_requests/${mrIid}`, { title });
+  }
+
+  /** Fusionne la MR seulement si sa tête est toujours `sha` (GitLab répond 409 sinon) ; la branche source est conservée. */
+  mergeMergeRequest(projectId: number, mrIid: number, sha: string): Promise<GitlabMergeRequest> {
+    return this.request("PUT", `/projects/${projectId}/merge_requests/${mrIid}/merge`, { sha, should_remove_source_branch: false });
+  }
+
   /** Commentaires de la MR (généraux et sur le diff), dans l'ordre chronologique. */
   getMergeRequestNotes(projectId: number, mrIid: number): Promise<GitlabNote[]> {
     return this.getAll(`/projects/${projectId}/merge_requests/${mrIid}/notes?sort=asc&order_by=created_at`);

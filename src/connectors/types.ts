@@ -205,4 +205,11 @@ export interface ForgeConnector {
   commentOnChangeRequest(projectId: number, iid: number, body: string, kind: CommentKind): Promise<void>;
   /** Approuve seulement si la tête est toujours `headSha` : on n'approuve jamais du code non relu. */
   approveChangeRequest(projectId: number, iid: number, headSha: string): Promise<void>;
+  /** Passe une demande de fusion de brouillon à prête (écriture chez la forge). Sans effet si elle n'est pas en brouillon. */
+  markChangeRequestReady(projectId: number, iid: number): Promise<void>;
+  /**
+   * Fusionne la demande dans sa branche cible (écriture chez la forge), seulement si sa tête est toujours `headSha` : on ne fusionne jamais
+   * du code qui n'a pas été relu. Ne supprime pas la branche source.
+   */
+  mergeChangeRequest(projectId: number, iid: number, headSha: string): Promise<void>;
 }

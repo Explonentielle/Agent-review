@@ -72,12 +72,12 @@
         if (chosen) {
           try { ticketsHtml = ticketsSection(chosen, await projectTickets(chosen)); } catch (err) { ticketsHtml = ticketsSection(chosen, null, err.message); }
         }
-        const card = (w) => `<button type="button" class="fg-wcard ${w === chosen ? "sel" : ""}" data-fg-sel="${esc(w.key)}">${weaponImg(game.weaponType(w), w.grade)}<span><b>${esc(w.path)}</b>${gradeTag(w.grade)} <small>Niv. ${w.level}</small></span></button>`;
+        const card = (w) => `<button type="button" class="fg-wcard ${w === chosen ? "sel" : ""}" data-fg-sel="${esc(w.key)}" title="${esc(w.path)}">${weaponImg(game.weaponType(w), w.grade)}<span><b>${esc(w.path)}</b>${gradeTag(w.grade)} <small>Niv. ${w.level}</small></span></button>`;
         const detail = chosen ? (() => {
           const type = game.weaponType(chosen), lo = xpFloor(chosen.level), hi = xpFloor(chosen.level + 1);
           return `<div class="fg-wdetail"><div class="fg-wbig">${weaponImg(type, chosen.grade, "big")}</div><div>
             <h4>${esc(chosen.path)}</h4><div>${gradeTag(chosen.grade)} · Niveau ${chosen.level} · ${chosen.xp} XP</div>${pct(((chosen.xp - lo) * 100) / (hi - lo))}
-            <div class="fg-stats"><span><b>${chosen.forged}</b> pièces forgées</span><span><b>${chosen.reviews}</b> revues</span><span><b>${chosen.failures}</b> échecs</span><span><b>${chosen.blocked}</b> questions</span></div>
+            <div class="fg-stats"><span><b>${chosen.forged}</b> pièce${chosen.forged > 1 ? "s" : ""} forgée${chosen.forged > 1 ? "s" : ""}</span><span><b>${chosen.reviews}</b> revue${chosen.reviews > 1 ? "s" : ""}</span><span><b>${chosen.failures}</b> échec${chosen.failures > 1 ? "s" : ""}</span><span><b>${chosen.blocked}</b> question${chosen.blocked > 1 ? "s" : ""}</span></div>
             <p class="fg-note">${chosen.devEnabled ? "L'agent dev est autorisé sur ce projet." : "L'agent dev n'est pas encore autorisé sur ce projet : règle-le pour qu'on puisse y forger."}</p></div></div>
             <div class="fg-types"><span>Type d'arme</span>${S.TYPES.map((t) => `<button type="button" class="fg-type ${t.id === type ? "on" : ""}" data-fg-type="${t.id}" title="${esc(t.name)}">${weaponImg(t.id, chosen.grade)}</button>`).join("")}</div>
             <div class="fg-inline"><button type="button" class="fg-btn" data-fg-edit="${esc(chosen.key)}">Régler le projet</button></div>`;
@@ -105,7 +105,12 @@
           const action = active ? `<span class="fg-tag ok">L'apprenti y travaille</span>`
             : i.devReady ? `<button type="button" class="fg-btn" data-fg-launch="${esc(`${i.source}:${i.projectId}:${i.iid}`)}">${i.task ? "Relancer" : "Forger"}</button>`
               : `<button type="button" class="fg-btn ghost" data-fg-open="rack">Régler le projet</button>`;
-          return `<div class="fg-ticket"><div><b>#${i.iid} ${esc(i.title)}</b><small>${esc(i.projectPath)}${i.labels.length ? ` · ${esc(i.labels.slice(0, 3).join(", "))}` : ""}</small></div>${action}</div>`;
+          const mr = i.task && i.task.mrUrl ? ` · <a href="${esc(i.task.mrUrl)}" target="_blank" rel="noopener noreferrer">ouvrir la MR</a>` : "";
+          const why = i.task && i.task.status === "error" && i.task.error ? `<small class="fg-fail">Échec : ${esc(i.task.error)}</small>` : "";
+          const forged = i.task && i.task.mrUrl && (i.task.status === "mr_created" || i.task.status === "mr_updated");
+          const piece = forged ? `<button type="button" class="fg-btn" data-fg-piece="${i.task.id}" title="Faire relire la MR par le Gardien, puis la fusionner">Relire et fusionner</button>` : "";
+          const drop = i.task && !active ? `<button type="button" class="fg-btn ghost" data-fg-deltask="${i.task.id}" title="Supprime cet essai de l'outil (la branche ou la MR éventuelles restent chez la forge)">Supprimer l'essai</button>` : "";
+          return `<div class="fg-ticket"><div><b>#${i.iid} ${esc(i.title)}</b><small>${esc(i.projectPath)}${i.labels.length ? ` · ${esc(i.labels.slice(0, 3).join(", "))}` : ""}${mr}</small>${why}</div><div class="fg-inline">${piece}${action}${drop}</div></div>`;
         };
         return {
           title: "L'Apprenti : tes tickets",
@@ -217,6 +222,51 @@
       },
     },
 
+    /** La pièce : la MR de l'agent. Relecture par le Gardien, état de la CI, puis fusion dans la branche cible du projet. */
+    piece: {
+      wide: true,
+      async render({ taskId }) {
+        const p = await api(`/api/tasks/${taskId}/piece`);
+        const stateTag = p.mr.state === "merged" ? ["Fusionnée", "ok"] : p.mr.state === "closed" ? ["Fermée", "warn"] : p.mr.draft ? ["Brouillon", ""] : ["Prête", "ok"];
+        const rv = p.review;
+        const reviewLabel = !rv ? ["Pas encore relue", ""]
+          : ["queued", "running", "detected"].includes(rv.status) ? ["Le Gardien relit…", ""]
+            : rv.status === "needs_human" ? ["Des points à analyser", "warn"]
+              : rv.status === "error" ? ["La relecture a échoué", "warn"]
+                : rv.status === "dismissed" ? ["Relecture ignorée", "warn"] : ["Relecture OK", "ok"];
+        const running = rv && ["queued", "running", "detected"].includes(rv.status);
+        const stale = rv && !rv.current && !running;
+        const counts = rv && rv.verdict ? `${rv.blocking ? `<b>${rv.blocking}</b> bloquant${rv.blocking > 1 ? "s" : ""} · ` : ""}${rv.important ? `<b>${rv.important}</b> important${rv.important > 1 ? "s" : ""} · ` : ""}<b>${rv.suggestion}</b> suggestion${rv.suggestion > 1 ? "s" : ""}` : "";
+        const reviewBtn = p.mr.state !== "opened" ? ""
+          : running ? ""
+            : !rv || stale ? `<button type="button" class="fg-btn" data-fg-piece-review="${taskId}">Faire relire par le Gardien</button>`
+              : `<button type="button" class="fg-btn ghost" data-fg-piece-review="${taskId}" data-again="1">Relire à nouveau</button>`;
+        const ci = p.checks.total === 0 ? "Aucune intégration continue" : p.checks.failed ? `<span class="fg-fail">${p.checks.failed} en échec</span>` : p.checks.pending ? `${p.checks.pending} en cours` : "Verte";
+        const reasons = !p.readiness.ok && p.mr.state === "opened" ? `<ul class="fg-reasons">${p.readiness.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : "";
+        const mergeBox = p.mr.state === "merged" ? `<div class="fg-done"><b>Fusionnée dans ${esc(p.mr.targetBranch)}.</b> Le code est sur la branche principale du projet. La mise en ligne se fait ensuite comme d'habitude pour ce projet.</div>`
+          : p.mr.state === "closed" ? `<p class="fg-note">La MR est fermée : elle ne peut plus être fusionnée.</p>`
+            : `<div class="fg-inline"><button type="button" class="fg-btn" data-fg-piece-merge="${taskId}" data-target="${esc(p.mr.targetBranch)}" ${p.readiness.ok ? "" : "disabled"}>Fusionner dans ${esc(p.mr.targetBranch)}</button></div>${reasons}`;
+        return {
+          title: "La pièce forgée",
+          html: `<div class="fg-sc-card"><div class="fg-sc-card-head">Demande de fusion</div>
+              <h4>${esc(p.mr.title)}</h4>
+              <p><span class="fg-tag ${stateTag[1]}">${stateTag[0]}</span> <code>${esc(p.mr.sourceBranch)}</code> vers <code>${esc(p.mr.targetBranch)}</code> · <a href="${esc(p.mr.url)}" target="_blank" rel="noopener noreferrer">ouvrir la MR</a></p></div>
+            <h4>1. Relecture par le Gardien</h4>
+            <p><span class="fg-tag ${reviewLabel[1]}">${reviewLabel[0]}</span> ${stale ? `<span class="fg-note">La MR a changé depuis la dernière relecture.</span>` : ""}</p>
+            ${rv && rv.summary && !running ? `<p class="fg-note">${esc(rv.summary)}</p>` : ""}${counts ? `<p class="fg-note">${counts}</p>` : ""}
+            <div class="fg-inline">${reviewBtn}${rv ? `<button type="button" class="fg-btn ghost" data-fg-review="${rv.id}">Lire la revue complète</button>` : ""}</div>
+            <p class="fg-note">La relecture ne publie rien sur la MR : c'est un contrôle avant fusion.</p>
+            <h4>2. Intégration continue</h4><p>${ci}</p>
+            <h4>3. Fusion</h4>${mergeBox}`,
+          after: () => {
+            clearTimeout(current?.pollTimer);
+            if (running && current) current.pollTimer = setTimeout(() => { if (current?.id === "piece") render(); }, 3000);
+          },
+          before: () => clearTimeout(current?.pollTimer),
+        };
+      },
+    },
+
     /** Un apprenti au travail : ce qu'il fait, et un lien vers sa tâche. */
     worker: {
       async render({ worker }) {
@@ -251,7 +301,13 @@
       const [taskName, taskCls] = (t.task && taskTag[t.task.status]) || ["", ""];
       const active = t.task && (t.task.status === "running" || t.task.status === "queued");
       const forge = !active && data.devReady ? `<button type="button" class="fg-btn" data-fg-launchraw="${esc(`${w.source}:${w.projectId}:${t.iid}`)}">${t.task ? "Relancer" : "Forger"}</button>` : "";
-      return `<div class="fg-ticket"><div><b>#${t.iid} ${esc(t.title)}</b><small>${colName ? `<span class="fg-tag ${colCls}">${esc(colName)}</span> ` : ""}${taskName ? `<span class="fg-tag ${taskCls}">${esc(taskName)}</span> ` : ""}${esc(t.labels.slice(0, 3).join(", "))} · <a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">ouvrir</a></small></div>${forge}</div>`;
+      const failed = t.task && t.task.status === "error";
+      const why = failed && t.task.error ? `<small class="fg-fail">Échec : ${esc(t.task.error)}</small>` : "";
+      const mr = t.task && t.task.mrUrl ? ` · <a href="${esc(t.task.mrUrl)}" target="_blank" rel="noopener noreferrer">ouvrir la MR</a>` : "";
+      const forged = t.task && t.task.mrUrl && (t.task.status === "mr_created" || t.task.status === "mr_updated");
+      const piece = forged ? `<button type="button" class="fg-btn" data-fg-piece="${t.task.id}" title="Faire relire la MR par le Gardien, puis la fusionner">Relire et fusionner</button>` : "";
+      const drop = t.task && !active ? `<button type="button" class="fg-btn ghost" data-fg-deltask="${t.task.id}" title="Supprime cet essai de l'outil (la branche ou la MR éventuelles restent chez la forge)">Supprimer l'essai</button>` : "";
+      return `<div class="fg-ticket"><div><b>#${t.iid} ${esc(t.title)}</b><small>${colName ? `<span class="fg-tag ${colCls}">${esc(colName)}</span> ` : ""}${taskName ? `<span class="fg-tag ${taskCls}">${esc(taskName)}</span> ` : ""}${esc(t.labels.slice(0, 3).join(", "))} · <a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">ouvrir</a>${mr}</small>${why}</div>${forge || drop || piece ? `<div class="fg-inline">${piece}${forge}${drop}</div>` : ""}</div>`;
     };
     const rows = data.tickets.length ? data.tickets.slice(0, 15).map(row).join("") : `<p class="fg-note">Aucun ticket ouvert dans ce projet.</p>`;
     const more = data.tickets.length > 15 ? `<p class="fg-note">… et ${data.tickets.length - 15} autres, dans l'onglet Tickets du tableau de bord.</p>` : "";
@@ -279,6 +335,52 @@
       A.sfx.fanfare();
       game.banner("L'apprenti file à l'enclume : il forge ton ticket.");
       game.refresh();
+    } catch (err) { game.banner(err.message); A.sfx.error(); }
+  }
+
+  /** Fait relire la pièce (la MR de l'agent) par le Gardien : aucun commentaire n'est publié. */
+  async function reviewPiece(taskId, again) {
+    try {
+      const out = await api(`/api/tasks/${taskId}/review`, again ? { again: true } : {});
+      A.sfx.select();
+      game.banner(out.already && !again ? "Cette version est déjà relue ou en cours de relecture." : "Le Gardien relit la pièce…");
+      game.refresh();
+      render();
+    } catch (err) { game.banner(err.message); A.sfx.error(); }
+  }
+
+  /** Fusionne la pièce dans la branche cible du projet, après confirmation. Le serveur revérifie toutes les règles. */
+  async function mergePiece(taskId, target) {
+    const ok = await ask({
+      title: `Fusionner dans ${target} ?`,
+      okLabel: "Fusionner",
+      html: `<p>La MR de l'agent est <b>fusionnée dans la branche <code>${esc(target)}</code></b> chez ta forge, avec le code que le Gardien a relu. La branche de l'agent n'est pas supprimée.</p>
+        <p class="note">Pour revenir en arrière, il faudra annuler la fusion chez ta forge. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p>`,
+    });
+    if (!ok) return;
+    try {
+      await api(`/api/tasks/${taskId}/merge`, {});
+      ticketCache.clear();
+      state.issues = null;
+      A.sfx.fanfare();
+      game.banner(`Pièce fusionnée dans ${target}.`);
+      game.refresh();
+      render();
+    } catch (err) { game.banner(err.message); A.sfx.error(); render(); }
+  }
+
+  /** Supprime un essai de l'agent (échec, annulation, MR déjà faite) : rien n'est touché chez la forge. */
+  async function deleteTask(id) {
+    const ok = await ask({ title: "Supprimer cet essai ?", okLabel: "Supprimer", html: "<p>L'essai et son journal sont supprimés de l'outil. <b>Rien n'est touché chez la forge</b> : si l'agent y a poussé une branche ou ouvert une MR, elles y restent.</p>" });
+    if (!ok) return;
+    try {
+      await api(`/api/tasks/${id}/delete`, {});
+      ticketCache.clear();
+      state.issues = null;
+      A.sfx.select();
+      game.banner("Essai supprimé.");
+      game.refresh();
+      render();
     } catch (err) { game.banner(err.message); A.sfx.error(); }
   }
 
@@ -375,6 +477,10 @@
     const by = (attr) => t.closest(`[${attr}]`);
     let el;
     if (current?.id === "scribe" && scribe.handleClick(ev)) return;
+    if ((el = by("data-fg-deltask"))) return deleteTask(el.dataset.fgDeltask);
+    if ((el = by("data-fg-piece-review"))) return reviewPiece(el.dataset.fgPieceReview, el.dataset.again === "1");
+    if ((el = by("data-fg-piece-merge"))) return el.disabled ? undefined : mergePiece(el.dataset.fgPieceMerge, el.dataset.target);
+    if ((el = by("data-fg-piece"))) { open("piece", { taskId: el.dataset.fgPiece }, game); return; }
     if ((el = by("data-fg-scribe"))) { if (el.dataset.fgScribe) scribe.focus(el.dataset.fgScribe); open("scribe", {}, game); return; }
     if ((el = by("data-fg-launchraw"))) {
       const [source, projectId, iid] = el.dataset.fgLaunchraw.split(":");

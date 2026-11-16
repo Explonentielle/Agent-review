@@ -76,6 +76,8 @@ export interface GithubPull {
   body: string | null;
   state: "open" | "closed";
   draft?: boolean;
+  /** Identifiant global de la PR, qu'exige l'API GraphQL (la sortie du brouillon n'existe pas en REST). */
+  node_id?: string;
   merged_at: string | null;
   html_url: string;
   user: GithubUser | null;

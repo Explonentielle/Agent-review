@@ -788,7 +788,7 @@ function taskCallout(t) {
       return `<div class="callout warn">${ICON.warn}<h3>L'agent a besoin d'informations</h3><p>Rien n'a été poussé. Complète le ticket (ou donne des consignes) puis relance.</p>
         ${res?.questions?.length ? `<ul>${res.questions.map((q) => `<li>${rich(q)}</li>`).join("")}</ul>` : ""}</div>`;
     case "error":
-      return `<div class="callout err">${ICON.err}<h3>La tâche a échoué</h3><pre>${esc(t.error)}</pre></div>`;
+      return `<div class="callout err">${ICON.err}<h3>La tâche a échoué</h3><pre>${esc(t.error)}</pre><p class="note">Tu peux <b>relancer l'agent</b> (si une branche d'un essai précédent existe encore sans MR, l'outil en prend une nouvelle) ou <b>supprimer cette tâche</b>, avec les boutons en bas de la page.</p></div>`;
     case "cancelled":
       return `<div class="callout info">${ICON.info}<h3>Tâche arrêtée</h3><p>Rien n'a été poussé.</p></div>`;
   }
@@ -840,6 +840,8 @@ async function showTask(id) {
       ` : ""}
       ${res && res.status === "blocked" ? `<section class="block"><h2>Ce que l'agent a compris</h2><div class="panel md">${md(res.summary)}</div></section>` : ""}
 
+      ${t.mr_iid && ["mr_created", "mr_updated"].includes(t.status) && !live ? `<section class="block"><h2>Relecture et fusion</h2><div class="panel" id="piece-box"><div class="note">Chargement…</div></div></section>` : ""}
+
       ${t.mr_iid && t.branch && !live ? `<section class="block"><h2>Reprendre avec des consignes</h2><div class="panel">
         <p>L'agent repart de la branche <code>${esc(t.branch)}</code> telle qu'elle est sur la forge (tes commits manuels compris), lit les commentaires de la MR, applique tes consignes, puis l'outil pousse <b>un nouveau commit</b> sur la même MR (jamais de --force) et y ajoute son rapport en commentaire. S'il se bloque, rien n'est poussé.</p>
         <textarea class="area" id="followup-text" placeholder="Ex. : ajoute les docblocks complets sur toutes les méthodes créées, aligne le style des accolades sur Model_Price_Rule, et contrôle réellement les plages annoncées dans la feuille Aide (adultes 0-99, stock max ≥ stock min)."></textarea>
@@ -852,6 +854,8 @@ async function showTask(id) {
       <a class="btn" href="${esc(t.issue_url)}" target="_blank" rel="noopener">Ouvrir le ticket ${ICON.ext}</a>
       ${live ? `<button class="btn danger" data-act="task-cancel">Arrêter l'agent</button>` : ""}
       <span class="spacer"></span>
+      ${!live && ["error", "cancelled", "blocked"].includes(t.status) ? `<button class="btn primary" data-act="task-relaunch" title="Crée une nouvelle tâche sur le même ticket, avec les mêmes consignes">Relancer l'agent</button>` : ""}
+      ${!live ? `<button class="btn danger" data-act="task-delete" title="Supprime la tâche et son journal de l'outil. La branche et la MR sur la forge ne sont pas touchées.">Supprimer cette tâche</button>` : ""}
       ${t.worktree_path && !live ? `<button class="btn ghost" data-act="task-cleanup" title="Supprime le dossier de travail local. La branche poussée sur la forge n'est pas touchée.">Nettoyer le dossier local</button>` : ""}
     </div>`;
 
@@ -860,6 +864,49 @@ async function showTask(id) {
   await pollEvents(true);
   refreshTasks();
   if (live) taskTimer = setTimeout(() => tickTask(id), 2500);
+  loadPiece(id);
+}
+
+/* La pièce (la MR de l'agent) : relecture par le Gardien, état de la CI, fusion dans la branche cible du projet. */
+let pieceTimer = null;
+function pieceHtml(p, taskId) {
+  const rv = p.review;
+  const running = rv && ["queued", "running", "detected"].includes(rv.status);
+  const stale = rv && !rv.current && !running;
+  const stateTag = p.mr.state === "merged" ? pill("green", "Fusionnée") : p.mr.state === "closed" ? pill("orange", "Fermée") : p.mr.draft ? pill("gray", "Brouillon") : pill("green", "Prête");
+  const reviewTag = !rv ? pill("gray", "Pas encore relue")
+    : running ? pill("accent", "Le Gardien relit…")
+      : rv.status === "needs_human" ? pill("orange", "Des points à analyser")
+        : rv.status === "error" ? pill("red", "La relecture a échoué")
+          : rv.status === "dismissed" ? pill("orange", "Relecture ignorée") : pill("green", "Relecture OK");
+  const counts = rv && rv.verdict ? ` · ${rv.blocking} bloquant${rv.blocking > 1 ? "s" : ""}, ${rv.important} important${rv.important > 1 ? "s" : ""}, ${rv.suggestion} suggestion${rv.suggestion > 1 ? "s" : ""}` : "";
+  const reviewBtn = p.mr.state !== "opened" || running ? ""
+    : !rv || stale ? `<button class="btn primary" data-act="piece-review">Faire relire par le Gardien</button>`
+      : `<button class="btn ghost" data-act="piece-review" data-again="1">Relire à nouveau</button>`;
+  const ci = p.checks.total === 0 ? "aucune intégration continue" : p.checks.failed ? `${p.checks.failed} en échec` : p.checks.pending ? `${p.checks.pending} en cours` : "verte";
+  const merge = p.mr.state === "merged" ? `<div class="callout ok">${ICON.ok}<h3>Fusionnée dans <code>${esc(p.mr.targetBranch)}</code></h3><p>Le code est sur la branche principale du projet. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p></div>`
+    : p.mr.state === "closed" ? `<p class="note">La MR est fermée : elle ne peut plus être fusionnée.</p>`
+      : `<button class="btn primary" data-act="piece-merge" data-target="${esc(p.mr.targetBranch)}" ${p.readiness.ok ? "" : "disabled"}>Fusionner dans ${esc(p.mr.targetBranch)}</button>
+         ${p.readiness.ok ? "" : `<ul class="note" style="margin:8px 0 0 18px">${p.readiness.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`}`;
+  return `<p>${stateTag} <code>${esc(p.mr.sourceBranch)}</code> vers <code>${esc(p.mr.targetBranch)}</code></p>
+    <p><b>1. Relecture</b> ${reviewTag}${esc(counts)} ${stale ? '<span class="note">La MR a changé depuis la dernière relecture.</span>' : ""}</p>
+    ${rv && rv.summary && !running ? `<p class="note">${esc(rv.summary)}</p>` : ""}
+    <div class="actions-inline">${reviewBtn}${rv ? `<a class="btn ghost" href="#reviews/${rv.id}">Lire la revue complète</a>` : ""}</div>
+    <p class="note">La relecture ne publie rien sur la MR : c'est un contrôle avant fusion.</p>
+    <p><b>2. Intégration continue</b> : ${ci}</p>
+    <p><b>3. Fusion</b></p>${merge}`;
+}
+async function loadPiece(taskId) {
+  clearTimeout(pieceTimer);
+  const box = document.getElementById("piece-box");
+  if (!box || state.taskId !== taskId) return;
+  try {
+    const p = await api(`/api/tasks/${taskId}/piece`);
+    box.innerHTML = pieceHtml(p, taskId);
+    if (p.review && ["queued", "running", "detected"].includes(p.review.status)) pieceTimer = setTimeout(() => loadPiece(taskId), 3000);
+  } catch (err) {
+    box.innerHTML = `<p class="note">${esc(err.message)}</p>`;
+  }
 }
 
 async function pollEvents(reset) {
@@ -1784,6 +1831,45 @@ document.addEventListener("click", async (e) => {
     toast("Reprise lancée.");
     refreshHeader();
     return go(`#dev/${res.id}`);
+  }
+  if (act === "piece-review") {
+    try {
+      await api(`/api/tasks/${state.taskId}/review`, t.dataset.again === "1" ? { again: true } : {});
+      toast("Le Gardien relit la pièce…");
+    } catch (err) { toast(err.message, true); }
+    return loadPiece(state.taskId);
+  }
+  if (act === "piece-merge") {
+    const target = t.dataset.target;
+    if (!(await ask({ title: `Fusionner dans ${target} ?`, html: `<p>La MR de l'agent est <b>fusionnée dans la branche <code>${esc(target)}</code></b> chez ta forge, avec le code que le Gardien a relu. La branche de l'agent n'est pas supprimée.</p><p class="note">Pour revenir en arrière, il faudra annuler la fusion chez ta forge. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p>`, okLabel: "Fusionner" }))) return;
+    try {
+      await api(`/api/tasks/${state.taskId}/merge`, {});
+      toast("Pièce fusionnée.");
+      state.issues = null;
+    } catch (err) { toast(err.message, true); }
+    return loadPiece(state.taskId);
+  }
+  if (act === "task-relaunch") {
+    const task = await api(`/api/tasks/${state.taskId}`).catch((err) => { toast(err.message, true); return null; });
+    if (!task) return;
+    if (!(await ask({ title: `Relancer l'agent sur #${task.issue_iid} ?`, html: "<p>Une nouvelle tâche démarre sur le même ticket, avec les mêmes consignes. Si la branche d'un essai précédent existe encore chez la forge sans MR, l'outil crée une nouvelle branche (suffixe -2, -3...) sans toucher à l'ancienne.</p>", okLabel: "Relancer" }))) return;
+    try {
+      const { id } = await api("/api/tasks", { source: task.source, projectId: task.project_id, issueIid: task.issue_iid, extraInstructions: task.extra_instructions || "" });
+      toast("Agent relancé.");
+      state.issues = null;
+      refreshHeader();
+      return go(`#dev/${id}`);
+    } catch (err) { return toast(err.message, true); }
+  }
+  if (act === "task-delete") {
+    if (!(await ask({ title: "Supprimer cette tâche ?", html: "<p>La tâche, son journal et le dossier de travail local sont supprimés de l'outil. <b>Rien n'est touché chez la forge</b> : si l'agent a poussé une branche ou ouvert une MR, ils restent là-bas, à supprimer chez la forge si tu n'en veux plus.</p>", okLabel: "Supprimer" }))) return;
+    try {
+      await api(`/api/tasks/${state.taskId}/delete`, {});
+      toast("Tâche supprimée.");
+      state.issues = null;
+      refreshHeader();
+      return go("#dev");
+    } catch (err) { return toast(err.message, true); }
   }
   if (act === "task-cleanup") {
     if (!(await ask({ title: "Nettoyer le dossier local ?", html: "<p>Le dossier de travail de l'agent est supprimé de ta machine. La branche et la MR sur la forge ne sont pas touchées, mais tu ne pourras plus reprendre la session de l'agent.</p>", okLabel: "Nettoyer" }))) return;

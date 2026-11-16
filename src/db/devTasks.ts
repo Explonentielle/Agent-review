@@ -160,6 +160,32 @@ export function createDevTaskRepo(db: Db, workspaceId: number) {
     },
 
     /**
+     * Tous les essais de l'agent sur un ticket, du plus ancien au plus récent.
+     * @returns Les tâches de l'espace pour ce ticket.
+     */
+    listForIssue(source: ForgeKind, projectId: number, issueIid: number): Promise<DevTaskRow[]> {
+      return db.all<DevTaskRow>("SELECT * FROM dev_tasks WHERE workspace_id = ? AND source = ? AND project_id = ? AND issue_iid = ? ORDER BY id", [workspaceId, source, projectId, issueIid]);
+    },
+
+    /**
+     * Supprime une tâche de l'espace avec son journal. Une tâche en attente ou en cours ne se supprime pas : on l'arrête d'abord. Les
+     * reprises qui s'y rattachaient perdent leur parent (leur propre rapport reste lisible). Rien n'est touché chez la forge.
+     * @param id Tâche à supprimer.
+     * @returns « deleted », « missing » (inconnue dans cet espace) ou « active » (en attente ou en cours : rien n'a été supprimé).
+     */
+    delete(id: number): Promise<"deleted" | "missing" | "active"> {
+      return db.transaction(async (tx) => {
+        const row = await tx.get<{ status: string }>("SELECT status FROM dev_tasks WHERE id = ? AND workspace_id = ?", [id, workspaceId]);
+        if (!row) return "missing";
+        if (row.status === "queued" || row.status === "running") return "active";
+        await tx.run("DELETE FROM dev_task_events WHERE task_id IN (SELECT id FROM dev_tasks WHERE id = ? AND workspace_id = ?)", [id, workspaceId]);
+        await tx.run("UPDATE dev_tasks SET parent_id = NULL WHERE parent_id = ? AND workspace_id = ?", [id, workspaceId]);
+        await tx.run("DELETE FROM dev_tasks WHERE id = ? AND workspace_id = ?", [id, workspaceId]);
+        return "deleted";
+      });
+    },
+
+    /**
      * Dernière tâche de l'espace par ticket, pour l'affichage dans l'onglet Tickets.
      * @returns Les tâches, par clé `source#projet#ticket`.
      */

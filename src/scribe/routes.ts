@@ -94,7 +94,7 @@ export function registerScribe(app: FastifyInstance, ctx: ScribeContext): void {
             url: t.url,
             updatedAt: t.updatedAt,
             column: ctx.classify(t.labels, settings.workflow),
-            task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url } : null,
+            task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, error: task.error ? task.error.slice(0, 300) : null } : null,
           };
         }),
       };

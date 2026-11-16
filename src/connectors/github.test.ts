@@ -458,3 +458,27 @@ describe("GithubConnector : tickets et projets créés", () => {
     expect(count("createRepo")).toBe(0);
   });
 });
+
+describe("GithubConnector : fusion d'une pièce", () => {
+  it("sortie du brouillon : mutation GraphQL avec l'identifiant global ; sans effet si la PR n'est pas en brouillon", async () => {
+    const { connector, calls } = setup({ getRepoById: repo, getPull: { ...pull, draft: true, node_id: "PR_kwDOabc" }, markPullReady: undefined });
+    await connector.markChangeRequestReady(321, 7);
+    expect(calls.find(([n]) => n === "markPullReady")).toEqual(["markPullReady", "PR_kwDOabc"]);
+
+    const ready = setup({ getRepoById: repo, getPull: { ...pull, draft: false, node_id: "PR_x" } });
+    await ready.connector.markChangeRequestReady(321, 7);
+    expect(ready.count("markPullReady")).toBe(0);
+  });
+
+  it("une PR en brouillon sans identifiant global : message clair, aucun appel", async () => {
+    const { connector, count } = setup({ getRepoById: repo, getPull: { ...pull, draft: true } });
+    await expect(connector.markChangeRequestReady(321, 7)).rejects.toThrow("identifiant global");
+    expect(count("markPullReady")).toBe(0);
+  });
+
+  it("fusion : nom complet du dépôt et commit relu", async () => {
+    const { connector, calls } = setup({ getRepoById: repo, mergePull: undefined });
+    await connector.mergeChangeRequest(321, 7, "e".repeat(40));
+    expect(calls.find(([n]) => n === "mergePull")).toEqual(["mergePull", "acme/projet", 7, "e".repeat(40)]);
+  });
+});

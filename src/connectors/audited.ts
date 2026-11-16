@@ -30,6 +30,8 @@ const CONNECTOR_WRITES: Record<string, (args: unknown[], result: unknown) => Des
   },
   commentOnChangeRequest: ([projectId, iid, body, kind]) => ({ action: "change_request_comment", target: `${projectId}/${iid}`, detail: { kind, length: String(body).length } }),
   approveChangeRequest: ([projectId, iid, headSha]) => ({ action: "change_request_approve", target: `${projectId}/${iid}`, detail: { headSha } }),
+  markChangeRequestReady: ([projectId, iid]) => ({ action: "change_request_ready", target: `${projectId}/${iid}` }),
+  mergeChangeRequest: ([projectId, iid, headSha]) => ({ action: "change_request_merge", target: `${projectId}/${iid}`, detail: { headSha } }),
 };
 
 /**

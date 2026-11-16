@@ -47,6 +47,8 @@ export class FakeConnector implements ForgeConnector {
   addedLabels: Array<{ iid: number; labels: string[] }> = [];
   createdTickets: Array<{ projectId: number; input: NewTicket; iid: number }> = [];
   createdProjects: NewProject[] = [];
+  readied: number[] = [];
+  merges: Array<{ iid: number; headSha: string }> = [];
   /** Où l'on peut créer un projet (la forge de test en propose deux). */
   namespaces: Namespace[] = [
     { id: "1", path: "alex", name: "Alex Dev", kind: "personal" },
@@ -215,5 +217,23 @@ export class FakeConnector implements ForgeConnector {
 
   async approveChangeRequest(_projectId: number, iid: number, headSha: string): Promise<void> {
     this.approvals.push({ iid, headSha });
+  }
+
+  async markChangeRequestReady(_projectId: number, iid: number): Promise<void> {
+    this.throwIfFailing();
+    const cr = this.changeRequests.get(iid);
+    if (!cr) throw new Error(`Demande ${iid} inconnue du faux connecteur`);
+    this.readied.push(iid);
+    this.changeRequests.set(iid, { ...cr, draft: false, title: cr.title.replace(/^draft:\s*/i, "") });
+  }
+
+  async mergeChangeRequest(_projectId: number, iid: number, headSha: string): Promise<void> {
+    this.throwIfFailing();
+    const cr = this.changeRequests.get(iid);
+    if (!cr) throw new Error(`Demande ${iid} inconnue du faux connecteur`);
+    if (cr.draft) throw new Error("La demande est en brouillon : elle ne peut pas être fusionnée");
+    if (cr.headSha !== headSha) throw new Error("La tête de la demande a changé : fusion refusée");
+    this.merges.push({ iid, headSha });
+    this.changeRequests.set(iid, { ...cr, state: "merged" });
   }
 }

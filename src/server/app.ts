@@ -26,6 +26,8 @@ import { computeArmory } from "../game/armory.js";
 import { computeHero, REVIEW_DONE, TASK_FORGED } from "../game/hero.js";
 import { computePrestige, computeProgress } from "../game/progress.js";
 import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
+import { registerPiece } from "../dev/pieceRoutes.js";
+import { registerRooms } from "../rooms/routes.js";
 import { registerScribe } from "../scribe/routes.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
 import type { AgentRunner } from "../agent/runner.js";
@@ -423,13 +425,16 @@ export function buildServer(base: ServerDeps) {
           branchPreview: project?.devEnabled ? renderTemplate(settings.templates.branch, { iid: i.iid, title: i.title, slug: slugify(i.title) }) : null,
           baseBranch: project?.baseBranch ?? null,
           targetBranch: project?.targetBranch ?? null,
-          task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, mrIid: task.mr_iid } : null,
+          task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, mrIid: task.mr_iid, error: task.error ? task.error.slice(0, 300) : null } : null,
         };
       });
     } catch (err) {
       return fail(reply, err);
     }
   });
+
+  // --- Salles du monde de la forge (données validées, lecture seule) -------------------------------
+  registerRooms(app);
 
   // --- Scribe : tickets d'un projet, brouillons, création de tickets et de projets ------------------
   registerScribe(app, { deps, whoIs: (req) => req.session ?? base.local, fail, forgeOf, classify: classifyIssue, runner: base.scribeRunner });
@@ -543,6 +548,42 @@ export function buildServer(base: ServerDeps) {
       return fail(reply, err);
     }
   });
+
+  /**
+   * Supprime une tâche terminée (échec, annulation, question, MR créée) avec son journal et son dossier de travail local. Rien n'est touché
+   * chez la forge : la branche ou la MR éventuelles restent. Une tâche en attente ou en cours doit d'abord être arrêtée.
+   */
+  app.post<IdParams>("/api/tasks/:id/delete", async (req, reply) => {
+    try {
+      const id = Number(req.params.id);
+      const task = await deps.tasks.get(id);
+      if (!task) return reply.code(404).send({ error: "Tâche introuvable" });
+      if (task.status === "running" || task.status === "queued") return reply.code(409).send({ error: "L'agent travaille encore sur cette tâche : arrête-le d'abord" });
+      // Le dossier de travail est partagé par toutes les tâches d'une même branche : on ne le supprime que si aucune autre tâche en cours ne s'en sert
+      if (task.worktree_path) {
+        const shared = (await deps.tasks.list(500)).some((t) => t.id !== id && t.worktree_path === task.worktree_path && (t.status === "running" || t.status === "queued"));
+        if (!shared) {
+          try {
+            const { connector, workspace } = deps.forges.get(task.source);
+            const project = await connector.getProject(task.project_id);
+            await workspace.removeDevWorktree(task.project_id, project.cloneUrl, task.worktree_path);
+          } catch (err) {
+            // Un dossier déjà disparu ou une forge injoignable n'empêche pas de supprimer la tâche
+            log.warn("task.delete_worktree_failed", { taskId: id, error: errorMessage(err) });
+          }
+        }
+      }
+      const outcome = await deps.tasks.delete(id);
+      if (outcome === "active") return reply.code(409).send({ error: "L'agent travaille encore sur cette tâche : arrête-le d'abord" });
+      log.info("task.deleted", { taskId: id, status: task.status });
+      return { ok: true };
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
+
+  // --- La pièce : relecture par le Gardien, puis fusion --------------------------------------------
+  registerPiece(app, { deps, fail });
 
   // --- Reviews ---------------------------------------------------------------
 

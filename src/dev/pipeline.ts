@@ -5,7 +5,7 @@ import { agentRunConfig, ProcessCancelledError } from "../claude/process.js";
 import type { Config } from "../config.js";
 import { assertBudgetAvailable } from "../budget.js";
 import type { ForgeRegistry } from "../connectors/registry.js";
-import type { CurrentUser } from "../connectors/types.js";
+import type { CurrentUser, ForgeConnector } from "../connectors/types.js";
 import type { CostRepo } from "../db/costs.js";
 import type { DevTaskRepo, DevTaskRow } from "../db/devTasks.js";
 import { errorMessage, log } from "../logger.js";
@@ -128,12 +128,10 @@ async function runNewTicket(c: RunContext): Promise<void> {
   if (!issue) throw new Error(`Ticket #${task.issue_iid} introuvable`);
 
   // --- Branche -------------------------------------------------------------
-  const branch = renderTemplate(settings.templates.branch, { iid: issue.iid, title: issue.title, slug: slugify(issue.title) });
+  const wanted = renderTemplate(settings.templates.branch, { iid: issue.iid, title: issue.title, slug: slugify(issue.title) });
   const forbidden = [project.baseBranch, project.targetBranch, ...protectedBranches];
-  assertBranchAllowed(branch, { issueIid: issue.iid, forbidden });
-  if (await connector.branchExists(task.project_id, branch)) {
-    throw new Error(`La branche « ${branch} » existe déjà sur le dépôt distant : supprime-la, ou utilise « Reprendre avec des consignes » sur la tâche qui l'a créée`);
-  }
+  assertBranchAllowed(wanted, { issueIid: issue.iid, forbidden });
+  const branch = await freeBranch(c, connector, wanted, forbidden, issue.iid);
 
   const worktree = await workspace.createBranchWorktree(task.project_id, gproject.cloneUrl, project.baseBranch, branch);
   const baseSha = await workspace.headSha(worktree);
@@ -178,6 +176,38 @@ async function runNewTicket(c: RunContext): Promise<void> {
   await tasks.update(task.id, { status: "mr_created", mr_iid: mr.iid, mr_url: mr.url, files_changed: changed.length });
   await step(`MR Draft !${mr.iid} créée vers ${project.targetBranch}`);
   log.info("dev.done", { taskId: task.id, mr: mr.iid, files: changed.length, costUsd: out.costUsd });
+}
+
+/**
+ * Choisit la branche du ticket. Une branche déjà présente chez la forge est refusée : on ne touche jamais à la branche de quelqu'un d'autre.
+ * Exception : une branche laissée par un essai PRÉCÉDENT de l'outil sur ce même ticket, qui n'a jamais abouti à une MR (échec après le push,
+ * par exemple). Elle ne bloque plus la relance : l'outil prend la suivante libre (-2, -3...) sans rien modifier à l'ancienne, que la personne
+ * pourra supprimer chez la forge. Si une MR existe déjà pour cette branche, c'est « Reprendre la MR » qu'il faut utiliser.
+ * @param c Contexte de la tâche.
+ * @param connector Connecteur de la forge de la tâche.
+ * @param wanted Nom de branche calculé d'après le ticket.
+ * @param forbidden Branches interdites (base, cible, protégées).
+ * @param issueIid Numéro du ticket.
+ * @returns Le nom de branche à créer.
+ * @throws Error Si la branche appartient à quelqu'un d'autre ou à une MR existante, ou si les neuf noms sont pris.
+ */
+async function freeBranch(c: RunContext, connector: ForgeConnector, wanted: string, forbidden: string[], issueIid: number): Promise<string> {
+  const { task } = c;
+  if (!(await connector.branchExists(task.project_id, wanted))) return wanted;
+  const previous = (await c.deps.tasks.listForIssue(task.source, task.project_id, task.issue_iid)).filter((t) => t.id !== task.id && t.branch === wanted);
+  const abandoned = previous.length > 0 && previous.every((t) => !t.mr_iid);
+  if (!abandoned) {
+    throw new Error(`La branche « ${wanted} » existe déjà sur le dépôt distant : supprime-la, ou utilise « Reprendre avec des consignes » sur la tâche qui l'a créée`);
+  }
+  for (let n = 2; n <= 9; n++) {
+    const candidate = `${wanted}-${n}`;
+    assertBranchAllowed(candidate, { issueIid, forbidden });
+    if (!(await connector.branchExists(task.project_id, candidate))) {
+      await c.step(`La branche « ${wanted} » existe déjà (essai précédent, sans MR) : nouvelle branche « ${candidate} »`);
+      return candidate;
+    }
+  }
+  throw new Error(`Les branches « ${wanted} » à « ${wanted}-9 » existent toutes déjà sur le dépôt distant : supprime les anciens essais chez la forge`);
 }
 
 async function runFollowup(c: RunContext): Promise<void> {

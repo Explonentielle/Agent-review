@@ -160,4 +160,16 @@ describe.each(BACKENDS)("review, de bout en bout, base %s (faux connecteur, vrai
     expect((await h.reviews.get(id3))!.status).toBe("needs_human");
     expect(h.connector.approvals).toHaveLength(1);
   });
+
+  it("review de la MR de l'agent dev (la tienne) : même en mode « auto », jamais de commentaire ni d'approbation automatiques", async () => {
+    await h.settings.save({ ...(await h.settings.get()), actionMode: "auto" });
+    // La MR a été ouverte par l'utilisateur de l'outil (l'agent dev agit en son nom) : auteur = utilisateur de la forge
+    h.connector.changeRequests.set(7, { ...cr, author: h.connector.me });
+    const id = await newReview();
+    await runReview(id, deps(runnerReturning(reviewOk)));
+
+    expect((await h.reviews.get(id))!.status).toBe("auto_ok"); // la review est faite et lisible
+    expect(h.connector.postedComments).toEqual([]);
+    expect(h.connector.approvals).toEqual([]);
+  });
 });

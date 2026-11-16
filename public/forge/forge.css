@@ -75,8 +75,9 @@
 .fg-wicon { width: 48px; height: 48px; image-rendering: pixelated; background: #3a3345; border-radius: 6px; flex: none; }
 .fg-wicon.big { width: 96px; height: 96px; }
 .fg-weapons { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-bottom: 12px; }
-.fg-wcard { display: grid; grid-template-columns: 48px 1fr; gap: 10px; align-items: center; text-align: left; background: var(--surface-2); border: 2px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); cursor: pointer; font: inherit; }
+.fg-wcard { display: grid; grid-template-columns: 48px minmax(0, 1fr); min-width: 0; gap: 10px; align-items: center; text-align: left; background: var(--surface-2); border: 2px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); cursor: pointer; font: inherit; }
 .fg-wcard.sel { border-color: #c97c1a; box-shadow: 0 0 0 2px #c97c1a55; }
+.fg-wcard > span { min-width: 0; }
 .fg-wcard b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 12.5px "Courier New", monospace; }
 .fg-wdetail { display: grid; grid-template-columns: 110px 1fr; gap: 14px; align-items: center; margin: 8px 0; }
 .fg-wbig { display: grid; place-items: center; }
@@ -172,3 +173,17 @@
 .fg-md code { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 12.5px; }
 .fg-ft-prev { border: 2px solid var(--border); border-radius: 8px; padding: 4px 10px; margin: 5px 0; }
 .fg-ft-prev summary { cursor: pointer; font-weight: 700; font-size: 13.5px; }
+
+/* Changement de salle : fondu */
+.fg-canvas, .fg-labels { transition: opacity .3s ease; }
+.fg-stage.fg-fade .fg-canvas, .fg-stage.fg-fade .fg-labels { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .fg-canvas, .fg-labels { transition: none; } }
+
+/* Cause d'un échec d'un essai de l'agent */
+.fg-fail { color: #e0553a; margin-top: 3px; word-break: break-word; }
+.fg-ticket .fg-inline { margin: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+/* La pièce : raisons qui bloquent la fusion */
+.fg-reasons { margin: 6px 0 0 18px; padding: 0; font-size: 12.5px; color: var(--text-2); }
+.fg-reasons li { margin: 2px 0; }
+.fg-btn[disabled] { opacity: .5; cursor: not-allowed; }

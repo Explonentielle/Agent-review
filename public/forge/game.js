@@ -45,6 +45,7 @@
 
   const g = {
     root: null, stage: null, canvas: null, c: null, el: {},
+    roomId: "forge", rooms: { catalog: null, list: [], byId: new Map(), at: -999 }, deco: [], transition: false,
     running: false, raf: 0, last: 0, time: 0, poll: 0,
     save: loadSave(), data: { hero: null, armory: { weapons: [], loot: [] }, forges: [] }, firstRefresh: true, done: null,
     player: { tx: 12, ty: 11, x: 12 * T, y: 11 * T, dir: "up", frame: 0, moving: null, path: [] },
@@ -56,7 +57,7 @@
   const flag = (id) => g.data.hero?.quests.some((q) => q.id === id && q.done) ?? false;
   const lit = (kind) => g.data.forges.includes(kind);
   const hasLoot = () => g.data.armory.loot.length > 0 || g.save.sold.length > 0;
-  const modal = () => Boolean(g.dlg || g.popup || g.custom);
+  const modal = () => Boolean(g.dlg || g.popup || g.custom || g.transition);
 
   /* ---------- série, missions, prestige : ce qui donne envie de revenir (calculé par le serveur) ---------- */
   const progress = () => g.data.hero?.progress ?? null;
@@ -115,6 +116,10 @@
     add({ id: "guard", name: "Gardien des revues", verb: "Parler", tiles: [[6, 11]], z: 12 * T, lx: 6.5, ly: 10.35, when: () => flag("project"), draw: (c) => S.person(c, 6 * T, 11 * T, { ...S.LOOKS.gardien, dir: "right" }), interact: guardTalk });
     add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[15, 10]], z: 11 * T, lx: 15.5, ly: 9.35, when: () => flag("forge"), draw: (c) => S.person(c, 15 * T, 10 * T, { ...S.LOOKS.scribe, dir: "left" }), interact: scribeTalk });
     add({ id: "door", name: "Porte", verb: "Sortir", tiles: [[11, 14], [12, 14]], z: 0, lx: 12, ly: 13.7, always: true, decor: true, draw: () => undefined, interact: doorTalk });
+    hubRooms().forEach((room, i) => {
+      const x = HUB_SLOTS[i];
+      add({ id: "portal-" + room.id, portal: true, name: room.name, verb: "Entrer", tiles: [[x, 2], [x + 1, 2]], z: 3 * T, lx: x + 1, ly: 3.4, when: () => flag("forge"), draw: (c, t) => S.hubDoor(c, x, 1, t), interact: () => portalTalk(room) });
+    });
     return E;
   }
 
@@ -324,6 +329,99 @@
     await say("Marchand Sélim", [n ? "Des pièces forgées ? Montre-moi ça, je rachète tout !" : "Rien à vendre ? Reviens quand tes apprentis auront forgé, ou regarde mes tenues."]);
     openPopup("merchant");
   }
+
+  /* ---------- salles décrites par des données (public/rooms/*.json, validées par le serveur) ---------- */
+  /** Colonnes (gauche) des portes magiques du mur du fond de la forge : une par salle qui demande à y figurer, trois au plus. */
+  const HUB_SLOTS = [14, 16, 9];
+  const hubRooms = () => g.rooms.list.filter((r) => r.hub).slice(0, HUB_SLOTS.length);
+  const currentRoom = () => g.rooms.byId.get(g.roomId) ?? null;
+  const fillName = (text) => String(text).replaceAll("{name}", g.save.name || "forgeron");
+  const tilesOf = (x, y, w, h) => { const out = []; for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) out.push([i, j]); return out; };
+  const buildAll = () => (g.roomId === "forge" ? [...buildEntities(), ...workerEntities()] : buildRoomEntities());
+
+  /**
+   * Les entités d'une salle. Les décors sans effet (tapis, torches, bannières) n'en sont pas : ils n'occupent aucune case et ne cachent donc
+   * jamais un meuble ou un personnage dans la recherche de ce qui est devant soi ; ils sont dessinés à part (g.deco).
+   */
+  function buildRoomEntities() {
+    g.deco = [];
+    const room = currentRoom();
+    if (!room) return [];
+    const catalog = g.rooms.catalog.objects, E = [];
+    room.objects.forEach((o, i) => {
+      const spec = catalog[o.type];
+      if (!spec) return;
+      const w = spec.resizable ? (o.w ?? 1) : spec.w, h = spec.resizable ? (o.h ?? 1) : spec.h;
+      const readable = o.text !== undefined;
+      if (!spec.solid && !readable) { g.deco.push({ z: o.type === "carpet" ? -1 : (o.y + h) * T, draw: (c, t) => S.drawObject(c, o, t) }); return; }
+      const onWall = spec.where === "wall";
+      E.push({
+        id: "obj-" + i, always: true, solid: spec.solid, tiles: tilesOf(o.x, o.y, w, h), z: (o.y + h) * T,
+        ...(readable ? { name: S.OBJECT_NAME[o.type], verb: "Examiner", lx: o.x + w / 2, ly: onWall ? o.y + h + 0.4 : o.y - 0.35, interact: () => say("", [fillName(o.text)]) } : {}),
+        draw: (c, t) => S.drawObject(c, o, t),
+      });
+    });
+    for (const n of room.npcs) {
+      E.push({
+        id: "npc-" + n.id, always: true, solid: true, name: n.name, verb: "Parler", tiles: [[n.x, n.y]], z: (n.y + 1) * T, lx: n.x + 0.5, ly: n.y - 0.65,
+        draw: (c) => S.person(c, n.x * T, n.y * T, { ...(S.LOOKS[n.look] ?? S.LOOKS.brann), dir: n.dir }),
+        interact: () => say(n.name, n.lines.map(fillName)),
+      });
+    }
+    room.doors.forEach((d, i) => {
+      E.push({ id: "door-" + i, always: true, solid: true, decor: true, name: d.label, verb: "Sortir", tiles: [[d.x, 14], [d.x + 1, 14]], z: 0, lx: d.x + 1, ly: 13.7, draw: (c) => S.doorBottom(c, d.x, H), interact: () => doorTo(d) });
+    });
+    return E;
+  }
+
+  async function portalTalk(room) {
+    const answer = await choose("", "Une porte mène à « " + room.name + " ».", ["Entrer", "Rester"]);
+    if (answer === 0) enterRoom(room.id, null);
+  }
+  async function doorTo(d) {
+    if (d.to === "forge") return enterRoom("forge", null);
+    const name = g.rooms.byId.get(d.to)?.name ?? d.to;
+    const answer = await choose("", "Cette porte mène à « " + name + " ».", ["Passer", "Rester"]);
+    if (answer === 0) enterRoom(d.to, d.spawn ?? null);
+  }
+
+  /** Change de salle : fondu, nouvelle salle, arrivée à l'endroit prévu (sous la porte magique quand on revient dans la forge). */
+  async function enterRoom(id, spawn) {
+    if (g.transition) return;
+    const room = g.rooms.byId.get(id);
+    if (id !== "forge" && !room) { banner("Cette salle est introuvable."); return; }
+    const from = g.roomId;
+    g.transition = true; g.keys = []; g.player.path = [];
+    g.el.stage.classList.add("fg-fade");
+    await sleep(300);
+    g.roomId = id;
+    let tx, ty, dir;
+    if (id === "forge") {
+      const slot = hubRooms().findIndex((r) => r.id === from);
+      [tx, ty, dir] = slot >= 0 ? [HUB_SLOTS[slot], 3, "down"] : [12, 11, "up"];
+    } else {
+      [tx, ty] = spawn ?? room.spawn;
+      dir = "up";
+    }
+    Object.assign(g.player, { tx, ty, x: tx * T, y: ty * T, dir, moving: null, frame: 0, path: [] });
+    g.entities = buildAll();
+    A.sfx.open();
+    await sleep(120);
+    g.el.stage.classList.remove("fg-fade");
+    g.transition = false;
+    if (id !== "forge") banner(room.name);
+    g.canvas.focus({ preventScroll: true });
+  }
+
+  /** Les salles sont facultatives : si le serveur ne répond pas, la forge fonctionne seule. */
+  async function loadRooms() {
+    g.rooms.at = g.time;
+    try {
+      const out = await api("/api/rooms");
+      g.rooms = { catalog: out.catalog, list: out.rooms, byId: new Map(out.rooms.map((r) => [r.id, r])), at: g.time };
+    } catch { /* pas de salles */ }
+  }
+
   async function doorTalk() {
     const answer = await choose("", "La porte mène au tableau de bord classique.", ["Sortir de la forge", "Rester"]);
     if (answer === 0) go("#tickets");
@@ -338,7 +436,9 @@
       banner(`Forge hors ligne : ${err.message}`);
       return;
     }
-    g.entities = [...buildEntities(), ...workerEntities()];
+    if (!g.rooms.catalog || g.time - g.rooms.at > 30) await loadRooms();
+    if (g.roomId !== "forge" && !currentRoom()) await enterRoom("forge", null);
+    g.entities = buildAll();
     afterRefresh();
     renderHud();
     if (g.popup) window.ForgePopups.update();
@@ -346,7 +446,7 @@
   function afterRefresh() {
     const hero = g.data.hero;
     const doneNow = new Set(hero.quests.filter((q) => q.done).map((q) => q.id));
-    const visible = g.entities.filter((e) => !e.worker && !e.decor && isVisible(e));
+    const visible = g.roomId === "forge" ? g.entities.filter((e) => !e.worker && !e.decor && isVisible(e)) : [];
     if (g.firstRefresh) {
       for (const e of visible) if (!g.save.seen.includes(e.id)) g.save.seen.push(e.id);
       g.save.lastLevel = g.save.lastLevel || hero.level;
@@ -357,7 +457,7 @@
         const [tx, ty] = e.tiles[0];
         g.fx.push({ x: tx * T + 8, y: ty * T + 4, t0: g.time });
         A.sfx.spawn();
-        banner(`${e.name} est arrivé dans la forge.`);
+        banner(e.portal ? `Une porte s'est ouverte : ${e.name}.` : `${e.name} est arrivé dans la forge.`);
       }
       for (const q of hero.quests) if (doneNow.has(q.id) && !g.done.has(q.id)) { A.sfx.fanfare(); banner(`Quête accomplie : ${q.title} (+${q.xp} XP)`); }
       if (hero.level > g.save.lastLevel) { A.sfx.fanfare(); banner(`Niveau ${hero.level} : ${hero.title} !`); }
@@ -501,7 +601,7 @@
       g.lastFire = g.time;
       const furnaces = [["github", 4, 2], ["gitlab", 20, 2]].filter(([k]) => lit(k));
       const d = furnaces.length ? Math.min(...furnaces.map(([, x, y]) => Math.hypot(x - p.tx, y - p.ty))) : 99;
-      A.setFire(furnaces.length ? Math.max(0.1, 1 - d / 16) : 0);
+      A.setFire(g.roomId === "forge" && furnaces.length ? Math.max(0.1, 1 - d / 16) : 0);
     }
   }
 
@@ -530,11 +630,12 @@
 
   function draw() {
     const c = g.c, t = g.time, p = g.player;
-    S.room(c, t, W, H);
+    if (g.roomId === "forge") S.room(c, t, W, H); else S.roomShell(c, t, W, H, currentRoom()?.theme);
     const items = g.entities.filter(isVisible).map((e) => [e.z, () => e.draw(c, t)]);
+    for (const d of g.deco) items.push([d.z, () => d.draw(c, t)]);
     const aura = prestige()?.rank.aura;
     if (aura) items.push([p.y + T - 1, () => drawAura(c, p, aura, t)]);
-    if (claimable().length) items.push([99 * T, () => drawMarker(c, 12 * T - 2, 5, t)]);
+    if (g.roomId === "forge" && claimable().length) items.push([99 * T, () => drawMarker(c, 12 * T - 2, 5, t)]);
     items.push([p.y + T, () => S.person(c, p.x, p.y, { ...playerLook(), dir: p.dir, frame: p.frame })]);
     items.sort((a, b) => a[0] - b[0]).forEach((it) => it[1]());
     for (const f of g.fx) S.sparkle(c, f.x, f.y, (g.time - f.t0) / 1.1);
@@ -650,7 +751,7 @@
     g.canvas.addEventListener("click", onCanvasClick);
     g.stage.addEventListener("click", onStageClick);
     g.labelEls.clear();
-    g.entities = [...buildEntities(), ...workerEntities()];
+    g.entities = buildAll();
     renderHud();
   }
 
@@ -706,6 +807,7 @@
       g.canvas.focus({ preventScroll: true });
     },
     pause,
+    enter: (id) => enterRoom(id, null),
     debug: () => g,
   };
 })();

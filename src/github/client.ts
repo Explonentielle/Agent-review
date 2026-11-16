@@ -149,6 +149,24 @@ export class GithubClient {
     return this.request("POST", org !== undefined ? `/orgs/${org}/repos` : "/user/repos", repo);
   }
 
+  /** Fusionne la PR seulement si sa tête est toujours `sha` (GitHub répond 409 sinon). Fusion normale ; la branche source est conservée. */
+  mergePull(fullName: string, number: number, sha: string): Promise<unknown> {
+    return this.request("PUT", `/repos/${repoPath(fullName)}/pulls/${number}/merge`, { sha, merge_method: "merge" });
+  }
+
+  /** Sort une PR du brouillon : seule l'API GraphQL le permet. */
+  async markPullReady(nodeId: string): Promise<void> {
+    const url = this.baseUrl.endsWith("/api/v3") ? this.baseUrl.replace(/\/v3$/, "/graphql") : `${this.baseUrl}/graphql`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({ query: "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }", variables: { id: nodeId } }),
+    });
+    if (!res.ok) throw new GithubError("POST", "/graphql", res.status, await res.text());
+    const out = (await res.json()) as { errors?: Array<{ message: string }> };
+    if (out.errors?.length) throw new GithubError("POST", "/graphql", 422, out.errors.map((e) => e.message).join(" ; "));
+  }
+
   addAssignees(fullName: string, number: number, logins: string[]): Promise<unknown> {
     return this.request("POST", `/repos/${repoPath(fullName)}/issues/${number}/assignees`, { assignees: logins });
   }

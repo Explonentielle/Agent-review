@@ -365,6 +365,20 @@ export class GithubConnector implements ForgeConnector {
     await this.client.createReview(repo.full_name, iid, { event: "APPROVE", commit_id: headSha });
   }
 
+  /** Sort la PR du brouillon (API GraphQL). Sans effet si elle n'est pas en brouillon. */
+  async markChangeRequestReady(projectId: number, iid: number): Promise<void> {
+    const repo = await this.repo(projectId);
+    const pull = await this.client.getPull(repo.full_name, iid);
+    if (!pull.draft) return;
+    if (!pull.node_id) throw new Error(`La PR #${iid} n'a pas d'identifiant global : retire-lui son statut de brouillon chez GitHub`);
+    await this.client.markPullReady(pull.node_id);
+  }
+
+  async mergeChangeRequest(projectId: number, iid: number, headSha: string): Promise<void> {
+    const repo = await this.repo(projectId);
+    await this.client.mergePull(repo.full_name, iid, headSha);
+  }
+
   // --- Interne -------------------------------------------------------------------------
 
   private remember(repo: GithubRepo): GithubRepo {

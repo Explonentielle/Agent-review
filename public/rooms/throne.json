@@ -1,0 +1,78 @@
+{
+  "format": 1,
+  "id": "throne",
+  "name": "La salle du trône",
+  "theme": "castle",
+  "hub": true,
+  "spawn": [12, 12],
+  "objects": [
+    { "type": "carpet", "x": 10, "y": 5, "w": 4, "h": 9, "color": "red" },
+    { "type": "carpet", "x": 11, "y": 5, "w": 2, "h": 9, "color": "gold" },
+    { "type": "throne", "x": 11, "y": 3, "text": "Le trône est sculpté d'enclumes et de marteaux croisés. Il est étonnamment inconfortable." },
+
+    { "type": "window", "x": 1, "y": 1, "text": "Par la fenêtre, la fumée de ta forge monte au loin." },
+    { "type": "window", "x": 21, "y": 1, "text": "Dehors, la nuit tombe sur le royaume. Il reste de la place pour d'autres salles." },
+    { "type": "bookshelf", "x": 6, "y": 1, "text": "Des livres de comptes, des recettes de trempe, et un manuel : « Rédiger un bon ticket en dix lignes »." },
+    { "type": "bookshelf", "x": 16, "y": 1, "text": "Les chroniques du royaume. La dernière page est encore blanche : c'est à toi de l'écrire." },
+    { "type": "banner", "x": 9, "y": 0, "color": "red" },
+    { "type": "banner", "x": 11, "y": 0, "color": "gold" },
+    { "type": "banner", "x": 12, "y": 0, "color": "gold" },
+    { "type": "banner", "x": 14, "y": 0, "color": "red" },
+    { "type": "torch", "x": 4, "y": 2 },
+    { "type": "torch", "x": 9, "y": 2 },
+    { "type": "torch", "x": 14, "y": 2 },
+    { "type": "torch", "x": 19, "y": 2 },
+
+    { "type": "pillar", "x": 5, "y": 5 },
+    { "type": "pillar", "x": 5, "y": 9 },
+    { "type": "pillar", "x": 18, "y": 5 },
+    { "type": "pillar", "x": 18, "y": 9 },
+
+    { "type": "table", "x": 2, "y": 7, "text": "Un festin froid : du pain, du fromage et trois gobelets vides." },
+    { "type": "chair", "x": 2, "y": 9 },
+    { "type": "chair", "x": 4, "y": 9 },
+    { "type": "table", "x": 19, "y": 7, "text": "Des parchemins couverts de listes de tickets, classés par couleur." },
+    { "type": "chair", "x": 19, "y": 9 },
+    { "type": "chair", "x": 21, "y": 9 },
+
+    { "type": "statue", "x": 7, "y": 11, "text": "Une statue de Maître Brann, plus jeune et sans barbe. Il ne veut pas qu'on en parle." },
+    { "type": "statue", "x": 16, "y": 11, "text": "Une statue d'apprenti, le marteau levé. Un oiseau a fait son nid sur le casque." },
+    { "type": "chest", "x": 22, "y": 12, "text": "Le coffre est verrouillé. Une inscription : « Seule une pièce légendaire l'ouvrira. »" },
+    { "type": "barrel", "x": 1, "y": 12 }
+  ],
+  "npcs": [
+    {
+      "id": "king", "name": "Le Roi", "look": "king", "x": 11, "y": 5, "dir": "down",
+      "lines": [
+        "Approche, {name}. On parle de ton atelier dans tout le royaume.",
+        "Cette salle est la première d'un monde qui va s'agrandir : un jour, chacun aura la sienne.",
+        "Retourne à ta forge, et forge de belles pièces. Le royaume en aura besoin."
+      ]
+    },
+    {
+      "id": "queen", "name": "La Reine", "look": "queen", "x": 13, "y": 5, "dir": "down",
+      "lines": [
+        "Les lames que tes apprentis forgent gardent nos frontières.",
+        "Reviens chaque jour : une flamme que l'on entretient ne s'éteint pas."
+      ]
+    },
+    {
+      "id": "guard-left", "name": "Garde royal", "look": "gardien", "x": 9, "y": 11, "dir": "right",
+      "lines": [ "Halte ! Ah, c'est vous, {name}. Passez, passez." ]
+    },
+    {
+      "id": "guard-right", "name": "Garde royal", "look": "gardien", "x": 14, "y": 11, "dir": "left",
+      "lines": [ "La salle du trône est ouverte à tous, pour l'instant.", "On dit qu'un jour certaines salles auront un code d'entrée." ]
+    },
+    {
+      "id": "noble", "name": "Dame Elsa", "look": "noble", "x": 17, "y": 7, "dir": "left",
+      "lines": [
+        "Savez-vous que d'autres forgerons pourront ouvrir leurs propres salles ici ?",
+        "Certaines seront publiques, d'autres sur invitation. J'ai hâte de les visiter."
+      ]
+    }
+  ],
+  "doors": [
+    { "x": 11, "to": "forge", "label": "Retour à la forge" }
+  ]
+}

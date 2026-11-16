@@ -60,6 +60,24 @@ describe("journal d'audit des écritures sur les forges", () => {
     expect(JSON.stringify(await audit.list())).not.toContain("confidentiel"); // la description d'un ticket n'est jamais gardée
   });
 
+  it("sortir une MR du brouillon et la fusionner sont tracés, avec le commit fusionné ; un refus aussi", async () => {
+    const forge = new FakeConnector({ cloneUrl: "file:///x" }, "github");
+    const connector = auditConnector(forge, audit);
+    const created = await connector.createChangeRequest(5, { sourceBranch: "feature/9-x", targetBranch: "develop", title: "Draft: x", description: "d" });
+
+    await connector.markChangeRequestReady(5, created.iid);
+    await connector.mergeChangeRequest(5, created.iid, "0".repeat(40));
+    forge.failNextWrite = new Error("405 Method Not Allowed");
+    await expect(connector.mergeChangeRequest(5, created.iid, "0".repeat(40))).rejects.toThrow("405");
+
+    const rows = (await entries()).filter((e) => e.action !== "change_request_create");
+    expect(rows).toEqual([
+      { action: "change_request_ready", source: "github", target: `5/${created.iid}`, outcome: "ok", error: null, detail: null, user: h.local.userId },
+      { action: "change_request_merge", source: "github", target: `5/${created.iid}`, outcome: "ok", error: null, detail: { headSha: "0".repeat(40) }, user: h.local.userId },
+      { action: "change_request_merge", source: "github", target: `5/${created.iid}`, outcome: "error", error: "405 Method Not Allowed", detail: { headSha: "0".repeat(40) }, user: h.local.userId },
+    ]);
+  });
+
   it("les lectures ne laissent aucune trace", async () => {
     const forge = new FakeConnector({ cloneUrl: "file:///x" });
     forge.tickets.set(1, h.ticket({ iid: 1 }));

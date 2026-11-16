@@ -152,12 +152,12 @@
           : `<p class="fg-note">Aucun projet de ${esc(forgeName(source()))} sur le râtelier. <button type="button" class="fg-btn ghost" data-fg-open="rack">Ouvrir le râtelier</button> ou crée un projet avec l'onglet « Nouveau projet ».</p>`)
         : "";
       const hint = tab() === "ticket"
-        ? "Dicte ton idée : « un export CSV des rapports mensuels ». Le Scribe rédige un ticket (contexte, comportement attendu, critères d'acceptation) que tu relis avant l'envoi."
-        : "Dicte ton idée de projet : « un outil de suivi des rapports ». Le Scribe propose un nom, une description et les premiers tickets pour démarrer.";
+        ? "Dis simplement ce que tu voudrais, comme à un collègue. Par exemple : « J'aimerais pouvoir télécharger les rapports du mois dans Excel ». Le Scribe en fait une demande claire (un « ticket »), et tu la relis avant qu'elle parte."
+        : "Décris ton projet avec tes mots. Par exemple : « Une petite appli pour suivre les rapports de mes clients ». Le Scribe propose un nom, une courte description et par quoi commencer.";
       return `<p class="fg-note">${esc(hint)}</p>${forgeSel}${projectSel}
-        <label class="fg-field-in">Ton idée<textarea data-sc="idea" rows="4" maxlength="4000" placeholder="${tab() === "ticket" ? "Ex. permettre d'exporter les rapports du mois en CSV" : "Ex. un outil de suivi des rapports clients"}">${esc(s.idea)}</textarea></label>
+        <label class="fg-field-in">Ce que tu voudrais<textarea data-sc="idea" rows="4" maxlength="4000" placeholder="${tab() === "ticket" ? "Ex. j'aimerais télécharger les rapports du mois dans Excel" : "Ex. une petite appli pour suivre les rapports de mes clients"}">${esc(s.idea)}</textarea></label>
         <div class="fg-inline"><button type="button" class="fg-btn" data-sc-act="draft">Rédiger avec le Scribe</button></div>
-        <p class="fg-note">Le Scribe n'écrit rien chez ${esc(forgeName(source()))} tant que tu n'as pas validé. Il ne voit pas ton code : il rédige d'après ton idée et les titres des tickets déjà ouverts.</p>`;
+        <p class="fg-note">Rien ne part chez ${esc(forgeName(source()))} tant que tu n'as pas dit oui. Le Scribe ne voit pas ton code : il se base sur ce que tu écris et sur les demandes déjà ouvertes.</p>`;
     }
 
     /** Ce que la personne valide : le ticket tel que la forge l'affichera. La création n'est proposée que depuis ce rendu. */

@@ -112,6 +112,17 @@ export function createReviewRepo(db: Db, workspaceId: number) {
     },
 
     /**
+     * Toutes les reviews d'une demande de fusion de l'espace (une par commit de tête), la plus récente d'abord.
+     * @param source Forge de la demande.
+     * @param projectId Projet chez la forge.
+     * @param mrIid Numéro de la demande.
+     * @returns Les reviews de cette demande.
+     */
+    listForMergeRequest(source: ForgeKind, projectId: number, mrIid: number): Promise<ReviewRow[]> {
+      return db.all<ReviewRow>("SELECT * FROM reviews WHERE workspace_id = ? AND source = ? AND project_id = ? AND mr_iid = ? ORDER BY id DESC", [workspaceId, source, projectId, mrIid]);
+    },
+
+    /**
      * Reviews de l'espace interrompues par un arrêt du process (à remettre en file au démarrage).
      * @returns Les reviews en attente ou en cours.
      */

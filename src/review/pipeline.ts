@@ -34,7 +34,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
   if (!row) return;
   // Relus à chaque review : une modification dans le dashboard s'applique sans redémarrer
   const settings = await deps.settings.get();
-  const actionMode = deps.forceShadow ? "shadow" : settings.actionMode;
+  let actionMode = deps.forceShadow ? "shadow" : settings.actionMode;
 
   await reviews.setStatus(reviewId, "running");
   log.info("review.start", { reviewId, project: row.project_path, mr: row.mr_iid });
@@ -44,6 +44,8 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
     await assertBudgetAvailable(settings, deps.costs);
     const { connector, workspace } = deps.forges.get(row.source);
     const [project, mr] = await Promise.all([connector.getProject(row.project_id), connector.getChangeRequest(row.project_id, row.mr_iid)]);
+    // La MR de l'agent dev est la tienne : la relire est un contrôle avant fusion, jamais un commentaire ni une approbation automatiques
+    if (mr.author.username === deps.forges.get(row.source).username) actionMode = "shadow";
 
     if (mr.headSha !== row.head_sha) {
       // Nouveau commit poussé depuis la détection : le poller créera une review pour le nouveau sha

@@ -110,6 +110,8 @@ describe("GitlabConnector", () => {
       calls.push([name, ...args]);
       return result;
     };
+  let mrState: GitlabMergeRequest = { ...mrJson, draft: true, title: "Draft: Resolve « Intégration images »" };
+  let keepDraft = false;
   const client = {
     createMergeRequest: record("createMergeRequest", mrJson),
     createMergeRequestDiscussion: record("discussion", { id: "d1" }),
@@ -118,6 +120,13 @@ describe("GitlabConnector", () => {
     addIssueLabels: record("addIssueLabels", issueJson),
     getProtectedBranches: record("protected", [{ name: "main" }, { name: "release/*" }]),
     getIssue: async (_p: number, iid: number) => (iid === 404 ? null : issueJson),
+    getMergeRequest: async () => mrState,
+    updateMergeRequestTitle: async (p: number, i: number, title: string) => {
+      calls.push(["title", p, i, title]);
+      if (!keepDraft) mrState = { ...mrState, title, draft: false };
+      return mrState;
+    },
+    mergeMergeRequest: record("merge", mrJson),
     createIssue: record("createIssue", { ...issueJson, iid: 700, title: "Ajouter un export", labels: ["Statut::A traiter"], web_url: "https://gitlab.example/groupe/projet/-/issues/700" }),
     listProjectIssues: record("listProjectIssues", [issueJson]),
     createProject: record("createProject", { id: 90, name: "Mon outil", path_with_namespace: "groupe/mon-outil", description: "d", http_url_to_repo: "https://gitlab.example/groupe/mon-outil.git", web_url: "https://gitlab.example/groupe/mon-outil" }),
@@ -195,6 +204,32 @@ describe("GitlabConnector", () => {
     await connector.createProject({ name: "Perso", description: "", private: false, withReadme: false });
     expect(calls[0]).toEqual(["createProject", { name: "Perso", description: "", namespace_id: undefined, visibility: "public", initialize_with_readme: false }]);
     await expect(connector.createProject({ name: "x", description: "", namespaceId: "../admin", private: true, withReadme: true })).rejects.toThrow("Groupe invalide");
+  });
+
+  it("sortie du brouillon : GitLab retire « Draft: » du titre ; sans effet si la MR n'est pas en brouillon ; échec si elle y reste", async () => {
+    calls.length = 0;
+    await connector.markChangeRequestReady(65, 7);
+    expect(calls).toEqual([["title", 65, 7, "Resolve « Intégration images »"]]);
+
+    calls.length = 0;
+    await connector.markChangeRequestReady(65, 7); // déjà sortie du brouillon par l'appel précédent
+    expect(calls).toEqual([]);
+
+    mrState = { ...mrJson, draft: true, title: "[Draft] Autre titre" };
+    calls.length = 0;
+    await connector.markChangeRequestReady(65, 7);
+    expect(calls).toEqual([["title", 65, 7, "Autre titre"]]);
+
+    mrState = { ...mrJson, draft: true, title: "Titre sans préfixe" };
+    keepDraft = true;
+    await expect(connector.markChangeRequestReady(65, 7)).rejects.toThrow("reste en brouillon");
+    keepDraft = false;
+  });
+
+  it("fusion : le commit relu est transmis à GitLab", async () => {
+    calls.length = 0;
+    await connector.mergeChangeRequest(65, 7, "d".repeat(40));
+    expect(calls).toEqual([["merge", 65, 7, "d".repeat(40)]]);
   });
 
   it("reconnaît l'URL d'une merge request, et seulement celle-là", async () => {
