@@ -212,3 +212,29 @@ describe("client GitHub : ressource supprimée", () => {
     await expect(client().getIssue("acme/projet", 2)).rejects.toThrow(GithubError);
   });
 });
+
+describe("client GitHub : ticket créé par le Scribe", () => {
+  it("assigné à l'utilisateur du jeton (lu une seule fois)", async () => {
+    const calls = stubFetch((url) => (url.endsWith("/user") ? reply({ id: 9, login: "alex" }) : reply({ number: 8, title: "t" }, 201)));
+    const c = client();
+    await c.createIssue("acme/projet", { title: "t", body: "b", labels: ["bug"] });
+    await c.createIssue("acme/projet", { title: "u", body: "b" });
+
+    expect(calls.map((x) => `${x.init?.method} ${x.url.replace(BASE, "")}`)).toEqual(["GET /user", "POST /repos/acme/projet/issues", "POST /repos/acme/projet/issues"]);
+    expect(JSON.parse(String(calls[1]!.init?.body))).toEqual({ title: "t", body: "b", labels: ["bug"], assignees: ["alex"] });
+    expect(JSON.parse(String(calls[2]!.init?.body)).assignees).toEqual(["alex"]);
+  });
+
+  it("l'utilisateur du jeton illisible : le ticket est créé quand même, sans assigné", async () => {
+    const calls = stubFetch((url) => (url.endsWith("/user") ? reply({ message: "Bad credentials" }, 401) : reply({ number: 8 }, 201)));
+    await client().createIssue("acme/projet", { title: "t", body: "b" });
+    expect(JSON.parse(String(calls[1]!.init?.body))).toEqual({ title: "t", body: "b" });
+  });
+
+  it("sans assignation demandée, aucune requête sur l'utilisateur", async () => {
+    const calls = stubFetch(() => reply({ number: 8 }, 201));
+    await client().createIssue("acme/projet", { title: "t", body: "b" }, false);
+    expect(calls.length).toBe(1);
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ title: "t", body: "b" });
+  });
+});

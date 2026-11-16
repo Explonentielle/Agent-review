@@ -180,13 +180,25 @@ export class GitlabClient {
     return this.request("POST", "/projects", project);
   }
 
-  /** Phase 4 : création d'une issue à partir d'un ticket support validé. */
-  createIssue(projectId: number, issue: { title: string; description: string; labels?: string[] }): Promise<GitlabIssue> {
+  /**
+   * Création d'un ticket (Scribe). Par défaut il est assigné à l'utilisateur du jeton : un ticket dicté au Scribe est le sien et apparaît dans
+   * « Mes tickets ». L'assignation est un confort : si l'utilisateur n'est pas lisible, le ticket est créé sans assigné plutôt que de ne pas l'être.
+   */
+  async createIssue(projectId: number, issue: { title: string; description: string; labels?: string[] }, assignToMe = true): Promise<GitlabIssue> {
+    const meId = assignToMe ? await this.tokenUserId() : null;
     return this.request("POST", `/projects/${projectId}/issues`, {
       title: issue.title,
       description: issue.description,
       labels: issue.labels?.join(","),
+      ...(meId !== null ? { assignee_ids: [meId] } : {}),
     });
+  }
+
+  private meId: number | null | undefined;
+  /** Identifiant de l'utilisateur du jeton (lu une fois), ou null s'il ne peut pas être lu. */
+  private async tokenUserId(): Promise<number | null> {
+    if (this.meId === undefined) this.meId = await this.getCurrentUser().then((u) => u.id, () => null);
+    return this.meId;
   }
 
   // --- Transport -------------------------------------------------------------

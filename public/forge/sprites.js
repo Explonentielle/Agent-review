@@ -80,9 +80,16 @@
     if (hat === "copper") { px(c, x + 3, yb - 20, 10, 4, "#c97c3a"); px(c, x + 3, yb - 17, 10, 1, "#8a4a1c"); px(c, x + 7, yb - 21, 2, 2, "#e8a05a"); }
     if (hat === "turban") { px(c, x + 3, yb - 21, 10, 5, "#2f9a6a"); px(c, x + 6, yb - 23, 4, 2, "#2f9a6a"); px(c, x + 7, yb - 20, 2, 1, "#ffd37a"); }
     if (hat === "crown") { px(c, x + 3, yb - 21, 10, 3, "#f0d078"); px(c, x + 3, yb - 23, 2, 2, "#f0d078"); px(c, x + 7, yb - 24, 2, 3, "#f0d078"); px(c, x + 11, yb - 23, 2, 2, "#f0d078"); px(c, x + 7, yb - 20, 2, 1, "#c0392b"); }
+    if (hat === "bandana") { px(c, x + 4, yb - 19, 8, 2, "#c0392b"); px(c, x + 11, yb - 18, 2, 3, "#c0392b"); px(c, x + 5, yb - 19, 2, 1, "#e8685a"); }
+    if (hat === "feather") { px(c, x + 3, yb - 20, 10, 3, "#2f7a5a"); px(c, x + 3, yb - 18, 10, 1, "#1f5a40"); px(c, x + 11, yb - 25, 2, 6, "#f0d078"); px(c, x + 12, yb - 26, 1, 2, "#fff7d0"); }
+    if (hat === "viking") { px(c, x + 3, yb - 20, 10, 4, "#9aa0ab"); px(c, x + 3, yb - 17, 10, 1, "#5d626c"); px(c, x + 1, yb - 24, 2, 5, "#e8e4da"); px(c, x + 13, yb - 24, 2, 5, "#e8e4da"); px(c, x + 2, yb - 20, 2, 2, "#e8e4da"); px(c, x + 12, yb - 20, 2, 2, "#e8e4da"); }
+    if (hat === "knight") { px(c, x + 3, yb - 21, 10, 6, "#b9bfca"); px(c, x + 3, yb - 16, 10, 1, "#6a707c"); px(c, x + 5, yb - 18, 6, 2, "#23252b"); px(c, x + 7, yb - 25, 2, 4, "#c0392b"); }
+    if (hat === "wizard") { px(c, x + 2, yb - 20, 12, 2, "#3a2f7a"); px(c, x + 4, yb - 23, 8, 3, "#4a3f9a"); px(c, x + 6, yb - 26, 4, 3, "#4a3f9a"); px(c, x + 7, yb - 28, 2, 2, "#4a3f9a"); px(c, x + 4, yb - 21, 8, 1, "#f0d078"); }
     if (hat === "scribe") { px(c, x + 3, yb - 20, 10, 2, "#2d2a4a"); px(c, x + 5, yb - 23, 6, 3, "#2d2a4a"); }
     if (item === "hammer") { const up = frame ? 3 : 0; px(c, x + 13, yb - 12 - up, 1, 8, WOOD); px(c, x + 11, yb - 14 - up, 5, 3, "#9aa0ab"); }
     if (item === "book") { px(c, x + 11, yb - 8, 5, 4, "#7a2a20"); px(c, x + 12, yb - 7, 3, 2, "#f5e9c8"); }
+    // Arme équipée (butin ou échange) : « weapon:<type>:<rareté> », tenue à la main droite
+    if (typeof item === "string" && item.startsWith("weapon:")) { const [, wt, wg] = item.split(":"); weapon(c, x + 7, yb - 17, wt, wg, 1); }
     if (item === "shield") { px(c, x, yb - 11, 4, 6, "#3a5fa0"); px(c, x + 1, yb - 10, 2, 4, "#ffd37a"); }
   }
 

@@ -6,6 +6,8 @@ import type { Config } from "../config.js";
 import type { ForgeRegistry } from "../connectors/registry.js";
 import type { ForgeKind, Ticket } from "../connectors/types.js";
 import type { DevTaskRepo } from "../db/devTasks.js";
+import type { ReviewRepo } from "../db/reviews.js";
+import { summarizePieces } from "../dev/pieceRoutes.js";
 import { errorMessage, log } from "../logger.js";
 import { loadSystemPrompt } from "../prompts.js";
 import type { SettingsStore } from "../settings/store.js";
@@ -19,7 +21,7 @@ import { buildProjectPrompt, buildTicketPrompt } from "./prompt.js";
 /** Ce que les routes du Scribe empruntent au serveur. */
 export interface ScribeContext {
   /** Dépôts et connexions de la personne servie (résolus à chaque requête). */
-  deps: { config: Config; forges: ForgeRegistry; settings: SettingsStore; tasks: DevTaskRepo };
+  deps: { config: Config; forges: ForgeRegistry; settings: SettingsStore; tasks: DevTaskRepo; reviews: ReviewRepo };
   whoIs: (req: FastifyRequest) => { userId: number };
   fail: (reply: FastifyReply, err: unknown, code?: number) => unknown;
   forgeOf: (value: unknown) => ForgeKind;
@@ -81,11 +83,14 @@ export function registerScribe(app: FastifyInstance, ctx: ScribeContext): void {
         deps.settings.listProjects(),
       ]);
       const project = projects.find((p) => p.source === source && p.projectId === projectId);
+      const shown = tickets.slice(0, MAX_FORGE_TICKETS);
+      // Statut réel des pièces forgées (MR ouverte, fusionnée, fermée ; état de la relecture)
+      const pieces = await summarizePieces(deps, shown.flatMap((t) => latest.get(`${source}#${projectId}#${t.iid}`) ?? []));
       return {
         source,
         projectId,
         devReady: Boolean(project?.devEnabled),
-        tickets: tickets.slice(0, MAX_FORGE_TICKETS).map((t: Ticket) => {
+        tickets: shown.map((t: Ticket) => {
           const task = latest.get(`${source}#${projectId}#${t.iid}`);
           return {
             iid: t.iid,
@@ -94,7 +99,7 @@ export function registerScribe(app: FastifyInstance, ctx: ScribeContext): void {
             url: t.url,
             updatedAt: t.updatedAt,
             column: ctx.classify(t.labels, settings.workflow),
-            task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, error: task.error ? task.error.slice(0, 300) : null } : null,
+            task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, error: task.error ? task.error.slice(0, 300) : null, piece: pieces.get(task.id) ?? null } : null,
           };
         }),
       };

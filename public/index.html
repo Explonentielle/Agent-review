@@ -867,7 +867,7 @@ async function showTask(id) {
   loadPiece(id);
 }
 
-/* La pièce (la MR de l'agent) : relecture par le Gardien, état de la CI, fusion dans la branche cible du projet. */
+/* La pièce (la MR de l'agent) : relecture par le Maître de fusion, état de la CI, fusion dans la branche cible du projet. */
 let pieceTimer = null;
 function pieceHtml(p, taskId) {
   const rv = p.review;
@@ -875,13 +875,13 @@ function pieceHtml(p, taskId) {
   const stale = rv && !rv.current && !running;
   const stateTag = p.mr.state === "merged" ? pill("green", "Fusionnée") : p.mr.state === "closed" ? pill("orange", "Fermée") : p.mr.draft ? pill("gray", "Brouillon") : pill("green", "Prête");
   const reviewTag = !rv ? pill("gray", "Pas encore relue")
-    : running ? pill("accent", "Le Gardien relit…")
+    : running ? pill("accent", "Le Maître de fusion relit…")
       : rv.status === "needs_human" ? pill("orange", "Des points à analyser")
         : rv.status === "error" ? pill("red", "La relecture a échoué")
           : rv.status === "dismissed" ? pill("orange", "Relecture ignorée") : pill("green", "Relecture OK");
   const counts = rv && rv.verdict ? ` · ${rv.blocking} bloquant${rv.blocking > 1 ? "s" : ""}, ${rv.important} important${rv.important > 1 ? "s" : ""}, ${rv.suggestion} suggestion${rv.suggestion > 1 ? "s" : ""}` : "";
   const reviewBtn = p.mr.state !== "opened" || running ? ""
-    : !rv || stale ? `<button class="btn primary" data-act="piece-review">Faire relire par le Gardien</button>`
+    : !rv || stale ? `<button class="btn primary" data-act="piece-review">Faire relire par le Maître de fusion</button>`
       : `<button class="btn ghost" data-act="piece-review" data-again="1">Relire à nouveau</button>`;
   const ci = p.checks.total === 0 ? "aucune intégration continue" : p.checks.failed ? `${p.checks.failed} en échec` : p.checks.pending ? `${p.checks.pending} en cours` : "verte";
   const merge = p.mr.state === "merged" ? `<div class="callout ok">${ICON.ok}<h3>Fusionnée dans <code>${esc(p.mr.targetBranch)}</code></h3><p>Le code est sur la branche principale du projet. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p></div>`
@@ -903,7 +903,8 @@ async function loadPiece(taskId) {
   try {
     const p = await api(`/api/tasks/${taskId}/piece`);
     box.innerHTML = pieceHtml(p, taskId);
-    if (p.review && ["queued", "running", "detected"].includes(p.review.status)) pieceTimer = setTimeout(() => loadPiece(taskId), 3000);
+    // Statut en direct tant que la MR est ouverte : 3 s pendant une relecture, 6 s sinon
+    if (p.mr.state === "opened") pieceTimer = setTimeout(() => loadPiece(taskId), p.review && ["queued", "running", "detected"].includes(p.review.status) ? 3000 : 6000);
   } catch (err) {
     box.innerHTML = `<p class="note">${esc(err.message)}</p>`;
   }
@@ -1082,7 +1083,7 @@ function loadForgeAssets() {
     css.rel = "stylesheet";
     css.href = "/forge/forge.css";
     document.head.append(css);
-    for (const file of ["sprites", "audio", "scribe", "popups", "game"]) {
+    for (const file of ["sprites", "audio", "scribe", "items", "popups", "game"]) {
       await new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = `/forge/${file}.js`;
@@ -1835,13 +1836,13 @@ document.addEventListener("click", async (e) => {
   if (act === "piece-review") {
     try {
       await api(`/api/tasks/${state.taskId}/review`, t.dataset.again === "1" ? { again: true } : {});
-      toast("Le Gardien relit la pièce…");
+      toast("Le Maître de fusion relit la pièce…");
     } catch (err) { toast(err.message, true); }
     return loadPiece(state.taskId);
   }
   if (act === "piece-merge") {
     const target = t.dataset.target;
-    if (!(await ask({ title: `Fusionner dans ${target} ?`, html: `<p>La MR de l'agent est <b>fusionnée dans la branche <code>${esc(target)}</code></b> chez ta forge, avec le code que le Gardien a relu. La branche de l'agent n'est pas supprimée.</p><p class="note">Pour revenir en arrière, il faudra annuler la fusion chez ta forge. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p>`, okLabel: "Fusionner" }))) return;
+    if (!(await ask({ title: `Fusionner dans ${target} ?`, html: `<p>La MR de l'agent est <b>fusionnée dans la branche <code>${esc(target)}</code></b> chez ta forge, avec le code que le Maître de fusion a relu. La branche de l'agent n'est pas supprimée.</p><p class="note">Pour revenir en arrière, il faudra annuler la fusion chez ta forge. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p>`, okLabel: "Fusionner" }))) return;
     try {
       await api(`/api/tasks/${state.taskId}/merge`, {});
       toast("Pièce fusionnée.");

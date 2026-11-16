@@ -1,14 +1,14 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { ForgeRegistry } from "../connectors/registry.js";
-import type { ChangeRequest, CheckStatus, ForgeKind } from "../connectors/types.js";
+import type { ChangeRequest, ChangeRequestState, CheckStatus, ForgeKind } from "../connectors/types.js";
 import type { DevTaskRepo, DevTaskRow } from "../db/devTasks.js";
-import type { ReviewRepo, ReviewRow } from "../db/reviews.js";
+import type { ReviewRepo, ReviewRow, ReviewStatus } from "../db/reviews.js";
 import { GithubError } from "../github/client.js";
 import { GitlabError } from "../gitlab/client.js";
 import { errorMessage, log } from "../logger.js";
 import type { ReviewResult } from "../review/schema.js";
 import type { SettingsStore } from "../settings/store.js";
-import { mergeReadiness, type Readiness } from "./merge.js";
+import { REVIEW_OK, mergeReadiness, type Readiness } from "./merge.js";
 
 /**
  * Routes de la « pièce » : la MR faite par l'agent dev. La relecture par le Gardien (l'agent de review) et, une fois qu'elle est OK, la
@@ -19,6 +19,42 @@ export interface PieceContext {
   /** Dépôts et connexions de la personne servie (résolus à chaque requête). */
   deps: { forges: ForgeRegistry; tasks: DevTaskRepo; reviews: ReviewRepo; settings: SettingsStore; enqueueReview: (reviewId: number) => void };
   fail: (reply: FastifyReply, err: unknown, code?: number) => unknown;
+}
+
+export interface PieceSummary {
+  /** `unknown` : la forge n'a pas répondu. */
+  state: ChangeRequestState | "unknown";
+  draft: boolean;
+  review: { id: number; status: ReviewStatus; current: boolean | null } | null;
+}
+
+/**
+ * L'état en direct des pièces de quelques tâches : la MR chez la forge (ouverte, fusionnée, fermée) et la dernière review. Au plus 15 pièces,
+ * lues en parallèle ; une forge qui ne répond pas donne `unknown` sans empêcher les autres. Sert à afficher le statut réel d'une pièce dans la forge.
+ * @param deps Forges et reviews de la personne.
+ * @param tasks Tâches à résumer (seules celles qui ont ouvert une MR comptent).
+ * @returns Le résumé de chaque pièce, par identifiant de tâche.
+ */
+export async function summarizePieces(deps: { forges: ForgeRegistry; reviews: ReviewRepo }, tasks: DevTaskRow[]): Promise<Map<number, PieceSummary>> {
+  const out = new Map<number, PieceSummary>();
+  const forged = tasks.filter((t) => t.mr_iid && (t.status === "mr_created" || t.status === "mr_updated")).slice(0, 15);
+  await Promise.all(
+    forged.map(async (t) => {
+      let mr: ChangeRequest | null = null;
+      try {
+        mr = await deps.forges.get(t.source).connector.getChangeRequest(t.project_id, t.mr_iid!);
+      } catch (err) {
+        log.warn("pieces.mr_unreadable", { taskId: t.id, error: errorMessage(err) });
+      }
+      const review = (await deps.reviews.listForMergeRequest(t.source, t.project_id, t.mr_iid!))[0] ?? null;
+      out.set(t.id, {
+        state: mr ? mr.state : "unknown",
+        draft: mr?.draft ?? false,
+        review: review ? { id: review.id, status: review.status, current: mr ? review.head_sha === mr.headSha : null } : null,
+      });
+    }),
+  );
+  return out;
 }
 
 /** Erreur lisible par la personne, avec son code HTTP. */
@@ -116,6 +152,58 @@ export function registerPiece(app: FastifyInstance, ctx: PieceContext): void {
       : { state: "blocked", ok: false, reasons: ["Le projet n'est plus configuré dans l'outil (Paramètres > Projets)."] };
     return { connector, mr, latest, checks, readiness };
   }
+
+  /**
+   * Les pièces forgées par l'agent dev qui attendent encore : une par MR ouverte, la plus récente d'abord, avec l'état de leur relecture.
+   * Sert au Gardien, dans la forge. Une MR déjà fusionnée ou fermée n'y figure plus ; une forge qui ne répond pas n'empêche pas d'afficher les autres.
+   */
+  app.get("/api/pieces", async (_req, reply) => {
+    try {
+      const seen = new Set<string>();
+      const latest: Array<DevTaskRow & { mr_iid: number }> = [];
+      for (const t of await deps.tasks.list(200)) {
+        if (!t.mr_iid || (t.status !== "mr_created" && t.status !== "mr_updated")) continue;
+        const key = `${t.source}#${t.project_id}#${t.mr_iid}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        latest.push(t as DevTaskRow & { mr_iid: number });
+      }
+      const items = await Promise.all(
+        latest.slice(0, 20).map(async (t) => {
+          let mr: ChangeRequest | null = null;
+          let readiness: Readiness | null = null;
+          const review = (await deps.reviews.listForMergeRequest(t.source, t.project_id, t.mr_iid))[0] ?? null;
+          try {
+            if (review && REVIEW_OK.includes(review.status)) {
+              // Relue sans point à analyser : on lit aussi la CI et les règles, pour proposer la fusion quand elle est permise
+              const piece = await readPiece(t);
+              mr = piece.mr;
+              readiness = piece.readiness;
+            } else {
+              mr = await deps.forges.get(t.source).connector.getChangeRequest(t.project_id, t.mr_iid);
+            }
+          } catch (err) {
+            log.warn("pieces.mr_unreadable", { taskId: t.id, error: errorMessage(err) });
+          }
+          return {
+            taskId: t.id,
+            source: t.source,
+            projectPath: t.project_path,
+            issueIid: t.issue_iid,
+            issueTitle: t.issue_title,
+            mrIid: t.mr_iid,
+            mrUrl: t.mr_url,
+            mr: mr ? { state: mr.state, draft: mr.draft, targetBranch: mr.targetBranch } : null,
+            readiness: readiness ? { ok: readiness.ok, reasons: readiness.reasons } : null,
+            review: review ? { id: review.id, status: review.status, current: mr ? review.head_sha === mr.headSha : null } : null,
+          };
+        }),
+      );
+      return items.filter((i) => !i.mr || i.mr.state === "opened");
+    } catch (err) {
+      return failPiece(reply, err);
+    }
+  });
 
   /** État de la pièce : la MR, la dernière review, la CI et ce qui empêche ou permet la fusion. */
   app.get<{ Params: { id: string } }>("/api/tasks/:id/piece", async (req, reply) => {

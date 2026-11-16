@@ -185,4 +185,67 @@ describe("API : relire puis fusionner la pièce de l'agent", () => {
     expect(noHeader.statusCode).toBe(403);
     expect(h.connector.merges).toEqual([]);
   });
+  it("la liste des pièces du Gardien : une par MR ouverte avec l'état de sa relecture ; fusionnée, fermée ou sans MR : absentes ; une forge muette n'empêche pas la liste", async () => {
+    const app = await server();
+    const list = async () => (await app.inject({ method: "GET", url: "/api/pieces" })).json<Array<{ taskId: number; mrIid: number; mr: { state: string } | null; review: { status: string; current: boolean | null } | null }>>();
+
+    // Une reprise de la même MR ne la compte pas deux fois ; une tâche en échec ou sans MR n'est pas une pièce
+    const followup = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 609, issueTitle: "Import", issueUrl: "u", extraInstructions: "reprise", followup: { parentId: taskId, branch: "feature/609-import", baseBranch: "develop", targetBranch: "develop", mrIid, mrUrl: "u" } });
+    await h.tasks.update(followup, { status: "mr_updated" });
+    const failed = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 700, issueTitle: "x", issueUrl: "u", extraInstructions: null });
+    await h.tasks.update(failed, { status: "error" });
+    // Une pièce dont la MR est illisible (forge muette) reste listée, sans état de MR
+    const silent = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 701, issueTitle: "Muette", issueUrl: "u", extraInstructions: null });
+    await h.tasks.update(silent, { status: "mr_created", branch: "feature/701-x", mr_iid: 99, mr_url: "u" });
+
+    let pieces = await list();
+    expect(pieces.map((p) => p.taskId).sort()).toEqual([followup, silent].sort());
+    expect(pieces.find((p) => p.taskId === followup)).toMatchObject({ mrIid, mr: { state: "opened" }, review: null });
+    expect(pieces.find((p) => p.taskId === silent)).toMatchObject({ mr: null, review: null });
+
+    // Relue : l'état suit la review ; la review est « actuelle » tant que la MR n'a pas changé
+    const { id } = (await review(app, followup)).json<{ id: number }>();
+    pieces = await list();
+    expect(pieces.find((p) => p.taskId === followup)!.review).toMatchObject({ status: "queued", current: true });
+    h.connector.changeRequests.set(mrIid, { ...h.connector.changeRequests.get(mrIid)!, headSha: "f".repeat(40) });
+    expect((await list()).find((p) => p.taskId === followup)!.review).toMatchObject({ current: false });
+
+    // Fusionnée ou fermée : la pièce disparaît de la liste
+    h.connector.changeRequests.set(mrIid, { ...h.connector.changeRequests.get(mrIid)!, state: "merged" });
+    expect((await list()).map((p) => p.taskId)).toEqual([silent]);
+    expect(id).toBeGreaterThan(0);
+  });
+
+  it("la liste du Gardien dit si la fusion est permise : seulement pour une pièce relue OK sur le commit actuel, CI verte", async () => {
+    const app = await server();
+    const piece = async () => (await app.inject({ method: "GET", url: "/api/pieces" })).json<Array<{ taskId: number; readiness: { ok: boolean; reasons: string[] } | null }>>().find((p) => p.taskId === taskId)!;
+
+    expect((await piece()).readiness).toBeNull(); // pas encore relue : pas d'état de fusion
+    const { id } = (await review(app)).json<{ id: number }>();
+    expect((await piece()).readiness).toBeNull(); // relecture en cours
+    await finishReview(id, "needs_human");
+    expect((await piece()).readiness).toBeNull(); // des points à analyser : la fusion n'est pas proposée
+    await h.reviews.setStatus(id, "auto_ok");
+    expect((await piece()).readiness).toEqual({ ok: true, reasons: [] });
+    h.connector.checkStatuses = [{ name: "phpunit", status: "failed" }];
+    expect((await piece()).readiness).toMatchObject({ ok: false });
+  });
+
+  it("le statut réel de la pièce est dans les listes de tickets : ouverte, relue, puis fusionnée", async () => {
+    h.connector.tickets.set(609, h.ticket({ iid: 609 }));
+    const app = await server();
+    const task = async () => (await app.inject({ method: "GET", url: "/api/forge/tickets?source=gitlab&projectId=1" })).json<{ tickets: Array<{ iid: number; task: { piece: { state: string; draft: boolean; review: { status: string; current: boolean } | null } | null } | null }> }>().tickets.find((t) => t.iid === 609)!.task!;
+    const issue = async () => (await app.inject({ method: "GET", url: "/api/issues" })).json<Array<{ iid: number; task: { piece: { state: string } | null } | null }>>().find((i) => i.iid === 609)!.task!;
+
+    expect((await task()).piece).toMatchObject({ state: "opened", draft: true, review: null });
+    const { id } = (await review(app)).json<{ id: number }>();
+    await finishReview(id, "auto_ok");
+    expect((await task()).piece).toMatchObject({ state: "opened", review: { status: "auto_ok", current: true } });
+    expect((await issue()).piece).toMatchObject({ state: "opened" });
+
+    expect((await merge(app)).statusCode).toBe(200);
+    expect((await task()).piece).toMatchObject({ state: "merged" }); // fusionnée : le râtelier n'a plus rien à proposer
+    expect((await issue()).piece).toMatchObject({ state: "merged" });
+  });
+
 });

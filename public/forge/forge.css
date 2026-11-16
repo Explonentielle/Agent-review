@@ -27,7 +27,7 @@
 .fg-more { position: absolute; right: .8em; bottom: .3em; font-size: .75em; color: #8a6a3a; animation: fg-blink 1s infinite; }
 @keyframes fg-blink { 50% { opacity: .2; } }
 .fg-options { display: flex; gap: .8em; margin-top: .6em; flex-wrap: wrap; }
-.fg-opt { background: #fffaf0; border: 2px solid #231a10; border-radius: 6px; padding: .15em .9em; font: inherit; cursor: pointer; }
+.fg-opt { background: #fffaf0; color: #231a10; border: 2px solid #231a10; border-radius: 6px; padding: .15em .9em; font: inherit; cursor: pointer; }
 .fg-opt.on { background: #c97c1a; color: #fff; }
 .fg-opt.on::before { content: "▸ "; }
 
@@ -187,3 +187,38 @@
 .fg-reasons { margin: 6px 0 0 18px; padding: 0; font-size: 12.5px; color: var(--text-2); }
 .fg-reasons li { margin: 2px 0; }
 .fg-btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+/* Page du personnage : onglets, sac, échange */
+.fg-card.wide { width: min(96%, 760px); max-height: 94%; overflow: auto; }
+.fg-ctabs { justify-content: center; margin: 0; padding-bottom: 6px; }
+.fg-look { display: grid; gap: 10px; width: 100%; }
+.fg-look[hidden], .fg-panel[hidden] { display: none; }
+.fg-panel { width: 100%; text-align: left; }
+.fg-panel h4 { margin: 10px 0 4px; font-size: 13px; }
+.fg-slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+.fg-slot { border: 2px solid var(--rc, var(--border)); border-radius: 8px; padding: 5px 8px; min-height: 52px; display: grid; gap: 2px; align-content: start; font-size: 12px; background: var(--surface-2); }
+.fg-slot small { color: var(--text-2); font: 700 10.5px "Courier New", monospace; text-transform: uppercase; }
+.fg-slot b { color: var(--rc); font-size: 12.5px; }
+.fg-slot span { color: var(--text-2); }
+.fg-mini { border: 2px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 6px; padding: 1px 8px; font: 700 11.5px "Courier New", monospace; cursor: pointer; justify-self: start; }
+.fg-mini:hover { border-color: #c97c1a; }
+.fg-prog { display: flex; flex-wrap: wrap; gap: 4px 14px; font: 700 11.5px "Courier New", monospace; color: var(--text-2); margin-bottom: 6px; }
+.fg-prog i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.fg-fchips { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 8px; }
+.fg-fchip { border: 2px solid var(--border); background: var(--surface-2); color: var(--text-2); border-radius: 14px; padding: 1px 10px; font: 700 11.5px "Courier New", monospace; cursor: pointer; }
+.fg-fchip.on { border-color: #c97c1a; color: var(--text); }
+.fg-igrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+.fg-icard { display: grid; grid-template-columns: 40px 1fr auto; gap: 8px; align-items: center; border: 2px solid var(--rc, var(--border)); border-radius: 8px; padding: 6px 8px; background: var(--surface-2); }
+.fg-icard.worn { box-shadow: 0 0 0 2px var(--rc); }
+.fg-icard b { font-size: 12.5px; }
+.fg-icard em { font-style: normal; color: var(--text-2); font-weight: 700; }
+.fg-icard small { display: block; color: var(--text-2); font-size: 11px; margin-top: 1px; }
+.fg-ithumb { width: 40px; height: 40px; image-rendering: pixelated; border-radius: 6px; object-fit: contain; background: #3a3345; }
+.fg-src { display: inline-block; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin-right: 3px; font-size: 10.5px; }
+.fg-new { background: #c97c1a; color: #fff; border-radius: 8px; padding: 0 6px; font-size: 10.5px; font-weight: 800; }
+.fg-pick { display: grid; grid-template-columns: 40px 1fr; gap: 8px; align-items: center; text-align: left; border: 2px solid var(--rc, var(--border)); background: var(--surface-2); color: var(--text); border-radius: 8px; padding: 6px 8px; cursor: pointer; font: inherit; }
+.fg-pick.on { background: var(--orange-soft); box-shadow: 0 0 0 2px var(--rc); }
+.fg-pick small { display: block; color: var(--text-2); font-size: 11px; }
+.fg-pick img { width: 40px; height: 40px; image-rendering: pixelated; border-radius: 6px; object-fit: contain; background: #3a3345; }
+.fg-bag b { background: #231a10; color: #ffd37a; border-radius: 8px; padding: 0 5px; }
+@media (max-width: 640px) { .fg-slots { grid-template-columns: repeat(2, 1fr); } }

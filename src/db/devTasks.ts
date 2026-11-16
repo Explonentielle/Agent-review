@@ -171,6 +171,19 @@ export function createDevTaskRepo(db: Db, workspaceId: number) {
     },
 
     /**
+     * Les tâches dont la MR a été fusionnée depuis l'outil (le journal de la tâche le note à la fusion). Une fusion faite à la main chez la
+     * forge n'y figure pas : l'outil ne la voit pas.
+     * @returns Les identifiants de ces tâches, dans l'espace.
+     */
+    async listMergedTaskIds(): Promise<number[]> {
+      const rows = await db.all<{ task_id: number }>(
+        "SELECT DISTINCT e.task_id AS task_id FROM dev_task_events e JOIN dev_tasks t ON t.id = e.task_id WHERE t.workspace_id = ? AND e.kind = 'step' AND e.text LIKE ?",
+        [workspaceId, "MR !% fusionnée dans %"],
+      );
+      return rows.map((r) => Number(r.task_id));
+    },
+
+    /**
      * Tous les essais de l'agent sur un ticket, du plus ancien au plus récent.
      * @returns Les tâches de l'espace pour ce ticket.
      */

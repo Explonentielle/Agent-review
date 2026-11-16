@@ -99,6 +99,20 @@ describe.each(backends)("suppression et historique des tâches de dev : $name", 
     expect(await tb.findByMergeRequest("gitlab", 1, 7)).toBeUndefined(); // autre espace
   });
 
+  it("retrouve les tâches dont la MR a été fusionnée depuis l'outil, dans l'espace seulement", async () => {
+    const ta = createDevTaskRepo(db, a);
+    const tb = createDevTaskRepo(db, b);
+    const merged = await ta.insert(ISSUE);
+    await ta.addEvent(merged, "step", "MR !7 fusionnée dans develop (commit relu abcd1234)");
+    const notMerged = await ta.insert({ ...ISSUE, issueIid: 700 });
+    await ta.addEvent(notMerged, "step", "MR !8 créée vers develop");
+    const other = await tb.insert(ISSUE);
+    await tb.addEvent(other, "step", "MR !7 fusionnée dans main (commit relu 1234abcd)");
+
+    expect(await ta.listMergedTaskIds()).toEqual([merged]);
+    expect(await tb.listMergedTaskIds()).toEqual([other]);
+  });
+
   it("liste les essais d'un ticket, du plus ancien au plus récent, sans ceux d'un autre espace ni d'une autre forge", async () => {
     const ta = createDevTaskRepo(db, a);
     const tb = createDevTaskRepo(db, b);

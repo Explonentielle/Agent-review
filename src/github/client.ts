@@ -139,8 +139,21 @@ export class GithubClient {
     return this.request("POST", `/repos/${repoPath(fullName)}/pulls`, pull);
   }
 
-  createIssue(fullName: string, issue: { title: string; body: string; labels?: string[] }): Promise<GithubIssue> {
-    return this.request("POST", `/repos/${repoPath(fullName)}/issues`, issue);
+  /**
+   * Crée un ticket. Par défaut il est assigné à l'utilisateur du jeton : un ticket dicté au Scribe est le sien et apparaît dans « Mes tickets ».
+   * L'assignation est un confort : GitHub l'ignore sans erreur si le jeton n'a pas le droit d'écriture sur le dépôt, et si l'utilisateur n'est pas
+   * lisible le ticket est créé sans assigné.
+   */
+  async createIssue(fullName: string, issue: { title: string; body: string; labels?: string[] }, assignToMe = true): Promise<GithubIssue> {
+    const login = assignToMe ? await this.tokenLogin() : null;
+    return this.request("POST", `/repos/${repoPath(fullName)}/issues`, { ...issue, ...(login ? { assignees: [login] } : {}) });
+  }
+
+  private login: string | null | undefined;
+  /** Identifiant GitHub de l'utilisateur du jeton (lu une fois), ou null s'il ne peut pas être lu. */
+  private async tokenLogin(): Promise<string | null> {
+    if (this.login === undefined) this.login = await this.getCurrentUser().then((u) => u.login, () => null);
+    return this.login;
   }
 
   /** Crée un dépôt dans le compte de la personne, ou dans une organisation si `org` est donné. */

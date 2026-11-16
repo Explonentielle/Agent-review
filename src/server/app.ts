@@ -23,10 +23,11 @@ import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName,
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
 import type { TenantContext, TenantDeps } from "../tenants/manager.js";
 import { computeArmory } from "../game/armory.js";
+import { LOOT_CATALOG, computeDrops } from "../game/loot.js";
 import { computeHero, REVIEW_DONE, TASK_FORGED } from "../game/hero.js";
 import { computePrestige, computeProgress } from "../game/progress.js";
 import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
-import { registerPiece } from "../dev/pieceRoutes.js";
+import { registerPiece, summarizePieces } from "../dev/pieceRoutes.js";
 import { registerRooms } from "../rooms/routes.js";
 import { registerScribe } from "../scribe/routes.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
@@ -335,6 +336,12 @@ export function buildServer(base: ServerDeps) {
     return computeArmory({ projects, tasks, reviews });
   });
 
+  /** Le butin : le catalogue d'objets et ceux que l'activité réelle (pièces forgées, reviews, fusions) a fait tomber, de façon déterministe. */
+  app.get("/api/forge/loot", async () => {
+    const [tasks, reviews, mergedTaskIds] = await Promise.all([deps.tasks.list(500), deps.reviews.list(undefined, 500), deps.tasks.listMergedTaskIds()]);
+    return { catalog: LOOT_CATALOG, drops: computeDrops({ tasks, reviews, mergedTaskIds }) };
+  });
+
   // --- Paramètres ------------------------------------------------------------
 
   app.get("/api/settings", async () => ({
@@ -407,6 +414,7 @@ export function buildServer(base: ServerDeps) {
       for (const r of failed) log.warn("issues.forge_error", { error: errorMessage(r.reason) });
       const issues = results.flatMap((r) => (r.status === "fulfilled" ? r.value.tickets.map((ticket) => ({ source: r.value.source, ticket })) : []));
 
+      const pieces = await summarizePieces(deps, issues.flatMap(({ source, ticket }) => latest.get(`${source}#${ticket.projectId}#${ticket.iid}`) ?? []));
       return issues.map(({ source, ticket: i }) => {
         const project = projects.get(`${source}#${i.projectId}`);
         const task = latest.get(`${source}#${i.projectId}#${i.iid}`);
@@ -425,7 +433,7 @@ export function buildServer(base: ServerDeps) {
           branchPreview: project?.devEnabled ? renderTemplate(settings.templates.branch, { iid: i.iid, title: i.title, slug: slugify(i.title) }) : null,
           baseBranch: project?.baseBranch ?? null,
           targetBranch: project?.targetBranch ?? null,
-          task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, mrIid: task.mr_iid, error: task.error ? task.error.slice(0, 300) : null } : null,
+          task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, mrIid: task.mr_iid, error: task.error ? task.error.slice(0, 300) : null, piece: pieces.get(task.id) ?? null } : null,
         };
       });
     } catch (err) {

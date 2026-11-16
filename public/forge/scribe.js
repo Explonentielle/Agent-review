@@ -167,7 +167,7 @@
       return `${questions}<div class="fg-sc-card"><div class="fg-sc-card-head">Aperçu du ticket · ${esc(weapon()?.path ?? "")}</div>
         <h4>${esc(s.title) || "<i>(sans titre)</i>"}</h4>${chips}<div class="fg-md">${preview(s.desc) || "<p><i>(description vide)</i></p>"}</div></div>
         <div class="fg-inline"><button type="button" class="fg-btn" data-sc-act="create">Valider et créer chez ${esc(forgeName(source()))}</button><button type="button" class="fg-btn ghost" data-sc-act="edit">Modifier</button><button type="button" class="fg-btn ghost" data-sc-act="again">Refaire le brouillon</button></div>
-        <p class="fg-note">Rien n'est envoyé tant que tu n'as pas cliqué sur « Valider et créer ». Une fois créé, le ticket est visible de toute l'équipe.</p>`;
+        <p class="fg-note">Rien n'est envoyé tant que tu n'as pas cliqué sur « Valider et créer ». Une fois créé, le ticket t'est assigné (il apparaît dans « Mes tickets ») et il est visible de toute l'équipe.</p>`;
     }
 
     function ticketReviewHtml(s) {
