@@ -46,7 +46,7 @@
   const g = {
     root: null, stage: null, canvas: null, c: null, el: {},
     pieces: [], piecesAt: -999,
-    roomId: "forge", rooms: { catalog: null, list: [], byId: new Map(), at: -999 }, deco: [], transition: false,
+    roomId: "forge", rooms: { catalog: null, list: [], byId: new Map(), problems: [], template: null, at: -999 }, deco: [], transition: false,
     running: false, raf: 0, last: 0, time: 0, poll: 0,
     save: loadSave(), data: { hero: null, armory: { weapons: [], loot: [] }, forges: [] }, firstRefresh: true, done: null,
     player: { tx: 12, ty: 11, x: 12 * T, y: 11 * T, dir: "up", frame: 0, moving: null, path: [] },
@@ -114,6 +114,7 @@
     add({ id: "apprentice", name: "Apprenti", verb: "Parler", tiles: [[9, 11]], z: 12 * T, lx: 9.5, ly: 10.35, when: () => flag("claude"), draw: (c) => S.person(c, 9 * T, 11 * T, { ...S.LOOKS.apprenti, dir: "right" }), interact: apprenticeTalk });
     add({ id: "guard", name: "Maître de fusion", verb: "Parler", tiles: [[6, 11]], z: 12 * T, lx: 6.5, ly: 10.35, when: () => flag("project"), draw: (c) => S.person(c, 6 * T, 11 * T, { ...S.LOOKS.gardien, dir: "right" }), interact: guardTalk });
     add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[15, 10]], z: 11 * T, lx: 15.5, ly: 9.35, when: () => flag("forge"), draw: (c) => S.person(c, 15 * T, 10 * T, { ...S.LOOKS.scribe, dir: "left" }), interact: scribeTalk });
+    add({ id: "architect", name: "Architecte", verb: "Parler", tiles: [[3, 11]], z: 12 * T, lx: 3.5, ly: 10.35, when: () => flag("forge"), draw: (c) => S.person(c, 3 * T, 11 * T, { ...S.LOOKS.architecte, dir: "right" }), interact: architectTalk });
     add({ id: "door", name: "Porte", verb: "Sortir", tiles: [[11, 14], [12, 14]], z: 0, lx: 12, ly: 13.7, always: true, decor: true, draw: () => undefined, interact: doorTalk });
     hubRooms().forEach((room, i) => {
       const x = HUB_SLOTS[i];
@@ -355,6 +356,16 @@
     await say("Scribe", ["Tu me dictes une idée, j'écris le ticket. Ou tout un projet, avec ses premiers tickets.", "Je ne pose rien sur la forge sans que tu aies relu, patron."]);
     openPopup("scribe");
   }
+  /** L'Architecte explique comment créer une salle. Le générateur automatique n'existe pas encore : il le dit. */
+  async function architectTalk() {
+    if (!g.rooms.catalog) await loadRooms();
+    await say("Architecte", [
+      "Je dessine les salles de ce monde. La salle du trône, c'est presque mon œuvre.",
+      "Une salle, ce n'est qu'un fichier de données : une grille de 24 sur 15, des meubles, des personnages, des portes.",
+      "Un jour, tu me diras ce que tu veux et je la dessinerai pour toi. Pour l'instant, voici mon mode d'emploi.",
+    ]);
+    openPopup("architect");
+  }
   async function merchantTalk() {
     const n = g.data.armory.loot.filter((i) => !g.save.sold.includes(i.id)).length;
     await say("Marchand Sélim", [n ? "Des pièces forgées ? Montre-moi ça, je rachète tout !" : "Rien à vendre ? Reviens quand tes apprentis auront forgé, ou regarde mes tenues."]);
@@ -449,7 +460,7 @@
     g.rooms.at = g.time;
     try {
       const out = await api("/api/rooms");
-      g.rooms = { catalog: out.catalog, list: out.rooms, byId: new Map(out.rooms.map((r) => [r.id, r])), at: g.time };
+      g.rooms = { catalog: out.catalog, list: out.rooms, byId: new Map(out.rooms.map((r) => [r.id, r])), problems: out.problems ?? [], template: out.template ?? null, at: g.time };
     } catch { /* pas de salles */ }
   }
 
@@ -557,34 +568,44 @@
       <button type="button" class="fg-tool ${pr.music ? "on" : ""}" data-fg="music" title="Musique">Musique</button>`;
   }
 
+  /** Nom et niveau, sous l'aperçu du forgeron (colonne de gauche du popup). */
+  function sideIdHtml() {
+    const h = g.data.hero;
+    return `<div class="fg-side-id"><b>${esc(g.save.name || "Forgeron")}</b>${h ? `<small>Niveau ${h.level} · ${esc(h.title)}</small>` : ""}</div>`;
+  }
+
   /** Page « Profil » : identité, niveau, or, rang, série, collection, quête en cours et travail réel (tout est lu, rien n'est modifiable ici). */
   function profileHtml() {
     const h = g.data.hero;
-    if (!h) return `<p class="fg-note">Les données du forgeron arrivent…</p>`;
+    if (!h) return `<p class="fg-empty">Les données du forgeron arrivent…</p>`;
     const rk = prestige(), pg = progress(), pending = claimable();
     const rank = rk ? `<span class="fg-rank" ${rk.rank.aura ? `style="--aura:${rk.rank.aura}"` : ""} title="Rang de prestige">${esc(rk.rank.name)}${rk.stars ? " " + "★".repeat(Math.min(rk.stars, 5)) : ""}</span>` : "";
     const nextRank = rk?.next ? `Encore ${rk.next.xpLeft} XP pour le rang ${esc(rk.next.name)} (niveau ${rk.next.level}).` : "";
     const col = items.collection();
     const next = h.quests.find((q) => !q.done);
     const tile = (label, value, note, cls = "") => `<div class="fg-tile ${cls}"><small>${label}</small><b>${value}</b><small>${note}</small></div>`;
+    // Toujours trois tuiles : la grille reste alignée même quand la série n'existe pas encore
     const tiles = [
       tile("Or", `${g.save.gold}`, rk ? `+${rk.rank.goldBonusPct} % aux ventes` : "à dépenser chez le marchand"),
-      pg ? tile("Série", `${pg.streak.current} j`, pg.streak.atRisk ? "s'éteint à minuit !" : `record ${pg.streak.best} j`, pg.streak.atRisk ? "risk" : "") : "",
+      pg ? tile("Série", `${pg.streak.current} j`, pg.streak.atRisk ? "s'éteint à minuit !" : `record ${pg.streak.best} j`, pg.streak.atRisk ? "risk" : "") : tile("Série", "0 j", "pas encore lancée"),
       tile("Collection", `${col.owned}/${col.total}`, "objets différents"),
     ].join("");
-    const claim = pending.length ? `<button type="button" class="fg-btn" data-pf-board>${pending.length} récompense${pending.length > 1 ? "s" : ""} à réclamer : ${pending.reduce((n, m) => n + m.gold, 0)} or</button>` : "";
+    const claim = pending.length ? `<button type="button" class="fg-btn fg-block" data-pf-board>${pending.length} récompense${pending.length > 1 ? "s" : ""} à réclamer : ${pending.reduce((n, m) => n + m.gold, 0)} or</button>` : "";
     const quest = next
       ? `<div class="fg-quest-row next"><span class="chk"></span><div><b>${esc(next.title)}</b><small>${esc(next.hint)}</small></div><span class="xp">+${next.xp} XP</span></div>`
-      : `<p class="fg-note">Toutes les quêtes de départ sont accomplies.</p>`;
+      : `<div class="fg-quest-row done"><span class="chk">✓</span><div><b>Toutes les quêtes de départ sont accomplies</b><small>Les missions du jour et de la semaine continuent au tableau.</small></div></div>`;
     return `<div class="fg-pf">
-      <div class="fg-pf-id"><div><b>${esc(g.save.name || "Forgeron")}</b> ${rank}<small>${esc(h.heroClass)} ${esc(h.specialty.toLowerCase())}</small></div><button type="button" class="fg-mini" data-pf-tab="look">Modifier</button></div>
-      <div>Niveau ${h.level} · ${esc(h.title)} · ${h.xp} XP</div>
-      <div class="fg-pbar"><i style="width:${Math.max(0, Math.min(100, h.percent))}%"></i></div>
-      ${nextRank ? `<small class="fg-note">${nextRank}</small>` : ""}
+      <div class="fg-box fg-pf-head">
+        <div class="fg-pf-id"><div><span class="fg-pf-name">${esc(g.save.name || "Forgeron")}</span> ${rank}<small>${esc(h.heroClass)} ${esc(h.specialty.toLowerCase())}</small></div><button type="button" class="fg-mini" data-pf-tab="look">Modifier</button></div>
+        <div class="fg-pf-level"><span>Niveau ${h.level} · ${esc(h.title)}</span><span>${h.xp} XP</span></div>
+        <div class="fg-pbar"><i style="width:${Math.max(0, Math.min(100, h.percent))}%"></i></div>
+        ${nextRank ? `<small class="fg-note">${nextRank}</small>` : ""}
+      </div>
       <div class="fg-tiles">${tiles}</div>
       ${claim}
-      <h4>Quête en cours <button type="button" class="fg-mini" data-pf-tab="quests">Toutes les quêtes</button></h4>${quest}
-      <h4>Ton travail</h4><div class="fg-stats">${h.stats.map((s) => `<span><b>${s.value}</b> ${esc(s.label.toLowerCase())}</span>`).join("")}</div>
+      <h4>Quête en cours<button type="button" class="fg-mini" data-pf-tab="quests">Toutes les quêtes</button></h4>${quest}
+      <h4>Ton travail</h4>
+      <div class="fg-tiles compact">${h.stats.map((s) => `<div class="fg-tile"><b>${s.value}</b><small>${esc(s.label.toLowerCase())}</small></div>`).join("")}</div>
     </div>`;
   }
 
@@ -606,9 +627,12 @@
       <div class="fg-side"><canvas class="fg-preview" width="32" height="40"></canvas><div class="fg-worn" ${first ? "hidden" : ""}></div></div>
       <div class="fg-look">
         <label>Ton nom<input maxlength="24" value="${esc(g.save.name)}" placeholder="Aldric" autocomplete="off"></label>
-        <div class="fg-row"><span>Peau</span>${swatches("skin", SKINS)}</div>
-        <div class="fg-row"><span>Cheveux</span>${swatches("hair", HAIRS)}</div>
-        <div class="fg-row"><span>Tunique</span>${swatches("tunic", TUNICS)}</div>
+        <div class="fg-box fg-looks">
+          <div class="fg-row"><span>Peau</span>${swatches("skin", SKINS)}</div>
+          <div class="fg-row"><span>Cheveux</span>${swatches("hair", HAIRS)}</div>
+          <div class="fg-row"><span>Tunique</span>${swatches("tunic", TUNICS)}</div>
+        </div>
+        ${first ? "" : `<p class="fg-note">L'aperçu à gauche change tout de suite. Clique sur « Enregistrer et fermer » pour garder ton nom et tes couleurs.</p>`}
       </div>
       <div class="fg-panel" hidden></div>
       <button type="button" class="fg-btn" data-ok>${first ? "Entrer dans la forge" : "Enregistrer et fermer"}</button></div>`;
@@ -626,7 +650,7 @@
       el.querySelectorAll("[data-ctab]").forEach((b) => b.classList.toggle("on", b.dataset.ctab === current));
       pane.hidden = current !== "look";
       panel.hidden = current === "look";
-      if (!first) el.querySelector(".fg-worn").innerHTML = items.equippedHtml();
+      if (!first) el.querySelector(".fg-worn").innerHTML = sideIdHtml() + items.equippedHtml();
       // Un changement d'équipement redessine l'onglet : on garde la position dans la liste, sauf quand on change d'onglet
       const scroller = current === "look" ? pane : panel;
       const keep = shown === current ? scroller.scrollTop : 0;
@@ -900,6 +924,7 @@
   const api2 = {
     get data() { return g.data; },
     get save() { return g.save; },
+    get rooms() { return g.rooms; },
     cosmetics: COSMETICS,
     persist, say, choose, banner, refresh, renderHud, weaponType, items, claim, claimable, claimKey, goldBonus, rankIndex, rankOrder: RANK_ORDER,
     setPopup(open) { g.popup = open; if (open) { g.keys = []; g.player.path = []; } },

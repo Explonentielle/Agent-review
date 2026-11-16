@@ -216,6 +216,43 @@
       },
     },
 
+    /** L'Architecte : mode d'emploi pour créer une salle (fichier de données), avec les vraies salles du monde, leurs erreurs et le catalogue. */
+    architect: {
+      async render() {
+        const r = game.rooms;
+        if (!r?.catalog) return { title: "L'Architecte", html: `<p class="fg-note">Les plans ne sont pas disponibles : le serveur n'a pas répondu. Réessaie dans un instant.</p>` };
+        const cat = r.catalog, lim = cat.limits;
+        const code = (t) => `<code>${esc(t)}</code>`;
+        const steps = [
+          `<b>Copie le modèle</b> : une salle complète et jouable. <button type="button" class="fg-btn" data-fg-copy-room>Copier le modèle</button>`,
+          `Enregistre-le dans le dépôt sous ${code("public/rooms/<id>.json")}. L'identifiant (minuscules, chiffres et tirets) est aussi le nom du fichier.`,
+          `Adapte-le : une grille de ${cat.grid.width} colonnes sur ${cat.grid.height} rangées (mur du fond rangées 0 à 2, sol 3 à ${cat.grid.floorBottom}, portes en bas), des objets du catalogue, des personnages et leurs répliques.`,
+          `Contrôle-le : ${code("npx tsx scripts/check-rooms.ts")}. Chaque erreur est dite en français.`,
+          `Pousse, puis redéploie : ${code("git pull && docker compose up -d --build")}. Avec ${code('"hub": true')}, une porte magique apparaît dans le mur du fond de la forge (trois salles au plus).`,
+        ];
+        const rooms = r.list.length
+          ? r.list.map((x) => `<div class="fg-item no-icon"><div><b>${esc(x.name)}</b> ${x.hub ? `<span class="fg-tag ok">porte dans la forge</span>` : ""}<small>${code(x.id)} · ${x.objects.length} objet${x.objects.length > 1 ? "s" : ""} · ${x.npcs.length} personnage${x.npcs.length > 1 ? "s" : ""} · thème ${esc(x.theme)}</small></div></div>`).join("")
+          : `<p class="fg-note">Aucune salle pour l'instant.</p>`;
+        const problems = r.problems?.length
+          ? `<h4>À corriger</h4>${r.problems.map((p) => `<div class="fg-err"><b>${esc(p.file)}</b> : ${p.errors.map(esc).join(" ; ")}</div>`).join("")}`
+          : "";
+        const objects = Object.entries(cat.objects).map(([type, o]) => {
+          const bits = [o.resizable ? "taille libre" : `${o.w} × ${o.h}`, o.where === "wall" ? "mur" : "sol", o.solid ? "plein" : "traversable", o.text ? "texte" : null, o.color ? "couleur" : null].filter(Boolean);
+          return `<span class="fg-tag" title="${esc(bits.join(", "))}">${esc(type)} · ${esc(bits.slice(0, 2).join(" "))}</span>`;
+        }).join(" ");
+        const tpl = r.template ? `<details><summary>Voir le modèle (si la copie est refusée par le navigateur)</summary><pre class="fg-pre">${esc(JSON.stringify(r.template, null, 2))}</pre></details>` : "";
+        return {
+          title: "L'Architecte",
+          html: `<p class="fg-note">Une salle est un simple fichier de données : ni code, ni image. Le navigateur la dessine avec les objets du catalogue. <b>Le générateur automatique arrive plus tard</b> : en attendant, on la décrit à la main.</p>
+            <h4>Créer une salle, pas à pas</h4><ol class="fg-steps">${steps.map((s) => `<li>${s}</li>`).join("")}</ol>${tpl}
+            <h4>Les salles de ton monde (${r.list.length})</h4>${rooms}${problems}
+            <h4>Ce que tu peux poser</h4><div class="fg-chips">${objects}</div>
+            <p class="fg-note">Thèmes : ${cat.themes.map(esc).join(", ")}. Apparences de personnages : ${cat.looks.map(esc).join(", ")}. Couleurs : ${cat.colors.map(esc).join(", ")}.</p>
+            <p class="fg-note">Limites : ${lim.objects} objets, ${lim.npcs} personnages et ${lim.doors} portes par salle, ${lim.lineLength} caractères par réplique ou texte, ${Math.round(lim.fileBytes / 1024)} Ko par fichier, ${lim.files} salles au plus. Le détail est dans ${code("docs/salles.md")}.</p>`,
+        };
+      },
+    },
+
     /** Le marchand : vendre les pièces forgées (pour de l'or, en jeu seulement) et acheter des tenues. */
     merchant: {
       live: true,
@@ -502,6 +539,19 @@
   document.addEventListener("ra:changed", () => { if (current?.def.rerender) render(); });
 
   /* ---------- actions dans les popups ---------- */
+  /** Copie la salle modèle de l'Architecte dans le presse-papiers (si le navigateur refuse, le modèle reste lisible dans la fenêtre). */
+  async function copyRoomTemplate() {
+    const template = game.rooms?.template;
+    if (!template) return game.banner("Le modèle n'est pas disponible.");
+    try {
+      await navigator.clipboard.writeText(`${JSON.stringify(template, null, 2)}\n`);
+      A.sfx.select();
+      game.banner("Modèle copié : colle-le dans public/rooms/ma-salle.json.");
+    } catch {
+      game.banner("Copie refusée par le navigateur : ouvre « Voir le modèle » et copie-le à la main.");
+    }
+  }
+
   async function launch(key) {
     const [source, projectId, iid] = key.split(":");
     const i = state.issues.find((x) => x.source === source && String(x.projectId) === projectId && String(x.iid) === iid);
@@ -559,6 +609,7 @@
     if ((el = by("data-fg-claim"))) { game.claim([el.dataset.fgClaim]); return render(); }
     if (by("data-fg-claimall")) { game.claim(null); return render(); }
     if ((el = by("data-fg-sell"))) return sell([el.dataset.fgSell]);
+    if (by("data-fg-copy-room")) return copyRoomTemplate();
     if (by("data-fg-sellcommons")) return sell(game.data.armory.loot.filter((i) => i.grade === "common" && !game.save.sold.includes(i.id)).map((i) => i.id));
     if ((el = by("data-fg-buy"))) {
       const item = game.cosmetics.find((c) => c.id === el.dataset.fgBuy);

@@ -158,13 +158,16 @@
     /* ---------- interface : inventaire et échange ---------- */
     const ui = { tab: "inv", cat: "all", give: [], get: null };
 
-    const sources = (id) => Object.keys(save().items[id]?.from || {}).filter((k) => save().items[id].from[k] > 0).map((k) => `<span class="fg-src">${SOURCES[k] ?? k}</span>`).join("");
+    /** Origine d'un objet en clair : « Obtenu, Acheté ». */
+    const sourcesText = (id) => Object.keys(save().items[id]?.from || {}).filter((k) => save().items[id].from[k] > 0).map((k) => SOURCES[k] ?? k).join(", ");
     const byRarity = (a, b) => RARITIES.indexOf(b.rarity) - RARITIES.indexOf(a.rarity) || a.name.localeCompare(b.name, "fr");
 
+    /** Les quatre emplacements du forgeron, avec l'icône de l'objet porté : affichés à côté de son aperçu. */
     function slotsHtml(cat) {
       return `<div class="fg-slots">${PARTS.map((part) => {
         const item = cat.get(save().equip[part]);
-        return `<div class="fg-slot" ${item ? `style="--rc:${color(item.rarity)}"` : ""}><small>${PART_NAME[part]}</small>${item ? `<b>${esc(item.name)}</b><button type="button" class="fg-mini" data-it-unequip="${part}">Retirer</button>` : "<span>Rien</span>"}</div>`;
+        const icon = item ? `<img class="fg-ithumb sm" src="${thumb(item)}" alt="">` : `<span class="fg-ithumb sm blank"></span>`;
+        return `<div class="fg-slot ${item ? "" : "bare"}" ${item ? `style="--rc:${color(item.rarity)}"` : ""}>${icon}<div><small>${PART_NAME[part]}</small><b>${item ? esc(item.name) : "Vide"}</b></div>${item ? `<button type="button" class="fg-mini" data-it-unequip="${part}" title="Retirer" aria-label="Retirer ${esc(item.name)}">×</button>` : ""}</div>`;
       }).join("")}</div>`;
     }
 
@@ -178,11 +181,13 @@
       const cards = shown.map((item) => {
         const worn = isEquipped(item.id), isNew = s.fresh.includes(item.id);
         return `<div class="fg-icard ${worn ? "worn" : ""}" style="--rc:${color(item.rarity)}"><img src="${thumb(item)}" alt="" class="fg-ithumb">
-          <div><b>${esc(item.name)}</b>${count(item.id) > 1 ? ` <em>×${count(item.id)}</em>` : ""} ${isNew ? '<span class="fg-new">nouveau</span>' : ""}<small>${tag(item.rarity)} ${PART_NAME[item.part] ?? ""}</small><small>${sources(item.id)}</small></div>
+          <div><div class="fg-icard-name"><b title="${esc(item.name)}">${esc(item.name)}</b>${count(item.id) > 1 ? `<em>×${count(item.id)}</em>` : ""}</div>
+          <small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small><small class="fg-origin">${esc(sourcesText(item.id))}</small></div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
           <button type="button" class="fg-mini" data-it-${worn ? "unequip" : "equip"}="${worn ? item.part : esc(item.id)}">${worn ? "Retirer" : "Équiper"}</button></div>`;
       }).join("");
-      return `<div class="fg-prog">${progress}</div><div class="fg-fchips">${filters}</div>
-        <div class="fg-igrid">${cards || `<p class="fg-note">Rien ici pour l'instant. Les objets s'obtiennent en forgeant des pièces, en faisant relire et fusionner tes pièces (butin aléatoire), chez le marchand, ou par échange.</p>`}</div>`;
+      // L'en-tête (progression et filtres) reste en haut pendant que la liste défile
+      return `<div class="fg-sticky"><div class="fg-prog">${progress}</div><div class="fg-fchips">${filters}</div></div>
+        <div class="fg-igrid">${cards || `<p class="fg-empty">Rien ici pour l'instant. Les objets s'obtiennent en forgeant des pièces, en faisant relire et fusionner tes pièces (butin aléatoire), chez le marchand, ou par échange.</p>`}</div>`;
     }
 
     function tradeHtml() {
@@ -190,16 +195,18 @@
       const rarity = ui.give.length ? cat.get(ui.give[0])?.rarity : null;
       const tradable = all.filter((i) => NEXT[i.rarity] && freeCopies(i.id) > 0 && (!rarity || i.rarity === rarity)).sort(byRarity);
       const chosen = (id) => ui.give.filter((x) => x === id).length;
-      const give = tradable.map((item) => `<button type="button" class="fg-pick ${chosen(item.id) ? "on" : ""}" style="--rc:${color(item.rarity)}" data-it-give="${esc(item.id)}"><img src="${thumb(item)}" alt=""><span>${esc(item.name)}<small>${tag(item.rarity)} · ${freeCopies(item.id) - chosen(item.id)} libre${freeCopies(item.id) - chosen(item.id) > 1 ? "s" : ""}${chosen(item.id) ? ` · ${chosen(item.id)} donné${chosen(item.id) > 1 ? "s" : ""}` : ""}</small></span></button>`).join("");
+      const give = tradable.map((item) => `<button type="button" class="fg-pick ${chosen(item.id) ? "on" : ""}" style="--rc:${color(item.rarity)}" data-it-give="${esc(item.id)}"><img src="${thumb(item)}" alt=""><span><b>${esc(item.name)}</b><small>${tag(item.rarity)} · ${freeCopies(item.id) - chosen(item.id)} libre${freeCopies(item.id) - chosen(item.id) > 1 ? "s" : ""}${chosen(item.id) ? ` · ${chosen(item.id)} donné${chosen(item.id) > 1 ? "s" : ""}` : ""}</small></span></button>`).join("");
       const targetRarity = rarity ? NEXT[rarity] : null;
       const rewards = targetRarity ? all.filter((i) => i.rarity === targetRarity && !i.rank).sort(byRarity) : [];
-      const want = rewards.map((item) => `<button type="button" class="fg-pick ${ui.get === item.id ? "on" : ""}" style="--rc:${color(item.rarity)}" data-it-get="${esc(item.id)}"><img src="${thumb(item)}" alt=""><span>${esc(item.name)}<small>${tag(item.rarity)} ${PART_NAME[item.part] ?? ""}${owns(item.id) ? ` · tu en as ${count(item.id)}` : ""}</small></span></button>`).join("");
+      const want = rewards.map((item) => `<button type="button" class="fg-pick ${ui.get === item.id ? "on" : ""}" style="--rc:${color(item.rarity)}" data-it-get="${esc(item.id)}"><img src="${thumb(item)}" alt=""><span><b>${esc(item.name)}</b><small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}${owns(item.id) ? ` · tu en as ${count(item.id)}` : ""}</small></span></button>`).join("");
       const check = tradeValidity(ui.give, ui.get ?? "");
+      const left = `<section><h4>Je donne (${ui.give.length}/${TRADE_COUNT})${ui.give.length ? `<button type="button" class="fg-mini" data-it-clear>Vider</button>` : ""}</h4>
+        <div class="fg-picks">${give || `<p class="fg-empty">Aucun objet à échanger : il faut des exemplaires non portés, communs, rares ou épiques.</p>`}</div></section>`;
+      const right = `<section><h4>Je reçois${targetRarity ? ` · ${esc(rarityName(targetRarity).toLowerCase())}` : ""}</h4>
+        ${targetRarity ? `<div class="fg-picks">${want}</div>` : `<p class="fg-empty">Choisis d'abord les objets à donner : les objets de la rareté au-dessus s'afficheront ici.</p>`}</section>`;
       return `<p class="fg-note">Échange ${TRADE_COUNT} objets de la même rareté contre <b>1 objet de la rareté au-dessus, que tu choisis</b>. Les objets portés ne s'échangent pas.</p>
-        <h4>Je donne (${ui.give.length}/${TRADE_COUNT})${ui.give.length ? ` <button type="button" class="fg-mini" data-it-clear>Vider</button>` : ""}</h4>
-        <div class="fg-igrid">${give || `<p class="fg-note">Aucun objet à échanger : il faut des exemplaires non portés, communs, rares ou épiques.</p>`}</div>
-        ${targetRarity ? `<h4>Je reçois (${esc(rarityName(targetRarity).toLowerCase())})</h4><div class="fg-igrid">${want}</div>` : ""}
-        <div class="fg-inline"><button type="button" class="fg-btn" data-it-trade ${check.ok ? "" : "disabled"}>Échanger</button>${check.ok || !ui.give.length ? "" : `<span class="fg-note">${esc(check.why)}</span>`}</div>`;
+        <div class="fg-trade">${left}${right}</div>
+        <div class="fg-trade-bar"><button type="button" class="fg-btn" data-it-trade ${check.ok ? "" : "disabled"}>Échanger</button>${check.ok || !ui.give.length ? "" : `<span class="fg-note">${esc(check.why)}</span>`}</div>`;
     }
 
     /** Avancement de la collection : objets différents possédés sur le total du catalogue. */

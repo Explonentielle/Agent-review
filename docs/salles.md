@@ -12,6 +12,8 @@ Créer ou modifier une salle :
 
 Exemple complet : `public/rooms/throne.json` (la salle du trône).
 
+Dans la forge, **l'Architecte** (un personnage, en bas à gauche, dès qu'une forge est allumée) explique ces étapes. Sa fenêtre propose le modèle de salle (`src/rooms/template.ts`, livré par `GET /api/rooms` et vérifié par un test), liste les salles du monde avec les erreurs des fichiers refusés, et rappelle le catalogue. Le générateur automatique n'existe pas encore.
+
 ## Le fichier
 
 ```json
