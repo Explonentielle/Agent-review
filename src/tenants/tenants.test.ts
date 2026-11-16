@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Config } from "../config.js";
 import { ForgeRegistry, type Forge } from "../connectors/registry.js";
@@ -107,7 +108,7 @@ describe("exécution par personne", () => {
     expect(configs[1]!.gitlab).toBeNull();
     expect(configs[1]!.github).toBeNull();
     expect(configs[1]!.anthropicApiKey).toBeNull();
-    expect(configs[1]!.dataDir).toBe(`${h.config.dataDir}/tenants/${bob.workspaceId}-${bob.userId}`);
+    expect(configs[1]!.dataDir).toBe(path.join(h.config.dataDir, "tenants", `${bob.workspaceId}-${bob.userId}`));
     expect(other.deps.forges.all()).toEqual([]);
     expect(owner.deps.config.dataDir).toBe(h.config.dataDir);
 

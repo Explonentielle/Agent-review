@@ -17,6 +17,10 @@ export interface Checkout {
  *
  * Le token n'est jamais écrit dans l'URL du remote ni dans .git/config : il est injecté à chaque
  * commande via GIT_CONFIG_* en variable d'env, donc invisible dans `git remote -v` et dans `ps`.
+ *
+ * Les fins de ligne ne sont jamais converties par l'outil (`core.autocrlf=false`, imposé comme le token par GIT_CONFIG_*) : le dossier de
+ * travail contient les octets exacts du dépôt, que la machine soit Linux ou Windows (où un `core.autocrlf=true` global ferait lire à l'agent des
+ * fichiers en CRLF et réécrire des fins de ligne que le dépôt n'a pas). Les `.gitattributes` du dépôt, eux, restent respectés.
  */
 export class RepoWorkspace {
   private readonly reposDir: string;
@@ -197,9 +201,11 @@ export class RepoWorkspace {
         ...process.env,
         ...extraEnv,
         GIT_TERMINAL_PROMPT: "0",
-        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_COUNT: "2",
         GIT_CONFIG_KEY_0: "http.extraHeader",
         GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
+        GIT_CONFIG_KEY_1: "core.autocrlf",
+        GIT_CONFIG_VALUE_1: "false",
       },
       maxBuffer: 50 * 1024 * 1024,
     });
