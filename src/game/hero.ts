@@ -17,6 +17,8 @@ export interface HeroInput {
   reviews: Record<string, number>;
   /** Nombre de tâches de l'agent dev par statut. */
   tasks: Record<string, number>;
+  /** XP des paliers de maîtrise franchis (`progress.ts`). */
+  bonusXp?: number;
 }
 
 export interface Quest {
@@ -55,9 +57,9 @@ export interface Hero {
   achievements: Achievement[];
 }
 
-const REVIEW_DONE = ["needs_human", "auto_ok", "published", "approved"];
+export const REVIEW_DONE = ["needs_human", "auto_ok", "published", "approved"];
 const REVIEW_PUBLISHED = ["published", "approved"];
-const TASK_FORGED = ["mr_created", "mr_updated"];
+export const TASK_FORGED = ["mr_created", "mr_updated"];
 const MAX_LEVEL = 99;
 
 /** XP pour de petites actions plafonnées, afin qu'on ne monte pas de niveau en ajoutant des projets à la chaîne. */
@@ -115,7 +117,8 @@ export function computeHero(input: HeroInput): Hero {
     reviewsDone * XP.review +
     reviewsPublished * XP.reviewPublished +
     forged * XP.forged +
-    Math.min(blocked, XP.blockedCap) * XP.blocked;
+    Math.min(blocked, XP.blockedCap) * XP.blocked +
+    (input.bonusXp ?? 0);
 
   const level = levelFor(xp);
   const levelStart = xpForLevel(level);
@@ -172,6 +175,7 @@ export function computeHero(input: HeroInput): Hero {
       `Review terminée : +${XP.review}, et +${XP.reviewPublished} de plus quand elle est publiée`,
       `Pièce forgée (demande de fusion ouverte ou mise à jour par l'agent) : +${XP.forged}`,
       `Ticket où l'agent s'arrête pour poser sa question : +${XP.blocked} (jusqu'à ${XP.blockedCap} fois)`,
+      "Palier de maîtrise franchi (pièces forgées, reviews, série de jours, raretés, niveau d'arme) : de l'XP en plus, détaillée au tableau",
     ],
     nextQuest: next?.id ?? null,
     achievements,

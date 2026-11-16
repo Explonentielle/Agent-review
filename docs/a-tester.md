@@ -148,10 +148,16 @@ Sur le VPS (Linux) :
 - [ ] Depuis un autre onglet, ouvrir la page avec un en-tête proxy (`curl -H 'X-Forwarded-For: 1.2.3.4' http://127.0.0.1:4321/api/terminal`) : refusé (403) tant que `AUTH_*` n'est pas configuré.
 - [ ] Lancer une tâche de l'agent dev : elle tourne sur ton abonnement, sans erreur d'authentification.
 
-La forge (onglet « La forge ») :
-- [ ] Niveau, XP et quêtes cohérents avec ce que tu as configuré ; la quête « Réveiller l'apprenti » se coche quand Claude est connecté, le bouton « Ouvrir le terminal » mène aux Paramètres et ouvre le terminal.
-- [ ] Pendant une tâche de l'agent dev : un forgeron frappe l'enclume avec des étincelles, sa bulle dit la dernière étape connue ; à la fin, il lève le marteau (« Pièce forgée ! »). Sans activité : un apprenti se promène et parle tout seul.
-- [ ] Avec « réduire les animations » activé dans le système, la scène est immobile mais lisible.
+La forge (onglet « La forge », monde 2D, voir roadmap Annexe B) :
+- [ ] Premier passage : création du personnage, puis Maître Brann parle dans une forge vide. Marcher aux flèches ou ZQSD, cliquer pour aller quelque part, E pour parler. Aucun son tant que tu n'as pas cliqué sur Son ou Musique.
+- [ ] Un fourneau (GitHub ou GitLab) ouvre une fenêtre avec les vrais champs de connexion ; enregistrer un jeton fait apparaître la forge et la quête suivante.
+- [ ] La pierre d'éveil ouvre le bloc Claude et le terminal ; une fois connecté, l'apprenti apparaît.
+- [ ] Le râtelier liste les projets (arme, type au choix, éditeur de projet dans la fenêtre) ; l'apprenti liste les tickets et « Forger » lance une vraie tâche ; le gardien montre les reviews.
+- [ ] Pendant une tâche : un forgeron frappe l'enclume, sa bulle dit la dernière étape ; à la fin, la pièce apparaît chez le marchand, qui la rachète pour de l'or ; l'or sert à acheter une tenue.
+- [ ] Tableau des quêtes, onglet « Aujourd'hui » : trois missions du jour, un coffre, trois missions de la semaine. Après une vraie action (lancer un ticket, forger une pièce, terminer une review), la barre avance, une bannière annonce la mission accomplie, un « ! » apparaît sur le tableau et « Réclamer » donne l'or une seule fois.
+- [ ] Série : après du travail deux jours de suite, « Série N j » apparaît sous la barre de niveau ; le lendemain, avant d'avoir travaillé, elle clignote (« s'éteint à minuit ») ; un jour sans rien la remet à zéro mais garde le record.
+- [ ] Onglets Maîtrises et Prestige : les paliers franchis donnent de l'XP (le niveau monte), le changement de rang déclenche une bannière, un halo autour du forgeron, un bonus d'or chez le marchand et des tenues offertes (rang requis grisé avant).
+- [ ] Recharger la page ou changer d'onglet puis revenir : la progression (nom, or, tenues) est conservée ; vider le stockage du navigateur la remet à zéro.
 
 ## 12. Pas testé du tout
 

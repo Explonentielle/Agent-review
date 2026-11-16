@@ -47,36 +47,7 @@
   button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   [hidden] { display: none !important; }
 
-  /* ---------- La forge (jeu) et terminal Claude ---------- */
-  .forge-hero { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 18px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); }
-  .hero-portrait { width: 96px; height: 96px; border-radius: 20px; background: linear-gradient(160deg, #3a2a1c, #8a3f10); display: grid; place-items: center; }
-  .hero-portrait svg { width: 64px; height: 64px; }
-  .hero-level { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--orange); }
-  .hero-name { font-size: 20px; font-weight: 700; margin: 2px 0; }
-  .hero-sub { color: var(--text-2); font-size: 13px; }
-  .xp-bar { height: 10px; border-radius: 999px; background: var(--gray-soft); overflow: hidden; margin: 10px 0 4px; }
-  .xp-bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--orange), #ffb347); border-radius: 999px; transition: width .6s ease; }
-  .hero-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 14px; }
-  .hero-stat { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
-  .hero-stat b { display: block; font-size: 18px; }
-  .hero-stat span { font-size: 12px; color: var(--muted); }
-  .quest-list { display: grid; gap: 8px; }
-  .quest { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
-  .quest.done { background: var(--green-soft); border-color: var(--green-border); }
-  .quest.next { background: var(--orange-soft); border-color: var(--orange-border); }
-  .quest-check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-strong); display: grid; place-items: center; font-size: 12px; font-weight: 700; }
-  .quest.done .quest-check { background: var(--green); border-color: var(--green); color: #fff; }
-  .quest b { display: block; }
-  .quest small { color: var(--text-2); }
-  .quest-side { display: flex; align-items: center; gap: 10px; }
-  .quest-xp { font-size: 12px; font-weight: 700; color: var(--orange); white-space: nowrap; }
-  .achv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
-  .achv { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface); }
-  .achv.locked { opacity: .5; filter: grayscale(1); }
-  .achv b { display: block; }
-  .achv small { color: var(--text-2); }
-  .forge-section { margin-top: 22px; }
-  .forge-section h2 { font-size: 15px; margin: 0 0 4px; }
+  /* ---------- Terminal Claude ---------- */
   .term-panel { margin-top: 12px; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: #0d1117; }
   .term-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #161b22; color: #c9d1d9; font-size: 12.5px; }
   .term-head .spacer { flex: 1; }
@@ -84,64 +55,6 @@
   #term-host { padding: 8px; overflow-x: auto; }
   .claude-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
   #claude-block { margin-top: 18px; }
-  @media (max-width: 640px) { .forge-hero { grid-template-columns: 1fr; } }
-
-  /* ---------- Atelier animé (SVG + CSS) ---------- */
-  .forge-scene { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
-  .forge-scene svg { display: block; width: 100%; height: auto; }
-  .sc-wall { fill: var(--surface-2); }
-  .sc-floor { fill: #6e4d31; }
-  .sc-floorline { stroke: #4e3622; stroke-width: 2; }
-  .sc-stone { fill: #5b5f68; }
-  .sc-stone-dark { fill: #4a4d55; }
-  .sc-brick { stroke: #434650; stroke-width: 1.5; fill: none; }
-  .sc-mouth { fill: #1b1410; }
-  .sc-glow { animation: sc-pulse 2.4s ease-in-out infinite; }
-  .sc-flame { animation: sc-flicker .9s ease-in-out infinite alternate; }
-  .sc-flame.b { animation-duration: .7s; animation-delay: .15s; }
-  .sc-smoke { fill: #9aa0ab; opacity: 0; animation: sc-smoke 4.5s ease-out infinite; }
-  .sc-smoke.s2 { animation-delay: 1.5s; }
-  .sc-smoke.s3 { animation-delay: 3s; }
-  .sc-star { animation: sc-twinkle 2.6s ease-in-out infinite; }
-  .sc-star.s2 { animation-delay: .9s; }
-  .sc-star.s3 { animation-delay: 1.7s; }
-  @keyframes sc-twinkle { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
-  .w-working .sc-bob { animation: sc-bob .9s ease-in-out infinite; }
-  .w-waiting .sc-bob { animation: sc-sway 3.2s ease-in-out infinite; }
-  .w-done .sc-bob { animation: sc-jump .7s ease-out infinite; }
-  .w-failed .sc-bob { animation: sc-shake .35s linear infinite; }
-  .w-idle .sc-bob { animation: sc-bob .45s ease-in-out infinite; }
-  .sc-arm.swing { animation: sc-swing .9s ease-in infinite; }
-  .sc-arm.rest { transform: rotate(35deg); }
-  .sc-arm.up { transform: rotate(-80deg); animation: sc-wave .6s ease-in-out infinite alternate; }
-  .sc-spark { fill: #ffd37a; opacity: 0; animation: sc-spark .9s ease-out infinite; }
-  .sc-mark { font: 700 16px ui-sans-serif, system-ui, sans-serif; fill: #ffb347; animation: sc-float 1.4s ease-in-out infinite alternate; }
-  .sc-label { font: 10.5px ui-sans-serif, system-ui, sans-serif; fill: var(--muted); text-anchor: middle; }
-  .sc-bubble rect, .sc-bubble path { fill: #fff; stroke: #cfd5df; stroke-width: 1; }
-  .sc-bubble text { font: 11px ui-sans-serif, system-ui, sans-serif; fill: #151922; }
-  .sc-bubble.cycle { opacity: 0; animation: sc-say 24s infinite; }
-  .walker { animation: sc-walk 14s ease-in-out infinite alternate; }
-  .walker-body { animation: sc-turn 28s step-end infinite; }
-  @keyframes sc-flicker { from { transform: scale(1.04, .82); } to { transform: scale(.95, 1.12); } }
-  @keyframes sc-pulse { 0%, 100% { opacity: .5; } 50% { opacity: .9; } }
-  @keyframes sc-smoke { 0% { transform: translate(0, 0) scale(.6); opacity: 0; } 15% { opacity: .5; } 100% { transform: translate(16px, -48px) scale(1.6); opacity: 0; } }
-  @keyframes sc-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.6px); } }
-  @keyframes sc-sway { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(1px); } }
-  @keyframes sc-jump { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-10px); } }
-  @keyframes sc-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
-  @keyframes sc-swing { 0% { transform: rotate(-25deg); } 50% { transform: rotate(72deg); } 58% { transform: rotate(62deg); } 100% { transform: rotate(-25deg); } }
-  @keyframes sc-wave { to { transform: rotate(-62deg); } }
-  @keyframes sc-spark { 0%, 49% { opacity: 0; transform: translate(0, 0); } 52% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)); } }
-  @keyframes sc-float { from { transform: translateY(0); } to { transform: translateY(-4px); } }
-  @keyframes sc-say { 0% { opacity: 0; } 2% { opacity: 1; } 23% { opacity: 1; } 25%, 100% { opacity: 0; } }
-  @keyframes sc-walk { from { transform: translateX(0); } to { transform: translateX(380px); } }
-  @keyframes sc-turn { 0% { transform: scaleX(1); } 50% { transform: scaleX(-1); } }
-  @media (prefers-reduced-motion: reduce) {
-    .forge-scene * { animation: none !important; }
-    .sc-bubble.cycle { opacity: 0; }
-    .sc-bubble.cycle.c0 { opacity: 1; }
-    .sc-arm.swing { transform: rotate(30deg); }
-  }
 
   /* ---------- Structure : sidebar + contenu ---------- */
   body { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: 100vh; overflow: hidden; }
@@ -693,6 +606,7 @@ function route() {
   if (state.tab === "tickets") loadTickets(false);
   if (state.tab === "dev") { if (id) showTask(Number(id)); else { state.taskId = null; renderTaskEmpty(); refreshTasks(); } }
   if (state.tab === "reviews") { if (id) showReview(Number(id)); else { state.reviewId = null; renderReviewEmpty(); refreshReviews(); } }
+  if (state.tab !== "forge") stopForge();
   if (state.tab === "forge") loadForge();
   if (state.tab === "settings") loadSettings();
 }
@@ -1111,183 +1025,42 @@ let projectsData = [];
 let editingProject = null;
 
 /* =====================================================================
-   La forge : héros, quêtes et hauts faits (déduits de l'activité réelle)
+   La forge : un petit monde 2D jouable (public/forge/), chargé à la première visite
    ===================================================================== */
-const QUEST_LABEL = { settings: "Ouvrir les paramètres", terminal: "Ouvrir le terminal", tickets: "Voir les tickets", reviews: "Voir les reviews" };
-const ANVIL = `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M6 22h38c0 7-5 12-12 12h-2v8h8v8H18v-8h8v-8h-2C14 34 8 30 6 22z" fill="#e8d5b7"/><path d="M44 22l14-5v7l-14 3z" fill="#e8d5b7"/><path d="M48 4l2.2 5.3L55.5 11.5l-5.3 2.2L48 19l-2.2-5.3L40.5 11.5l5.3-2.2z" fill="#ffb347"/></svg>`;
+let forgeAssets = null;
+
+function loadForgeAssets() {
+  forgeAssets ??= (async () => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/forge/forge.css";
+    document.head.append(css);
+    for (const file of ["sprites", "audio", "popups", "game"]) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = `/forge/${file}.js`;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Impossible de charger ${file}.js`));
+        document.head.append(script);
+      });
+    }
+  })().catch((err) => { forgeAssets = null; throw err; });
+  return forgeAssets;
+}
 
 async function loadForge() {
   const root = document.getElementById("view-forge");
-  if (!state.hero) root.innerHTML = `<div class="page"><div class="page-inner"><div class="empty">Allumage de la forge…</div></div></div>`;
   try {
-    const hero = await api("/api/hero");
-    // La page entière n'est redessinée que si le héros change ; si seuls les forgerons changent, seule la scène l'est (ses animations ne repartent pas pour rien)
-    const { workers, ...core } = hero;
-    const coreKey = JSON.stringify(core);
-    const workersKey = JSON.stringify(workers);
-    if (coreKey === state.heroKey && root.querySelector(".forge-hero")) {
-      if (workersKey !== state.workersKey) {
-        state.hero = hero;
-        state.workersKey = workersKey;
-        mountForgeScene();
-      }
-      return;
-    }
-    state.hero = hero;
-    state.heroKey = coreKey;
-    state.workersKey = workersKey;
+    await loadForgeAssets();
   } catch (err) {
     root.innerHTML = `<div class="page"><div class="page-inner"><div class="callout err">${ICON.err}<h3>La forge est éteinte</h3><pre>${esc(err.message)}</pre></div></div></div>`;
     return;
   }
-  renderForge();
+  if (state.tab === "forge") window.ForgeGame.mount(root);
 }
 
-function renderForge() {
-  const h = state.hero;
-  const root = document.getElementById("view-forge");
-  const done = h.quests.filter((q) => q.done).length;
-  const maxed = h.level >= 99;
-  const quest = (q) => `<div class="quest ${q.done ? "done" : q.id === h.nextQuest ? "next" : ""}">
-      <span class="quest-check">${q.done ? "✓" : ""}</span>
-      <div><b>${esc(q.title)}</b><small>${esc(q.hint)}</small></div>
-      <div class="quest-side"><span class="quest-xp">+${q.xp} XP</span>${q.done ? "" : `<button type="button" class="btn sm ${q.id === h.nextQuest ? "primary" : ""}" data-quest="${esc(q.action)}">${esc(QUEST_LABEL[q.action] ?? "Y aller")}</button>`}</div>
-    </div>`;
-  root.innerHTML = `<div class="page"><div class="page-inner">
-    <div class="page-head"><div><h1>La forge</h1><div class="sub">Ton activité réelle, mise en jeu : chaque action de l'outil rapporte de l'expérience.</div></div></div>
-    <div class="forge-hero">
-      <div class="hero-portrait">${ANVIL}</div>
-      <div>
-        <div class="hero-level">Niveau ${h.level} · ${esc(h.heroClass)}</div>
-        <div class="hero-name">${esc(h.title)}</div>
-        <div class="hero-sub">Spécialité : ${esc(h.specialty)} · ${h.xp} XP</div>
-        <div class="xp-bar" role="progressbar" aria-valuenow="${h.percent}" aria-valuemin="0" aria-valuemax="100"><i style="width:${h.percent}%"></i></div>
-        <small class="note" style="margin:0">${maxed ? "Niveau maximum atteint." : `${h.levelXp} / ${h.levelSize} XP avant le niveau ${h.level + 1}`}</small>
-      </div>
-    </div>
-    <div class="hero-stats">${h.stats.map((s) => `<div class="hero-stat"><b>${s.value}</b><span>${esc(s.label)}</span></div>`).join("")}</div>
-    <div id="forge-scene-slot"></div>
-    <section class="forge-section"><h2>Premiers pas (${done}/${h.quests.length})</h2>
-      <p class="note" style="margin:0 0 8px">${h.nextQuest ? "Une quête après l'autre : l'outil est prêt quand elles sont toutes accomplies." : "Toutes les quêtes sont accomplies : la forge tourne à plein régime."}</p>
-      <div class="quest-list">${h.quests.map(quest).join("")}</div>
-    </section>
-    <section class="forge-section"><h2>Hauts faits (${h.achievements.filter((a) => a.unlocked).length}/${h.achievements.length})</h2>
-      <div class="achv-grid">${h.achievements.map((a) => `<div class="achv ${a.unlocked ? "" : "locked"}"><b>${esc(a.title)}</b><small>${esc(a.description)}</small></div>`).join("")}</div>
-    </section>
-    <details class="forge-section"><summary>Comment gagner de l'XP ?</summary>
-      <ul class="note">${h.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
-    </details>
-  </div></div>`;
-  mountForgeScene();
-}
-
-/* ---------- Atelier animé : une forge, un forgeron par agent actif, des bulles d'après l'état réel ---------- */
-const SMITH_SHIRTS = ["#3e6fb0", "#b0503e", "#3e9a6a", "#8a5cb0"];
-const SMITH_HAIRS = ["#3a2a1c", "#c9a227", "#23252b", "#8a3b12"];
-const IDLE_LINES = ["Le feu est prêt, patron.", "Confie-moi un ticket à forger !", "J'aiguise mes outils…", "Une demande de fusion à contrôler ?"];
-const SCENE_WIDTH = 760;
-
-/** Coupe un texte en deux lignes au plus, sans casser les mots. */
-function wrapLines(text, width = 24, maxLines = 2) {
-  const lines = [];
-  let line = "";
-  for (const word of String(text).split(/\s+/).filter(Boolean)) {
-    if (line && `${line} ${word}`.length > width) { lines.push(line); line = word; } else line = line ? `${line} ${word}` : word;
-  }
-  if (line) lines.push(line);
-  if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] += "…"; }
-  return lines.map((l) => (l.length > width ? `${l.slice(0, width - 1)}…` : l));
-}
-
-/** Bulle de dialogue au-dessus d'un personnage (cx : abscisse du personnage). Le texte vient de la base ou du modèle : toujours échappé. */
-function sceneBubble(text, cx, cls = "", style = "", clamp = true, width = 24, maxLines = 2) {
-  const lines = wrapLines(text, width, maxLines);
-  const w = Math.max(...lines.map((l) => l.length)) * 6.1 + 18;
-  const h = lines.length * 14 + 10;
-  const x = clamp ? Math.min(Math.max(cx - w / 2, 6), SCENE_WIDTH - 6 - w) : cx - w / 2; // l'apprenti qui se promène garde sa bulle centrée sur lui
-  const y = 88 - h;
-  const tail = clamp ? Math.min(Math.max(cx, x + 12), x + w - 12) : cx;
-  return `<g class="sc-bubble ${cls}" style="${style}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8"/><path d="M${tail - 5} ${y + h} l5 9 l5 -9z"/>${lines.map((l, i) => `<text x="${x + 9}" y="${y + 16 + i * 14}">${esc(l)}</text>`).join("")}</g>`;
-}
-
-/** Un forgeron dessiné autour de l'abscisse 0, pieds à y = 190. L'état choisit la pose et le mouvement. */
-function smithSvg(index, state) {
-  const arm = state === "done" ? "up" : state === "working" ? "swing" : "rest";
-  const mark = { blocked: "?", failed: "!", waiting: "z" }[state];
-  return `<g class="sc-smith w-${state}"><g class="sc-bob">
-    <rect x="-9" y="166" width="7" height="24" rx="2" fill="#3b3a47"/><rect x="2" y="166" width="7" height="24" rx="2" fill="#3b3a47"/>
-    <rect x="-13" y="130" width="26" height="40" rx="7" fill="${SMITH_SHIRTS[index % 4]}"/>
-    <rect x="-10" y="140" width="20" height="30" rx="4" fill="#6b4423"/>
-    <circle cx="0" cy="118" r="11" fill="#f2c9a0"/>
-    <path d="M-11.5 117a11.5 11.5 0 0 1 23 0z" fill="${SMITH_HAIRS[index % 4]}"/>
-    <circle cx="4" cy="119" r="1.5" fill="#23252b"/>
-    <g transform="translate(9 136)"><g class="sc-arm ${arm}">
-      <path d="M0 0L22 14" stroke="#f2c9a0" stroke-width="6" stroke-linecap="round"/>
-      <path d="M22 14L32 -10" stroke="#8b5a2b" stroke-width="4" stroke-linecap="round"/>
-      <rect x="24" y="-18" width="17" height="10" rx="2" fill="#9aa0ab"/>
-    </g></g>
-    ${mark ? `<text class="sc-mark" x="16" y="108">${mark}</text>` : ""}
-  </g></g>`;
-}
-
-/** Enclume centrée en 0, base à y = 190, avec les étincelles du coup de marteau quand le forgeron travaille. */
-function anvilSvg(sparks) {
-  return `<path d="M-30 166h52c0 8-6 13-14 13h-2v5h9v6h-38v-6h9v-5h-2c-9 0-14-6-14-13z" fill="#7d838f"/><path d="M22 166l14 4-14 4z" fill="#7d838f"/><rect x="-30" y="164" width="52" height="4" rx="1" fill="#a3a9b5"/>
-    ${sparks ? `<g transform="translate(-4 163)"><circle class="sc-spark" r="2.2" style="--dx:-16px;--dy:-18px"/><circle class="sc-spark" r="1.8" style="--dx:6px;--dy:-24px;animation-delay:.02s"/><circle class="sc-spark" r="2" style="--dx:20px;--dy:-14px;animation-delay:.04s"/></g>` : ""}`;
-}
-
-/** Fenêtre sur la nuit, au fond de l'atelier : lune et étoiles qui scintillent. */
-function windowSvg() {
-  return `<rect x="612" y="30" width="104" height="80" rx="6" fill="#16213a" stroke="#4a4d55" stroke-width="5"/><path d="M664 30v80M612 70h104" stroke="#4a4d55" stroke-width="4"/>
-    <circle cx="692" cy="50" r="9" fill="#f4e9b8"/><circle cx="696" cy="47" r="8" fill="#16213a"/>
-    <circle class="sc-star" cx="630" cy="48" r="1.6" fill="#fff"/><circle class="sc-star s2" cx="648" cy="88" r="1.4" fill="#fff"/><circle class="sc-star s3" cx="684" cy="92" r="1.6" fill="#fff"/><circle class="sc-star s2" cx="640" cy="62" r="1.2" fill="#fff"/>`;
-}
-
-/** La forge (four, flammes, fumée) à gauche de la scène. */
-function furnaceSvg() {
-  return `<defs><radialGradient id="sc-glow-grad"><stop offset="0" stop-color="#ff9f45" stop-opacity=".85"/><stop offset="1" stop-color="#ff9f45" stop-opacity="0"/></radialGradient></defs>
-    <rect class="sc-stone-dark" x="92" y="40" width="28" height="60"/>
-    <rect class="sc-stone" x="24" y="96" width="126" height="94" rx="4"/>
-    <path class="sc-brick" d="M24 120h126M24 144h126M24 168h126M64 96v24M110 96v24M44 120v24M90 120v24M130 120v24M64 144v24M110 144v24M44 168v22M90 168v22M130 168v22"/>
-    <rect class="sc-mouth" x="50" y="128" width="74" height="50" rx="8"/>
-    <circle class="sc-glow" cx="87" cy="172" r="52" fill="url(#sc-glow-grad)"/>
-    <g transform="translate(70 176)"><path class="sc-flame" d="M0 0C-10-14 2-24 8-38C12-24 24-20 20 0z" fill="#ff7a1a"/></g>
-    <g transform="translate(90 176)"><path class="sc-flame b" d="M0 0C-8-12 2-20 6-32C10-20 20-16 16 0z" fill="#ffc83d"/></g>
-    <g transform="translate(106 40)"><circle class="sc-smoke" r="7"/><circle class="sc-smoke s2" r="7"/><circle class="sc-smoke s3" r="7"/></g>`;
-}
-
-/** L'atelier complet : sans personne au travail, un apprenti se promène et rêve à voix haute ; sinon un forgeron par agent actif. */
-function forgeSceneSvg(workers) {
-  const count = workers.length;
-  const slots = workers.map((_, i) => 230 + (i + 0.5) * (500 / count));
-  const body = count === 0
-    ? `<g transform="translate(220 0)"><g class="walker"><g class="walker-body w-idle">${smithSvg(0, "idle")}</g>
-         ${IDLE_LINES.map((line, i) => sceneBubble(line, 0, `cycle c${i}`, `animation-delay:${i * 6}s`, false)).join("")}</g></g>`
-    : workers.map((w, i) => {
-      const x = slots[i];
-      const cx = x - 36;
-      const crowded = count >= 3; // à partir de trois, bulles et libellés plus étroits pour ne pas se chevaucher
-      const short = w.label.length > 21 ? `${w.label.slice(0, 20)}…` : w.label;
-      return `<g transform="translate(${x} 0)">${anvilSvg(w.state === "working")}<g transform="translate(-36 0)">${smithSvg(i, w.state)}</g></g>
-        ${sceneBubble(w.line, cx, "", "", true, crowded ? 17 : 24, crowded ? 3 : 2)}
-        <text class="sc-label" x="${cx}" y="210"><title>${esc(w.label)}</title>${esc(short)}</text>`;
-    }).join("");
-  const label = count ? `Atelier : ${count} forgeron${count > 1 ? "s" : ""} au travail` : "Atelier : aucun agent en cours, l'apprenti attend un ticket";
-  return `<svg viewBox="0 0 ${SCENE_WIDTH} 240" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title>
-    <rect class="sc-wall" width="${SCENE_WIDTH}" height="190"/><rect class="sc-floor" y="190" width="${SCENE_WIDTH}" height="50"/><path class="sc-floorline" d="M0 190H${SCENE_WIDTH}"/>
-    ${windowSvg()}${furnaceSvg()}${body}</svg>`;
-}
-
-function mountForgeScene() {
-  const slot = document.getElementById("forge-scene-slot");
-  if (slot) slot.innerHTML = `<div class="forge-scene">${forgeSceneSvg(state.hero?.workers ?? [])}</div>`;
-}
-
-/** Un clic sur le bouton d'une quête mène à l'endroit où l'accomplir. */
-function runQuestAction(action) {
-  if (action === "terminal") { state.autoTerminal = true; return go("#settings"); }
-  return go({ settings: "#settings", tickets: "#tickets", reviews: "#reviews" }[action] ?? "#settings");
-}
+/** On quitte la forge : le monde se met en pause et le son s'arrête. */
+function stopForge() { window.ForgeGame?.pause(); }
 
 /* =====================================================================
    Terminal Claude : connexion de l'abonnement depuis le navigateur
@@ -1327,8 +1100,7 @@ async function refreshClaudeStatus(force) {
     if (row) row.innerHTML = claudeStatusRow();
     if (state.claude.connected && before === false) {
       toast("Claude est connecté : l'apprenti est réveillé.");
-      state.hero = null;
-      state.heroKey = null;
+      document.dispatchEvent(new Event("ra:changed"));
     }
   } catch (err) {
     if (force) toast(err.message, true);
@@ -1548,9 +1320,9 @@ async function secretAction(act, name) {
     }
     await refreshHeader();
     state.secrets = (await api("/api/secrets")).secrets;
-    document.getElementById("forges-block").innerHTML = forgesBlock();
-    document.getElementById("secrets-block").innerHTML = secretsBlock();
-    document.getElementById("api-key-state").innerHTML = apiKeyPill();
+    const blocks = { "forges-block": forgesBlock, "secrets-block": secretsBlock, "api-key-state": apiKeyPill };
+    for (const [id, render] of Object.entries(blocks)) { const el = document.getElementById(id); if (el) el.innerHTML = render(); }
+    document.dispatchEvent(new Event("ra:changed"));
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1916,6 +1688,7 @@ async function saveProject() {
     editingProject = null;
     state.issues = null;
     await loadSettings();
+    document.dispatchEvent(new Event("ra:changed"));
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1945,7 +1718,6 @@ document.addEventListener("click", async (e) => {
   if ((t = el("[data-launch]"))) { const [source, p, i] = t.dataset.launch.split(":"); return launchAgent(source, Number(p), Number(i)); }
   if ((t = el("[data-configure]"))) { state.prefillProject = t.dataset.configure; state.prefillSource = t.dataset.configureSource; return go("#settings"); }
   if ((t = el("[data-copy]"))) return copy(t.dataset.copy);
-  if ((t = el("[data-quest]"))) return runQuestAction(t.dataset.quest);
   if ((t = el("[data-addlabel]"))) {
     const field = lastLabelField || document.querySelector("[name='workflow.todoLabels']");
     const current = lines(field.value);
@@ -2053,7 +1825,6 @@ window.addEventListener("hashchange", route);
     refreshHeader();
     if (state.tab === "reviews") refreshReviews().catch(() => undefined);
     if (state.tab === "dev") refreshTasks().catch(() => undefined);
-    if (state.tab === "forge") loadForge().catch(() => undefined);
   }, 10000);
 })();
 </script>

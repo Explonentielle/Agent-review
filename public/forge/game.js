@@ -1,0 +1,710 @@
+/* La forge : un petit monde 2D jouable. Le personnage se balade case par case, parle aux PNJ (les agents), touche les objets (fours, râtelier,
+   pierre d'éveil...) qui ouvrent les vrais réglages dans des popups. Tout est déduit de l'état réel de l'outil ; la progression de jeu
+   (nom, apparence, or, tenues, type d'arme par projet) est gardée dans ce navigateur. */
+(() => {
+  "use strict";
+  const S = window.ForgeSprites, A = window.ForgeAudio;
+  const T = S.T, W = 24, H = 15, SAVE_KEY = "ra.game.v1";
+  const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  const KEY_DIR = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", z: "up", w: "up", s: "down", q: "left", a: "left", d: "right" };
+  const SKINS = ["#f2c9a0", "#d9a066", "#8d5a3b"];
+  const HAIRS = ["#3a2a1c", "#c9a227", "#23252b", "#8a3b12", "#e8e4da"];
+  const TUNICS = ["#3e6fb0", "#b0503e", "#3e9a6a", "#8a5cb0", "#d8a63a", "#2f7a8a"];
+  const ANVIL_X = [8, 11, 14, 17];
+  /** Tenues à acheter chez le marchand : un décor de jeu, sans effet sur l'outil. */
+  const COSMETICS = [
+    { id: "cape", name: "Cape rouge", price: 120, part: "cape", value: "#b0302e" },
+    { id: "helm", name: "Casque de cuivre", price: 200, part: "hat", value: "copper" },
+    { id: "apron", name: "Tablier doré", price: 400, part: "apron", value: "#d8a63a" },
+    // Tenues réservées à un rang de prestige : offertes dès que le rang est atteint
+    { id: "cape-silver", name: "Cape d'argent", price: 0, part: "cape", value: "#c8d0dc", rank: "silver" },
+    { id: "apron-gold", name: "Tablier de maître", price: 0, part: "apron", value: "#f4c542", rank: "gold" },
+    { id: "helm-mithril", name: "Heaume de mithril", price: 0, part: "hat", value: "helmet", rank: "mithril" },
+    { id: "cape-violet", name: "Cape d'orichalque", price: 0, part: "cape", value: "#7a3fc4", rank: "orichalcum" },
+  ];
+  const RANK_ORDER = ["iron", "bronze", "silver", "gold", "mithril", "orichalcum"];
+  const rect = (x, y, w, h) => { const out = []; for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) out.push([i, j]); return out; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /* ---------- progression de jeu, dans ce navigateur ---------- */
+  const freshSave = () => ({ v: 1, name: "", look: { skin: SKINS[0], hair: HAIRS[1], tunic: TUNICS[0] }, gold: 0, sold: [], owned: [], worn: {}, weapons: {}, seen: [], lastLevel: 0, created: false, intro: false, claimed: {}, lastRank: "" });
+  function loadSave() {
+    const save = freshSave();
+    try {
+      const raw = JSON.parse(localStorage.getItem(SAVE_KEY) || "{}");
+      Object.assign(save, raw, { look: { ...save.look, ...(raw.look || {}) } });
+    } catch { /* stockage indisponible ou illisible : on repart de zéro */ }
+    for (const k of ["sold", "owned", "seen"]) if (!Array.isArray(save[k])) save[k] = [];
+    for (const k of ["worn", "weapons", "claimed"]) if (!save[k] || typeof save[k] !== "object" || Array.isArray(save[k])) save[k] = {};
+    if (typeof save.lastRank !== "string") save.lastRank = "";
+    // Les réclamations anciennes ne servent plus (une mission est liée à son jour) : on ne garde que les plus récentes
+    const keys = Object.keys(save.claimed);
+    if (keys.length > 80) for (const key of keys.slice(0, keys.length - 60)) delete save.claimed[key];
+    return save;
+  }
+
+  const g = {
+    root: null, stage: null, canvas: null, c: null, el: {},
+    running: false, raf: 0, last: 0, time: 0, poll: 0,
+    save: loadSave(), data: { hero: null, armory: { weapons: [], loot: [] }, forges: [] }, firstRefresh: true, done: null,
+    player: { tx: 12, ty: 11, x: 12 * T, y: 11 * T, dir: "up", frame: 0, moving: null, path: [] },
+    keys: [], fx: [], entities: [], dlg: null, popup: false, custom: null, labelEls: new Map(), lastBump: 0, lastFire: 0, hammer: new Map(),
+  };
+  const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(g.save)); } catch { /* stockage indisponible */ } };
+
+  /* ---------- données réelles ---------- */
+  const flag = (id) => g.data.hero?.quests.some((q) => q.id === id && q.done) ?? false;
+  const lit = (kind) => g.data.forges.includes(kind);
+  const hasLoot = () => g.data.armory.loot.length > 0 || g.save.sold.length > 0;
+  const modal = () => Boolean(g.dlg || g.popup || g.custom);
+
+  /* ---------- série, missions, prestige : ce qui donne envie de revenir (calculé par le serveur) ---------- */
+  const progress = () => g.data.hero?.progress ?? null;
+  const prestige = () => g.data.hero?.prestige ?? null;
+  const rankIndex = () => Math.max(0, RANK_ORDER.indexOf(prestige()?.rank.id ?? "iron"));
+  /** Bonus d'or du rang chez le marchand, en pourcent. */
+  const goldBonus = () => prestige()?.rank.goldBonusPct ?? 0;
+  const missionList = () => { const p = progress(); return p ? [...p.daily, p.chest, ...p.weekly] : []; };
+  const claimKey = (m) => `${m.id}@${m.period}`;
+  const claimable = () => missionList().filter((m) => m.done && !g.save.claimed[claimKey(m)]);
+  /** Réclame l'or de missions accomplies (`keys` : leurs clés, ou rien pour tout réclamer). @returns L'or gagné. */
+  function claim(keys) {
+    let total = 0;
+    for (const m of claimable()) {
+      if (keys && !keys.includes(claimKey(m))) continue;
+      g.save.claimed[claimKey(m)] = true;
+      total += m.gold;
+    }
+    if (!total) return 0;
+    g.save.gold += total;
+    persist(); A.sfx.coin(); renderHud();
+    banner(`+${total} or : récompenses réclamées.`);
+    return total;
+  }
+
+  /** Type d'arme d'un projet : celui choisi au râtelier, sinon un type fixe tiré de son nom. */
+  function weaponType(weapon) {
+    const chosen = g.save.weapons[weapon.key];
+    if (chosen && S.TYPES.some((t) => t.id === chosen)) return chosen;
+    let h = 0;
+    for (const ch of weapon.key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return S.TYPES[h % S.TYPES.length].id;
+  }
+  const rackWeapons = () => g.data.armory.weapons.slice(0, 6).map((w) => [weaponType(w), w.grade]);
+  const playerLook = () => {
+    const worn = g.save.worn, owned = (id) => g.save.owned.includes(id) && worn[id] !== false;
+    const look = { ...g.save.look };
+    for (const item of COSMETICS) if (owned(item.id)) look[item.part] = item.value;
+    return look;
+  };
+
+  /* ---------- le monde ---------- */
+  function buildEntities() {
+    const E = [];
+    const add = (e) => E.push({ solid: true, ...e });
+    add({ id: "brann", name: "Maître Brann", verb: "Parler", tiles: [[11, 9]], z: 10 * T, lx: 11.5, ly: 8.35, always: true, draw: (c) => S.person(c, 11 * T, 9 * T, { ...S.LOOKS.brann, dir: "down" }), interact: brannTalk });
+    add({ id: "furnace-github", name: "Forge GitHub", verb: "Forger", tiles: rect(2, 1, 4, 3), z: 4 * T, lx: 4, ly: 4.35, always: true, draw: (c, t) => S.furnace(c, 2, 1, lit("github"), t), interact: () => furnaceTalk("github") });
+    add({ id: "furnace-gitlab", name: "Forge GitLab", verb: "Forger", tiles: rect(18, 1, 4, 3), z: 4 * T, lx: 20, ly: 4.35, always: true, draw: (c, t) => S.furnace(c, 18, 1, lit("gitlab"), t), interact: () => furnaceTalk("gitlab") });
+    add({ id: "board", name: "Tableau des quêtes", verb: "Lire", tiles: rect(11, 1, 2, 2), z: 3 * T, lx: 12, ly: 3.4, always: true, draw: (c) => S.board(c, 11, 1), interact: () => openPopup("board") });
+    add({ id: "stone", name: "Pierre d'éveil", verb: "Toucher", tiles: [[6, 3], [6, 4]], z: 5 * T + 12, lx: 6.5, ly: 3.1, when: () => flag("forge"), draw: (c, t) => S.stone(c, 6, 3, flag("claude"), t), interact: () => openPopup("stone") });
+    add({ id: "rack", name: "Râtelier", verb: "Choisir", tiles: rect(1, 7, 6, 2), z: 9 * T, lx: 4, ly: 6.85, when: () => flag("forge"), draw: (c) => S.rack(c, 1, 7, rackWeapons()), interact: rackTalk });
+    add({ id: "anvils", tiles: ANVIL_X.map((x) => [x, 7]), z: 8 * T, when: () => flag("forge"), decor: true, draw: (c) => ANVIL_X.forEach((x) => S.anvil(c, x, 7)) });
+    add({ id: "crates", tiles: [[22, 5], [22, 6], [1, 12]], z: 7 * T, when: () => flag("forge"), decor: true, draw: (c) => { S.barrel(c, 22, 5); S.crate(c, 22, 6); S.barrel(c, 1, 12); } });
+    add({ id: "merchant", name: "Marchand Sélim", verb: "Commercer", tiles: rect(17, 10, 6, 3), z: 13 * T, lx: 19.5, ly: 7.6, when: hasLoot, draw: (c) => { S.person(c, 19 * T, 8 * T, { ...S.LOOKS.marchand, dir: "down" }); S.stall(c, 17, 10); }, interact: merchantTalk });
+    add({ id: "apprentice", name: "Apprenti", verb: "Parler", tiles: [[9, 11]], z: 12 * T, lx: 9.5, ly: 10.35, when: () => flag("claude"), draw: (c) => S.person(c, 9 * T, 11 * T, { ...S.LOOKS.apprenti, dir: "right" }), interact: apprenticeTalk });
+    add({ id: "guard", name: "Gardien des revues", verb: "Parler", tiles: [[6, 11]], z: 12 * T, lx: 6.5, ly: 10.35, when: () => flag("project"), draw: (c) => S.person(c, 6 * T, 11 * T, { ...S.LOOKS.gardien, dir: "right" }), interact: guardTalk });
+    add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[15, 10]], z: 11 * T, lx: 15.5, ly: 9.35, when: () => flag("dev"), draw: (c) => S.person(c, 15 * T, 10 * T, { ...S.LOOKS.scribe, dir: "left" }), interact: scribeTalk });
+    add({ id: "door", name: "Porte", verb: "Sortir", tiles: [[11, 14], [12, 14]], z: 0, lx: 12, ly: 13.7, always: true, decor: true, draw: () => undefined, interact: doorTalk });
+    return E;
+  }
+
+  /** Les apprentis au travail : un par agent actif (tâche ou review), à son enclume. */
+  function workerEntities() {
+    const looks = [S.LOOKS.apprenti, S.LOOKS.apprenti2, S.LOOKS.apprenti3, S.LOOKS.apprenti];
+    return (g.data.hero?.workers ?? []).slice(0, ANVIL_X.length).map((w, i) => {
+      const ax = ANVIL_X[i];
+      return {
+        id: `worker-${w.id}`, name: w.label, verb: "Voir", worker: w, slot: i, tiles: [[ax, 6]], z: 7 * T, lx: ax + 0.5, ly: 5.55, always: true, solid: true, bubble: w.line,
+        interact: () => openPopup("worker", { worker: w }),
+        draw: (c, t) => {
+          const working = w.state === "working";
+          const swing = working && Math.floor(t * 2.2 + i * 0.37) % 2 === 1;
+          S.person(c, ax * T, 6 * T, { ...looks[i], dir: "down", frame: swing ? 1 : 0, item: working || w.state === "done" ? "hammer" : null });
+          if (working) S.sparks(c, ax * T + 8, 7 * T + 6, t + i * 0.3);
+        },
+      };
+    });
+  }
+
+  const isVisible = (e) => e.always || (e.when ? e.when() : true);
+  const entityAt = (tx, ty) => g.entities.find((e) => isVisible(e) && e.tiles.some(([x, y]) => x === tx && y === ty)) ?? null;
+  const free = (tx, ty) => {
+    if (tx < 0 || tx >= W || ty < 3 || ty >= H - 1) return false;
+    const e = entityAt(tx, ty);
+    return !(e && e.solid);
+  };
+  const front = () => { const [dx, dy] = DIRS[g.player.dir]; return entityAt(g.player.tx + dx, g.player.ty + dy); };
+
+  /* ---------- déplacements ---------- */
+  function tryStep(dir) {
+    const p = g.player;
+    p.dir = dir;
+    const [dx, dy] = DIRS[dir], nx = p.tx + dx, ny = p.ty + dy;
+    if (!free(nx, ny)) {
+      if (g.time - g.lastBump > 0.28) { g.lastBump = g.time; A.sfx.bump(); }
+      return false;
+    }
+    p.moving = { fx: p.x, fy: p.y, tx: nx * T, ty: ny * T, k: 0 };
+    p.tx = nx; p.ty = ny;
+    return true;
+  }
+  function bfs(sx, sy, gx, gy) {
+    const q = [[sx, sy]], from = new Map([[`${sx},${sy}`, null]]);
+    while (q.length) {
+      const [x, y] = q.shift();
+      if (x === gx && y === gy) break;
+      for (const d of Object.keys(DIRS)) {
+        const nx = x + DIRS[d][0], ny = y + DIRS[d][1], k = `${nx},${ny}`;
+        if (!from.has(k) && free(nx, ny)) { from.set(k, [x, y, d]); q.push([nx, ny]); }
+      }
+    }
+    const out = [];
+    let cur = from.has(`${gx},${gy}`) ? [gx, gy] : null;
+    while (cur && from.get(`${cur[0]},${cur[1]}`)) { const [px, py, d] = from.get(`${cur[0]},${cur[1]}`); out.unshift(d); cur = [px, py]; }
+    return out;
+  }
+  /** Marche jusqu'à une case, ou jusqu'à côté d'un objet puis lui parle. */
+  function walkTo(tx, ty) {
+    const p = g.player, target = entityAt(tx, ty);
+    let gx = tx, gy = ty;
+    if (!free(tx, ty)) {
+      // Une case occupée : on va à la case libre la plus proche autour de l'objet (ou du mur)
+      const tiles = target ? target.tiles : [[tx, ty]];
+      const around = tiles.flatMap(([x, y]) => Object.values(DIRS).map(([dx, dy]) => [x + dx, y + dy])).filter(([x, y]) => free(x, y));
+      const best = around
+        .map(([x, y]) => ({ x, y, len: x === p.tx && y === p.ty ? 0 : bfs(p.tx, p.ty, x, y).length || Infinity }))
+        .filter((c) => c.len !== Infinity)
+        .sort((a, b) => a.len - b.len)[0];
+      if (!best) return;
+      gx = best.x; gy = best.y;
+    }
+    const steps = gx === p.tx && gy === p.ty ? [] : bfs(p.tx, p.ty, gx, gy);
+    if (!steps.length && (gx !== p.tx || gy !== p.ty)) return;
+    p.path = steps;
+    if (target) p.path.push(`face:${target.id}`);
+  }
+  function faceEntity(id) {
+    const p = g.player;
+    for (const d of Object.keys(DIRS)) {
+      const e = entityAt(p.tx + DIRS[d][0], p.ty + DIRS[d][1]);
+      if (e && e.id === id) { p.dir = d; return true; }
+    }
+    return false;
+  }
+
+  /* ---------- dialogues à la Pokémon ---------- */
+  function startDialog(dlg) {
+    g.dlg = { speaker: "", lines: [], i: 0, shown: 0, options: null, sel: 0, timer: 0, ...dlg };
+    g.player.path = [];
+    const el = g.el.dialog;
+    el.hidden = false;
+    el.querySelector(".fg-who").textContent = g.dlg.speaker;
+    el.querySelector(".fg-who").hidden = !g.dlg.speaker;
+    showLine();
+  }
+  function showLine() {
+    const d = g.dlg, text = d.lines[d.i];
+    d.shown = 0;
+    g.el.dialog.querySelector(".fg-options").innerHTML = "";
+    g.el.dialog.querySelector(".fg-more").hidden = true;
+    clearInterval(d.timer);
+    d.timer = setInterval(() => {
+      d.shown = Math.min(text.length, d.shown + 1);
+      g.el.dialog.querySelector(".fg-text").textContent = text.slice(0, d.shown);
+      if (d.shown % 2 === 0 && text[d.shown - 1] !== " ") A.sfx.blip((d.speaker.length + d.shown) % 5);
+      if (d.shown >= text.length) { clearInterval(d.timer); lineDone(); }
+    }, 22);
+  }
+  function lineDone() {
+    const d = g.dlg, last = d.i >= d.lines.length - 1;
+    if (last && d.options) renderOptions();
+    else g.el.dialog.querySelector(".fg-more").hidden = false;
+  }
+  function renderOptions() {
+    const d = g.dlg;
+    g.el.dialog.querySelector(".fg-options").innerHTML = d.options.map((o, i) => `<button type="button" class="fg-opt ${i === d.sel ? "on" : ""}" data-opt="${i}">${esc(o)}</button>`).join("");
+  }
+  function endDialog(result) {
+    const d = g.dlg;
+    if (!d) return;
+    clearInterval(d.timer);
+    g.dlg = null;
+    g.el.dialog.hidden = true;
+    d.resolve(result);
+  }
+  function advance() {
+    const d = g.dlg;
+    if (!d) return;
+    const text = d.lines[d.i];
+    if (d.shown < text.length) { clearInterval(d.timer); d.shown = text.length; g.el.dialog.querySelector(".fg-text").textContent = text; lineDone(); return; }
+    if (d.i < d.lines.length - 1) { d.i++; A.sfx.select(); showLine(); return; }
+    if (d.options) { A.sfx.select(); endDialog(d.sel); return; }
+    endDialog(0);
+  }
+  const say = (speaker, lines) => new Promise((resolve) => startDialog({ speaker, lines: [].concat(lines), resolve }));
+  const choose = (speaker, text, options) => new Promise((resolve) => startDialog({ speaker, lines: [text], options, resolve }));
+
+  /* ---------- toucher, parler ---------- */
+  async function interact() {
+    if (g.dlg) return advance();
+    if (modal()) return;
+    const e = front();
+    if (!e || !e.interact) return;
+    A.sfx.select();
+    g.player.path = [];
+    await e.interact(e);
+  }
+
+  const openPopup = (id, params = {}) => window.ForgePopups.open(id, params, api2);
+
+  async function brannTalk() {
+    const name = g.save.name || "forgeron", h = g.data.hero;
+    if (!g.save.intro) {
+      await say("Maître Brann", [
+        `Te voilà, ${name}. Bienvenue dans ma forge.`,
+        "Elle est vide, pour l'instant. Vois ces deux fours froids : ce sont tes forges. GitHub à gauche, GitLab à droite.",
+        "Chaque projet que tu confieras à tes apprentis deviendra une arme, plus belle à mesure qu'ils travaillent.",
+        "Marche avec les flèches (ou ZQSD), parle et touche avec E. Commence par un four : il s'allume avec un jeton.",
+      ]);
+      g.save.intro = true;
+      persist();
+      return;
+    }
+    const lines = {
+      forge: ["Un four t'attend. Approche-toi et appuie sur E pour le forger : il lui faut un jeton."],
+      claude: ["Tes fours chauffent. Réveille maintenant tes apprentis : touche la Pierre d'éveil, près du mur."],
+      project: ["Pose ta première arme au râtelier, à gauche : choisis un projet à forger."],
+      dev: ["Ton arme est posée. Au râtelier, autorise l'agent dev sur ce projet : tes apprentis pourront forger."],
+      task: ["Parle à l'Apprenti : confie-lui un ticket. Tu le verras travailler à l'enclume."],
+      review: ["Va voir le Gardien : il contrôle les lames des autres, les revues de demandes de fusion."],
+    }[h?.nextQuest ?? ""];
+    if (lines) return say("Maître Brann", lines);
+    const forged = g.data.armory.loot.length, pg = progress(), pr = prestige();
+    const out = [`Niveau ${h?.level ?? 1}, rang ${pr?.rank.name ?? "Fer"}, ${forged} pièce${forged > 1 ? "s" : ""} forgée${forged > 1 ? "s" : ""}. Ma forge n'a jamais tourné aussi bien.`];
+    const waiting = claimable().length;
+    const open = pg ? [...pg.daily, ...pg.weekly].find((m) => !m.done) : null;
+    if (waiting) out.push(`Des récompenses t'attendent au tableau : ${waiting} mission${waiting > 1 ? "s" : ""} à réclamer.`);
+    else if (open) out.push(`Au tableau : « ${open.title} », ${open.progress}/${open.target}. Un peu d'or à la clé.`);
+    if (pg?.streak.atRisk) out.push(`Ta série de ${pg.streak.current} jour${pg.streak.current > 1 ? "s" : ""} s'éteint ce soir. Une pièce ou une lame contrôlée, et la flamme tient.`);
+    else if (pr?.next) out.push(`Encore ${pr.next.xpLeft} XP pour le rang ${pr.next.name}.`);
+    await say("Maître Brann", out);
+  }
+  async function furnaceTalk(kind) {
+    if (!lit(kind)) await say("", ["Le four est froid.", "Il lui faut un jeton pour s'allumer."]);
+    openPopup("forge", { kind });
+  }
+  async function rackTalk() {
+    if (!g.data.armory.weapons.length) await say("", ["Le râtelier est vide.", "Choisis un projet à forger : il deviendra ta première arme."]);
+    openPopup("rack");
+  }
+  async function apprenticeTalk() {
+    await say("Apprenti", ["Patron ! Quel ticket je forge ?"]);
+    openPopup("tickets");
+  }
+  async function guardTalk() {
+    await say("Gardien", ["Halte ! Je surveille les lames des autres.", "Les demandes de fusion à contrôler, c'est moi. Tu veux voir ?"]);
+    openPopup("reviews");
+  }
+  async function scribeTalk() {
+    await say("Scribe", ["Je rédigerais volontiers tes tickets : tu me dictes, j'écris, la forge s'en charge.", "Mais j'apprends encore la plume. Reviens bientôt, patron !"]);
+  }
+  async function merchantTalk() {
+    const n = g.data.armory.loot.filter((i) => !g.save.sold.includes(i.id)).length;
+    await say("Marchand Sélim", [n ? "Des pièces forgées ? Montre-moi ça, je rachète tout !" : "Rien à vendre ? Reviens quand tes apprentis auront forgé, ou regarde mes tenues."]);
+    openPopup("merchant");
+  }
+  async function doorTalk() {
+    const answer = await choose("", "La porte mène au tableau de bord classique.", ["Sortir de la forge", "Rester"]);
+    if (answer === 0) go("#tickets");
+  }
+
+  /* ---------- données et événements ---------- */
+  async function refresh() {
+    try {
+      const [hero, armory] = await Promise.all([api(`/api/hero?tz=${new Date().getTimezoneOffset()}`), api("/api/forge/armory")]);
+      g.data = { hero, armory, forges: hero.forges ?? [] };
+    } catch (err) {
+      banner(`Forge hors ligne : ${err.message}`);
+      return;
+    }
+    g.entities = [...buildEntities(), ...workerEntities()];
+    afterRefresh();
+    renderHud();
+    if (g.popup) window.ForgePopups.update();
+  }
+  function afterRefresh() {
+    const hero = g.data.hero;
+    const doneNow = new Set(hero.quests.filter((q) => q.done).map((q) => q.id));
+    const visible = g.entities.filter((e) => !e.worker && !e.decor && isVisible(e));
+    if (g.firstRefresh) {
+      for (const e of visible) if (!g.save.seen.includes(e.id)) g.save.seen.push(e.id);
+      g.save.lastLevel = g.save.lastLevel || hero.level;
+    } else {
+      for (const e of visible) {
+        if (g.save.seen.includes(e.id)) continue;
+        g.save.seen.push(e.id);
+        const [tx, ty] = e.tiles[0];
+        g.fx.push({ x: tx * T + 8, y: ty * T + 4, t0: g.time });
+        A.sfx.spawn();
+        banner(`${e.name} est arrivé dans la forge.`);
+      }
+      for (const q of hero.quests) if (doneNow.has(q.id) && !g.done.has(q.id)) { A.sfx.fanfare(); banner(`Quête accomplie : ${q.title} (+${q.xp} XP)`); }
+      if (hero.level > g.save.lastLevel) { A.sfx.fanfare(); banner(`Niveau ${hero.level} : ${hero.title} !`); }
+      g.save.lastLevel = hero.level;
+    }
+    announceProgress(hero);
+    g.done = doneNow;
+    g.firstRefresh = false;
+    persist();
+  }
+
+  /** Annonce ce qui a changé depuis le dernier rafraîchissement : mission faite, palier de maîtrise, rang de prestige, série. */
+  function announceProgress(hero) {
+    const p = hero.progress, pr = hero.prestige;
+    if (!p || !pr) return;
+    const doneKeys = new Set(missionList().filter((m) => m.done).map(claimKey));
+    const tiers = Object.fromEntries(p.masteries.map((m) => [m.id, m.reached]));
+    if (g.prog) {
+      for (const m of missionList()) if (m.done && !g.prog.missions.has(claimKey(m))) { A.sfx.fanfare(); banner(`Mission accomplie : ${m.title}. ${m.gold} or à réclamer au tableau.`); }
+      for (const m of p.masteries) if (m.reached > (g.prog.tiers[m.id] ?? 0)) { A.sfx.fanfare(); banner(`Maîtrise « ${m.title} » : palier ${m.reached}/${m.tiers.length} (+${m.tiers[m.reached - 1].xp} XP)`); }
+      if (p.streak.current > g.prog.streak) banner(`Série de ${p.streak.current} jour${p.streak.current > 1 ? "s" : ""} : la flamme brûle !`);
+    } else if (p.streak.atRisk) {
+      banner(`Ta série de ${p.streak.current} jour${p.streak.current > 1 ? "s" : ""} s'éteint à minuit : une pièce ou une review suffit.`);
+    } else if (claimable().length) {
+      banner(`${claimable().length} récompense${claimable().length > 1 ? "s" : ""} t'attend${claimable().length > 1 ? "ent" : ""} au tableau.`);
+    }
+    if (g.save.lastRank && g.save.lastRank !== pr.rank.id && RANK_ORDER.indexOf(pr.rank.id) > RANK_ORDER.indexOf(g.save.lastRank)) {
+      A.sfx.fanfare();
+      banner(`Prestige : rang ${pr.rank.name} ! Bonus d'or de ${pr.rank.goldBonusPct} % chez le marchand.`);
+      const pl = g.player;
+      for (let i = 0; i < 5; i++) g.fx.push({ x: pl.x + 2 + i * 3, y: pl.y + 2 - (i % 2) * 6, t0: g.time + i * 0.1 });
+    }
+    g.save.lastRank = pr.rank.id;
+    g.prog = { missions: doneKeys, tiers, streak: p.streak.current };
+  }
+
+  function banner(text) {
+    const el = document.createElement("div");
+    el.className = "fg-banner";
+    el.textContent = text;
+    g.el.banners.append(el);
+    setTimeout(() => el.remove(), 4200);
+  }
+
+  function renderHud() {
+    const h = g.data.hero, e = g.el;
+    const next = h?.quests.find((q) => !q.done);
+    e.hud.title = `${h?.title ?? ""} · ${h?.xp ?? 0} XP`;
+    e.hud.innerHTML = `<button type="button" class="fg-name" data-fg="custom" title="Changer d'apparence">${esc(g.save.name || "Forgeron")}</button><span>Niv. ${h?.level ?? 1}</span><span class="fg-bar"><i style="width:${h?.percent ?? 0}%"></i></span><span class="fg-gold">${g.save.gold} or</span>`;
+    // Deuxième ligne : rang de prestige, série de jours, récompenses à réclamer (les trois mènent au tableau)
+    const rk = prestige(), pg = progress(), pending = claimable().length;
+    const aura = rk?.rank.aura;
+    const parts = [];
+    if (rk) parts.push(`<span class="fg-rank" ${aura ? `style="--aura:${aura}"` : ""} title="Rang de prestige : +${rk.rank.goldBonusPct} % d'or aux ventes">${esc(rk.rank.name)}${rk.stars ? " " + "★".repeat(Math.min(rk.stars, 5)) : ""}</span>`);
+    if (pg && (pg.streak.current > 0 || pg.streak.best > 0)) parts.push(`<span class="fg-streak ${pg.streak.atRisk ? "risk" : ""}" title="${pg.streak.atRisk ? "Fais une pièce ou une review avant minuit pour garder ta série" : "Jours de suite avec du travail de tes agents"} (record ${pg.streak.best})">Série ${pg.streak.current} j</span>`);
+    if (pending) parts.push(`<button type="button" class="fg-pending" data-fg="board" title="Récompenses de missions à réclamer au tableau">${pending} à réclamer</button>`);
+    e.hud2.innerHTML = parts.join("");
+    e.hud2.hidden = parts.length === 0;
+    e.quest.title = next ? `${next.title} : ${next.hint}` : "";
+    e.quest.innerHTML = next ? `<b>Quête</b> ${esc(next.title)} <small>${esc(next.hint)}</small>` : `<b>Toutes les quêtes sont accomplies</b>`;
+    const pr = A.prefs();
+    e.tools.innerHTML = `<button type="button" class="fg-tool ${pr.sfx ? "on" : ""}" data-fg="sfx" title="Effets sonores">Son</button>
+      <button type="button" class="fg-tool ${pr.music ? "on" : ""}" data-fg="music" title="Musique">Musique</button>`;
+  }
+
+  /* ---------- création du personnage ---------- */
+  function openCustomizer(first) {
+    if (g.custom) return;
+    const look = { ...g.save.look };
+    const el = document.createElement("div");
+    el.className = "fg-custom";
+    const swatches = (key, list) => `<div class="fg-swatches" data-key="${key}">${list.map((c) => `<button type="button" class="fg-sw ${look[key] === c ? "on" : ""}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>`;
+    el.innerHTML = `<div class="fg-card">
+      <h2>${first ? "Qui es-tu, forgeron ?" : "Ton forgeron"}</h2>
+      <canvas class="fg-preview" width="32" height="40"></canvas>
+      <label>Ton nom<input maxlength="24" value="${esc(g.save.name)}" placeholder="Aldric" autocomplete="off"></label>
+      <div class="fg-row"><span>Peau</span>${swatches("skin", SKINS)}</div>
+      <div class="fg-row"><span>Cheveux</span>${swatches("hair", HAIRS)}</div>
+      <div class="fg-row"><span>Tunique</span>${swatches("tunic", TUNICS)}</div>
+      <button type="button" class="fg-btn" data-ok>${first ? "Entrer dans la forge" : "Enregistrer"}</button></div>`;
+    g.el.stage.append(el);
+    g.custom = el;
+    const draw = () => {
+      const c = el.querySelector("canvas").getContext("2d");
+      c.clearRect(0, 0, 32, 40);
+      S.px(c, 0, 0, 32, 40, "#3a3345");
+      S.person(c, 8, 16, { ...look, ...Object.fromEntries(COSMETICS.filter((i) => g.save.owned.includes(i.id)).map((i) => [i.part, i.value])), dir: "down" });
+    };
+    draw();
+    el.addEventListener("click", (ev) => {
+      const sw = ev.target.closest(".fg-sw");
+      if (sw) { look[sw.parentElement.dataset.key] = sw.dataset.c; sw.parentElement.querySelectorAll(".fg-sw").forEach((b) => b.classList.toggle("on", b === sw)); A.sfx.select(); draw(); return; }
+      if (ev.target.closest("[data-ok]")) {
+        g.save.name = el.querySelector("input").value.trim() || "Forgeron";
+        g.save.look = look;
+        g.save.created = true;
+        persist();
+        el.remove();
+        g.custom = null;
+        A.sfx.open();
+        renderHud();
+        if (first) startAdventure();
+      }
+    });
+    el.querySelector("input").focus();
+  }
+  async function startAdventure() {
+    await sleep(500);
+    if (!g.running || g.save.intro) return;
+    g.player.dir = "up";
+    await brannTalk();
+  }
+
+  /* ---------- boucle ---------- */
+  function update(dt) {
+    const p = g.player;
+    if (p.moving) {
+      p.moving.k += dt * 6;
+      const k = Math.min(1, p.moving.k);
+      p.x = p.moving.fx + (p.moving.tx - p.moving.fx) * k;
+      p.y = p.moving.fy + (p.moving.ty - p.moving.fy) * k;
+      p.frame = k < 0.5 ? 1 : 2;
+      if (k >= 1) { p.x = p.moving.tx; p.y = p.moving.ty; p.moving = null; p.frame = 0; A.sfx.step(); }
+    } else if (!modal()) {
+      const held = g.keys[g.keys.length - 1];
+      if (held) tryStep(held);
+      else if (p.path.length) {
+        const s = p.path.shift();
+        if (s.startsWith("face:")) { if (faceEntity(s.slice(5))) interact(); } else if (!tryStep(s)) p.path = [];
+      }
+    }
+    g.fx = g.fx.filter((f) => g.time - f.t0 < 1.1);
+    // Coups de marteau des apprentis au travail, et crépitement des fours allumés : plus forts quand on s'approche
+    for (const e of g.entities) {
+      if (!e.worker || e.worker.state !== "working") continue;
+      const phase = Math.floor(g.time * 2.2 + e.slot * 0.37) % 2; // 1 : marteau levé, 0 : il retombe
+      if (g.hammer.get(e.id) === 1 && phase === 0) A.sfx.hammer(Math.max(0.12, 1 - Math.hypot(e.tiles[0][0] - p.tx, e.tiles[0][1] - p.ty) / 14));
+      g.hammer.set(e.id, phase);
+    }
+    if (g.time - g.lastFire > 0.2) {
+      g.lastFire = g.time;
+      const furnaces = [["github", 4, 2], ["gitlab", 20, 2]].filter(([k]) => lit(k));
+      const d = furnaces.length ? Math.min(...furnaces.map(([, x, y]) => Math.hypot(x - p.tx, y - p.ty))) : 99;
+      A.setFire(furnaces.length ? Math.max(0.1, 1 - d / 16) : 0);
+    }
+  }
+
+  /** Halo du rang de prestige : un anneau au sol qui respire, et quelques étincelles qui montent. */
+  function drawAura(c, p, color, t) {
+    c.save();
+    c.globalAlpha = 0.32 + 0.1 * Math.sin(t * 3);
+    c.fillStyle = color;
+    c.beginPath();
+    c.ellipse(p.x + 8, p.y + T - 1, 9, 3.5, 0, 0, Math.PI * 2);
+    c.fill();
+    for (let i = 0; i < 3; i++) {
+      const phase = (t * 0.8 + i / 3) % 1;
+      c.globalAlpha = 1 - phase;
+      c.fillRect(Math.round(p.x + 4 + i * 4 + Math.sin(t * 2 + i) * 1.5), Math.round(p.y + T - 4 - phase * 16), 1, 1);
+    }
+    c.restore();
+  }
+  /** Un « ! » doré qui flotte au-dessus du tableau tant qu'une récompense de mission attend. */
+  function drawMarker(c, x, y, t) {
+    const by = y + Math.round(Math.sin(t * 4) * 1.5);
+    S.px(c, x - 1, by - 1, 6, 11, "#231a10");
+    S.px(c, x, by, 4, 6, "#ffd37a");
+    S.px(c, x, by + 7, 4, 2, "#ffd37a");
+  }
+
+  function draw() {
+    const c = g.c, t = g.time, p = g.player;
+    S.room(c, t, W, H);
+    const items = g.entities.filter(isVisible).map((e) => [e.z, () => e.draw(c, t)]);
+    const aura = prestige()?.rank.aura;
+    if (aura) items.push([p.y + T - 1, () => drawAura(c, p, aura, t)]);
+    if (claimable().length) items.push([99 * T, () => drawMarker(c, 12 * T - 2, 5, t)]);
+    items.push([p.y + T, () => S.person(c, p.x, p.y, { ...playerLook(), dir: p.dir, frame: p.frame })]);
+    items.sort((a, b) => a[0] - b[0]).forEach((it) => it[1]());
+    for (const f of g.fx) S.sparkle(c, f.x, f.y, (g.time - f.t0) / 1.1);
+    const e = !modal() && !p.moving ? front() : null;
+    if (e && e.interact) S.pointer(c, e.lx * T, e.ly * T - 2, t);
+  }
+
+  /** Noms et bulles posés au-dessus des personnages et objets proches. */
+  function updateLabels() {
+    const p = g.player, want = new Map();
+    for (const e of g.entities) {
+      if (!isVisible(e) || e.decor) continue;
+      if (e.bubble) { want.set(e.id, { cls: "bubble", text: e.bubble, x: e.lx, y: e.ly }); continue; }
+      if (e.name && Math.hypot(e.lx - 0.5 - p.tx, e.ly - p.ty) <= 3.8) want.set(e.id, { cls: "pill", text: e.name, x: e.lx, y: e.ly });
+    }
+    const f = !modal() && !p.moving ? front() : null;
+    if (f && f.interact) want.set("prompt", { cls: "prompt", text: `E · ${f.verb ?? "Parler"}`, x: f.lx, y: f.ly - 0.55 });
+    for (const [id, el] of g.labelEls) if (!want.has(id)) { el.remove(); g.labelEls.delete(id); }
+    for (const [id, w] of want) {
+      let el = g.labelEls.get(id);
+      if (!el) { el = document.createElement("div"); g.el.labels.append(el); g.labelEls.set(id, el); }
+      el.className = `fg-label ${w.cls}`;
+      if (el.textContent !== w.text) el.textContent = w.text;
+      el.style.left = `${(w.x * T / (W * T)) * 100}%`;
+      el.style.top = `${(w.y * T / (H * T)) * 100}%`;
+    }
+  }
+
+  function frame(now) {
+    if (!g.running) return;
+    const dt = Math.min(0.05, (now - g.last) / 1000);
+    g.last = now;
+    g.time += dt;
+    update(dt);
+    draw();
+    updateLabels();
+    g.raf = requestAnimationFrame(frame);
+  }
+
+  /* ---------- clavier et souris ---------- */
+  const typing = (t) => t && (t.matches?.("input, textarea, select") || t.isContentEditable);
+  function onKeyDown(ev) {
+    if (!g.running || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    A.start();
+    const key = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
+    if (typing(ev.target)) { if (key === "Escape" && g.popup) window.ForgePopups.close(); return; }
+    if (key === "Escape") {
+      if (g.dlg) { endDialog(-1); ev.preventDefault(); } else if (g.popup) { window.ForgePopups.close(); ev.preventDefault(); }
+      return;
+    }
+    if (key === "m") { A.toggleAll(); renderHud(); return; }
+    if (g.popup || g.custom) return;
+    if (g.dlg) {
+      if (key === "e" || key === " " || key === "Enter") { ev.preventDefault(); advance(); }
+      else if (g.dlg.options && (key === "ArrowUp" || key === "ArrowDown" || key === "z" || key === "s" || key === "w")) {
+        ev.preventDefault();
+        const d = g.dlg, n = d.options.length;
+        d.sel = (d.sel + (key === "ArrowDown" || key === "s" ? 1 : n - 1)) % n;
+        A.sfx.blip(2);
+        renderOptions();
+      }
+      return;
+    }
+    if (key === "e" || key === " " || key === "Enter") { ev.preventDefault(); interact(); return; }
+    const dir = KEY_DIR[key];
+    if (dir) { ev.preventDefault(); g.player.path = []; if (!g.keys.includes(dir)) g.keys.push(dir); }
+  }
+  function onKeyUp(ev) {
+    const key = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
+    const dir = KEY_DIR[key];
+    if (dir) g.keys = g.keys.filter((d) => d !== dir);
+  }
+  function onCanvasClick(ev) {
+    A.start();
+    if (g.dlg) return advance();
+    if (modal()) return;
+    const r = g.canvas.getBoundingClientRect();
+    const tx = Math.floor(((ev.clientX - r.left) / r.width) * W), ty = Math.floor(((ev.clientY - r.top) / r.height) * H);
+    g.keys = [];
+    walkTo(tx, ty);
+  }
+  function onStageClick(ev) {
+    const t = ev.target.closest("[data-fg]");
+    if (t) {
+      A.start();
+      const what = t.dataset.fg;
+      if (what === "sfx") A.set("sfx", !A.prefs().sfx);
+      if (what === "music") A.set("music", !A.prefs().music);
+      if (what === "custom") openCustomizer(false);
+      if (what === "board" && !modal()) openPopup("board");
+      renderHud();
+      return;
+    }
+    const opt = ev.target.closest("[data-opt]");
+    if (opt && g.dlg?.options) { g.dlg.sel = Number(opt.dataset.opt); advance(); }
+    else if (ev.target.closest(".fg-dialog")) advance();
+  }
+
+  /* ---------- montage ---------- */
+  function build(root) {
+    root.innerHTML = `<div class="fg-wrap"><div class="fg-stage">
+      <canvas class="fg-canvas" width="${W * T}" height="${H * T}" tabindex="0"></canvas>
+      <div class="fg-labels"></div>
+      <div class="fg-hud"></div><div class="fg-hud2"></div><div class="fg-quest"></div><div class="fg-tools"></div>
+      <div class="fg-help">Flèches ou ZQSD : marcher · E : parler, toucher · clic : aller là · M : couper le son</div>
+      <div class="fg-dialog" hidden><span class="fg-who"></span><div class="fg-text"></div><div class="fg-options"></div><span class="fg-more" hidden>▼ E</span></div>
+      <div class="fg-banners"></div>
+    </div><div class="fg-popups"></div></div>`;
+    const q = (s) => root.querySelector(s);
+    g.root = root; g.stage = q(".fg-stage"); g.canvas = q(".fg-canvas"); g.c = g.canvas.getContext("2d");
+    g.c.imageSmoothingEnabled = false;
+    g.el = { stage: g.stage, labels: q(".fg-labels"), hud: q(".fg-hud"), hud2: q(".fg-hud2"), quest: q(".fg-quest"), tools: q(".fg-tools"), dialog: q(".fg-dialog"), banners: q(".fg-banners"), popups: q(".fg-popups") };
+    g.canvas.addEventListener("click", onCanvasClick);
+    g.stage.addEventListener("click", onStageClick);
+    g.labelEls.clear();
+    g.entities = [...buildEntities(), ...workerEntities()];
+    renderHud();
+  }
+
+  function start() {
+    if (g.running) return;
+    g.running = true;
+    g.last = performance.now();
+    g.raf = requestAnimationFrame(frame);
+    clearInterval(g.poll);
+    g.poll = setInterval(refresh, 8000);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("ra:changed", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    A.resume();
+    refresh();
+    if (!g.save.created) openCustomizer(true);
+  }
+  const onBlur = () => { g.keys = []; };
+  const onVisibility = () => { if (document.hidden) A.stop(); else if (g.running) A.resume(); };
+
+  function pause() {
+    if (!g.running) return;
+    g.running = false;
+    cancelAnimationFrame(g.raf);
+    clearInterval(g.poll);
+    document.removeEventListener("keydown", onKeyDown);
+    document.removeEventListener("keyup", onKeyUp);
+    window.removeEventListener("blur", onBlur);
+    document.removeEventListener("ra:changed", refresh);
+    document.removeEventListener("visibilitychange", onVisibility);
+    if (g.popup) window.ForgePopups.close();
+    if (g.dlg) endDialog(-1);
+    g.keys = [];
+    A.stop();
+  }
+
+  /** Ce que les popups peuvent utiliser du jeu. */
+  const api2 = {
+    get data() { return g.data; },
+    get save() { return g.save; },
+    cosmetics: COSMETICS,
+    persist, say, choose, banner, refresh, renderHud, weaponType, claim, claimable, claimKey, goldBonus, rankIndex, rankOrder: RANK_ORDER,
+    setPopup(open) { g.popup = open; if (open) { g.keys = []; g.player.path = []; } },
+    openCustomizer: () => openCustomizer(false),
+  };
+
+  window.ForgeGame = {
+    mount(root) {
+      if (g.root !== root || !root.querySelector(".fg-wrap")) build(root);
+      start();
+      g.canvas.focus({ preventScroll: true });
+    },
+    pause,
+    debug: () => g,
+  };
+})();

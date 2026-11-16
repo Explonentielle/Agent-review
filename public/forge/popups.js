@@ -1,0 +1,352 @@
+/* Popups de la forge : les vrais réglages de l'outil (jetons, terminal Claude, projets, tickets, revues), ouverts depuis le monde. */
+(() => {
+  "use strict";
+  const S = window.ForgeSprites, A = window.ForgeAudio;
+  let game = null;
+  let current = null; // { id, params, def, el, sel }
+
+  const xpFloor = (level) => 25 * level * (level - 1);
+  const pct = (n) => `<div class="fg-pbar"><i style="width:${Math.max(0, Math.min(100, n))}%"></i></div>`;
+  const gradeTag = (grade) => `<span class="fg-grade g-${grade}">${esc(S.GRADE[grade].name)}</span>`;
+  const weaponImg = (type, grade, cls = "") => `<img class="fg-wicon ${cls}" src="${S.icon(type, grade)}" alt="">`;
+  const fmtKind = (k) => (k === "github" ? "GitHub" : "GitLab");
+
+  /* ---------- contenus ---------- */
+  const defs = {
+    /** Un four = une forge connectée : adresse et jeton, les vrais réglages de connexion. */
+    forge: {
+      rerender: true,
+      async render({ kind }) {
+        const { secrets } = await api("/api/secrets");
+        state.secrets = secrets;
+        const names = kind === "github" ? ["github.token"] : ["gitlab.url", "gitlab.token"];
+        const rows = names.map((n) => secrets.find((s) => s.name === n)).filter(Boolean);
+        const isLit = game.data.forges.includes(kind);
+        const user = state.stats?.forges?.find((f) => f.kind === kind)?.username;
+        const origin = (x) => (x.source === "env" ? `<span class="fg-tag">défini dans le .env</span>` : x.source === "vault" ? `<span class="fg-tag ok">enregistré, chiffré</span>` : `<span class="fg-tag warn">à renseigner</span>`);
+        const field = (x) => {
+          const input = x.secret === false
+            ? `<input type="text" autocomplete="off" spellcheck="false" placeholder="https://gitlab.exemple.com" value="${esc(x.value || "")}" data-secret-input="${esc(x.name)}">`
+            : `<input type="password" autocomplete="new-password" placeholder="${x.source === "vault" ? "Nouvelle valeur (remplace l'actuelle)" : "Coller le jeton"}" data-secret-input="${esc(x.name)}">`;
+          const actions = x.source === "env"
+            ? (x.secret === false && x.value ? `<code>${esc(x.value)}</code>` : "")
+            : `<div class="fg-inline">${input}<button type="button" class="fg-btn" data-act="secret-save" data-name="${esc(x.name)}">Enregistrer</button>${x.source === "vault" ? `<button type="button" class="fg-btn ghost" data-act="secret-delete" data-name="${esc(x.name)}">Éteindre</button>` : ""}</div>`;
+          return `<div class="fg-field"><b>${esc(x.label)}</b> ${origin(x)}${actions}</div>`;
+        };
+        const help = kind === "github"
+          ? "Un jeton à portée fine, créé pour le compte ou l'organisation qui possède les dépôts : Contents, Pull requests et Issues en lecture et écriture, Checks et Commit statuses en lecture."
+          : "L'adresse de ton instance GitLab, puis le jeton d'un compte qui a accès aux projets concernés (scopes api, read_repository, write_repository).";
+        return {
+          title: `Forge ${fmtKind(kind)}`,
+          html: `<p class="fg-status">${isLit ? `<span class="fg-tag ok">Forge allumée</span>${user ? ` compte <b>@${esc(user)}</b>` : ""}` : `<span class="fg-tag warn">Forge éteinte</span> le four chauffe dès qu'un jeton valide est enregistré`}</p>
+            ${rows.map(field).join("")}<p class="fg-note">${esc(help)}</p>
+            <p class="fg-note">Les jetons sont chiffrés dans la base de l'outil, jamais renvoyés au navigateur. Rien n'est révoqué chez ${fmtKind(kind)} quand tu éteins le four : fais-le là-bas si un jeton a fuité.</p>`,
+        };
+      },
+    },
+
+    /** La Pierre d'éveil : connecter l'abonnement Claude avec le terminal. */
+    stone: {
+      wide: true,
+      async render() {
+        return {
+          title: "Pierre d'éveil",
+          html: `<p class="fg-note">Tes apprentis travaillent avec la CLI Claude Code de cette machine. Pose la main sur la pierre pour y connecter ton abonnement.</p>${claudeBlock()}`,
+          after: () => refreshClaudeStatus(false),
+          before: () => disposeTermView(),
+        };
+      },
+    },
+
+    /** Le râtelier : un projet = une arme. Niveau et qualité viennent du travail réel ; le type d'arme se choisit. */
+    rack: {
+      rerender: true,
+      wide: true,
+      async render(params, sel) {
+        projectsData = await api("/api/projects");
+        state.runtime ??= await api("/api/agent-runtime").catch(() => null);
+        const weapons = game.data.armory.weapons;
+        const chosen = weapons.find((w) => w.key === sel) ?? weapons[0];
+        current.sel = chosen?.key;
+        const card = (w) => `<button type="button" class="fg-wcard ${w === chosen ? "sel" : ""}" data-fg-sel="${esc(w.key)}">${weaponImg(game.weaponType(w), w.grade)}<span><b>${esc(w.path)}</b>${gradeTag(w.grade)} <small>Niv. ${w.level}</small></span></button>`;
+        const detail = chosen ? (() => {
+          const type = game.weaponType(chosen), lo = xpFloor(chosen.level), hi = xpFloor(chosen.level + 1);
+          return `<div class="fg-wdetail"><div class="fg-wbig">${weaponImg(type, chosen.grade, "big")}</div><div>
+            <h4>${esc(chosen.path)}</h4><div>${gradeTag(chosen.grade)} · Niveau ${chosen.level} · ${chosen.xp} XP</div>${pct(((chosen.xp - lo) * 100) / (hi - lo))}
+            <div class="fg-stats"><span><b>${chosen.forged}</b> pièces forgées</span><span><b>${chosen.reviews}</b> revues</span><span><b>${chosen.failures}</b> échecs</span><span><b>${chosen.blocked}</b> questions</span></div>
+            <p class="fg-note">${chosen.devEnabled ? "L'agent dev est autorisé sur ce projet." : "L'agent dev n'est pas encore autorisé sur ce projet : règle-le pour qu'on puisse y forger."}</p></div></div>
+            <div class="fg-types"><span>Type d'arme</span>${S.TYPES.map((t) => `<button type="button" class="fg-type ${t.id === type ? "on" : ""}" data-fg-type="${t.id}" title="${esc(t.name)}">${weaponImg(t.id, chosen.grade)}</button>`).join("")}</div>
+            <div class="fg-inline"><button type="button" class="fg-btn" data-fg-edit="${esc(chosen.key)}">Régler le projet</button></div>`;
+        })() : `<p class="fg-note">Aucune arme pour l'instant. Chaque projet que tu ajoutes devient une arme à forger.</p>`;
+        return {
+          title: "Le râtelier : tes projets",
+          html: `<div class="fg-weapons">${weapons.map(card).join("")}</div>${detail}
+            <div class="fg-inline"><button type="button" class="fg-btn ${chosen ? "ghost" : ""}" data-fg-new>Forger une nouvelle arme (ajouter un projet)</button></div>
+            <div id="project-editor"></div>`,
+        };
+      },
+    },
+
+    /** L'Apprenti : l'agent dev. Ses tickets, et le bouton qui le lance. */
+    tickets: {
+      async render() {
+        state.issues = await api("/api/issues");
+        const list = state.issues.filter((i) => i.devReady || !i.task);
+        const card = (i) => {
+          const active = i.task && (i.task.status === "running" || i.task.status === "queued");
+          const action = active ? `<span class="fg-tag ok">L'apprenti y travaille</span>`
+            : i.devReady ? `<button type="button" class="fg-btn" data-fg-launch="${esc(`${i.source}:${i.projectId}:${i.iid}`)}">${i.task ? "Relancer" : "Forger"}</button>`
+              : `<button type="button" class="fg-btn ghost" data-fg-open="rack">Régler le projet</button>`;
+          return `<div class="fg-ticket"><div><b>#${i.iid} ${esc(i.title)}</b><small>${esc(i.projectPath)}${i.labels.length ? ` · ${esc(i.labels.slice(0, 3).join(", "))}` : ""}</small></div>${action}</div>`;
+        };
+        return {
+          title: "L'Apprenti : tes tickets",
+          html: list.length
+            ? `<p class="fg-note">Les tickets qui te sont assignés. Un clic sur « Forger » : l'apprenti lit le ticket, code sur une branche, puis l'outil ouvre une demande de fusion Draft.</p>${list.slice(0, 14).map(card).join("")}`
+            : `<p class="fg-note">Aucun ticket ne t'est assigné pour l'instant, ou ta forge n'est pas encore allumée.</p>`,
+        };
+      },
+    },
+
+    /** Le Gardien : les revues de demandes de fusion. */
+    reviews: {
+      async render() {
+        const rows = await api("/api/reviews");
+        const label = { needs_human: ["À analyser", "warn"], auto_ok: ["Rien de grave", "ok"], published: ["Publiée", "ok"], approved: ["Approuvée", "ok"], running: ["En cours", ""], queued: ["En attente", ""], detected: ["Détectée", ""], dismissed: ["Ignorée", ""], error: ["Échec", "warn"] };
+        const order = ["needs_human", "running", "queued", "detected", "auto_ok", "published", "approved", "error", "dismissed"];
+        const sorted = [...rows].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
+        return {
+          title: "Le Gardien : les revues",
+          html: sorted.length
+            ? `<p class="fg-note">Les demandes de fusion que tes agents ont contrôlées. Clique pour lire la revue dans le tableau de bord.</p>${sorted.slice(0, 14).map((r) => { const [t, c] = label[r.status] ?? [r.status, ""]; return `<button type="button" class="fg-ticket link" data-fg-review="${r.id}"><div><b>${esc(r.mr_title)}</b><small>${esc(r.project_path)} · ${esc(r.author)}</small></div><span class="fg-tag ${c}">${esc(t)}</span></button>`; }).join("")}`
+            : `<p class="fg-note">Aucune revue pour l'instant. Elles arrivent quand une demande de fusion te désigne comme relecteur.</p>`,
+        };
+      },
+    },
+
+    /** Le tableau : missions du jour et de la semaine, série, maîtrises à paliers, prestige, quêtes de départ. La fenêtre garde l'onglet dans `sel`. */
+    board: {
+      live: true,
+      async render(_params, sel) {
+        const h = game.data.hero, pg = h.progress, pr = h.prestige;
+        const tab = ["today", "mastery", "prestige", "quests"].includes(sel) ? sel : "today";
+        const pending = game.claimable().length;
+        const tabs = [["today", "Aujourd'hui", pending], ["mastery", "Maîtrises", 0], ["prestige", "Prestige", 0], ["quests", "Quêtes", 0]]
+          .map(([id, label, n]) => `<button type="button" class="fg-tab ${id === tab ? "on" : ""}" data-fg-sel="${id}">${label}${n ? ` <i>${n}</i>` : ""}</button>`).join("");
+        const rankBadge = `<span class="fg-rank" ${pr.rank.aura ? `style="--aura:${pr.rank.aura}"` : ""}>${esc(pr.rank.name)}${pr.stars ? " " + "★".repeat(Math.min(pr.stars, 5)) : ""}</span>`;
+        const header = `<div class="fg-hero"><b>${esc(game.save.name || "Forgeron")}</b> ${rankBadge} · ${esc(h.heroClass)} ${esc(h.specialty.toLowerCase())}<div>Niveau ${h.level} · ${esc(h.title)} · ${h.xp} XP</div>${pct(h.percent)}
+          <div class="fg-stats">${h.stats.map((s) => `<span><b>${s.value}</b> ${esc(s.label.toLowerCase())}</span>`).join("")}</div></div><div class="fg-tabs">${tabs}</div>`;
+
+        const mission = (m) => {
+          const key = game.claimKey(m), claimed = game.save.claimed[key];
+          const right = claimed ? `<span class="fg-tag ok">Réclamé</span>` : m.done ? `<button type="button" class="fg-btn" data-fg-claim="${esc(key)}">Réclamer ${m.gold} or</button>` : `<span class="fg-reward">${m.gold} or</span>`;
+          return `<div class="fg-mission ${m.done ? "done" : ""}"><div><b>${esc(m.title)}</b><small>${esc(m.hint)}</small>${pct((m.progress * 100) / m.target)}<small>${m.progress} / ${m.target}</small></div>${right}</div>`;
+        };
+
+        let body;
+        if (tab === "today") {
+          const s = pg.streak, nextStreak = pg.masteries.find((m) => m.id === "streak")?.next;
+          const state = s.atRisk ? "Elle s'éteint à minuit : une pièce forgée ou une review suffit." : s.activeToday ? "Bien joué : elle est entretenue pour aujourd'hui." : "Fais forger une pièce ou contrôler une lame pour la lancer.";
+          body = `<div class="fg-streakcard ${s.atRisk ? "risk" : ""}"><b>Série : ${s.current} jour${s.current > 1 ? "s" : ""}</b><small>Record : ${s.best} · ${state}${nextStreak ? ` Prochain palier : ${nextStreak.at} jours (+${nextStreak.xp} XP).` : ""}</small></div>
+            <h4>Missions du jour</h4>${pg.daily.map(mission).join("")}${mission(pg.chest)}
+            <h4>Missions de la semaine</h4>${pg.weekly.map(mission).join("")}
+            ${pending > 1 ? `<div class="fg-inline"><button type="button" class="fg-btn" data-fg-claimall>Tout réclamer : ${game.claimable().reduce((n, m) => n + m.gold, 0)} or</button></div>` : ""}
+            <p class="fg-note">De nouvelles missions arrivent chaque jour à minuit, et celles de la semaine le lundi. L'or sert chez le marchand.</p>`;
+        } else if (tab === "mastery") {
+          body = `<p class="fg-note">Chaque palier franchi te rapporte de l'XP, une seule fois. Elles montent avec ton travail réel : tickets forgés, reviews, jours de suite, raretés.</p>` + pg.masteries.map((m) => {
+            const dots = m.tiers.map((t) => `<i class="${t.done ? "on" : ""}" title="${t.at} : +${t.xp} XP"></i>`).join("");
+            const tail = m.next ? `${m.value} / ${m.next.at} · prochain palier : +${m.next.xp} XP` : "Tous les paliers sont franchis.";
+            return `<div class="fg-mastery"><div class="head"><b>${esc(m.title)}</b><span class="dots">${dots}</span></div><small>${esc(m.unit)}</small>${pct(m.next ? (m.value * 100) / m.next.at : 100)}<small>${tail}</small></div>`;
+          }).join("");
+        } else if (tab === "prestige") {
+          const perks = (r) => [`+${r.goldBonusPct} % d'or aux ventes`, r.aura ? "halo autour de ton forgeron" : null, ...game.cosmetics.filter((c) => c.rank === r.id).map((c) => `tenue : ${c.name}`)].filter(Boolean).join(" · ");
+          const next = pr.next;
+          body = `<div class="fg-rankcard" ${pr.rank.aura ? `style="--aura:${pr.rank.aura}"` : ""}><b>Rang ${esc(pr.rank.name)}${pr.stars ? " " + "★".repeat(Math.min(pr.stars, 5)) : ""}</b><small>${esc(perks(pr.rank))}</small></div>
+            ${next ? `<p class="fg-note">Prochain : <b>${esc(next.name)}</b> au niveau ${next.level}. Encore ${next.levelsLeft} niveau${next.levelsLeft > 1 ? "x" : ""}, soit ${next.xpLeft} XP.</p>` : ""}
+            <h4>Les rangs</h4>${pr.ranks.map((r) => `<div class="fg-rankrow ${r.reached ? "done" : ""}"><span class="sw" style="background:${r.aura || "#6b6f7b"}"></span><div><b>${esc(r.name)}</b> · niveau ${r.from}<small>${esc(perks(r))}</small></div><span class="chk">${r.reached ? "✓" : ""}</span></div>`).join("")}
+            <p class="fg-note">Au-delà du dernier rang, une étoile ★ tous les 10 niveaux. Les tenues de prestige sont offertes chez le marchand.</p>`;
+        } else {
+          const quest = (q) => `<div class="fg-quest-row ${q.done ? "done" : q.id === h.nextQuest ? "next" : ""}"><span class="chk">${q.done ? "✓" : ""}</span><div><b>${esc(q.title)}</b><small>${esc(q.hint)}</small></div><span class="xp">+${q.xp} XP</span></div>`;
+          body = `<h4>Quêtes de départ (${h.quests.filter((q) => q.done).length}/${h.quests.length})</h4>${h.quests.map(quest).join("")}
+            <h4>Hauts faits (${h.achievements.filter((a) => a.unlocked).length}/${h.achievements.length})</h4>
+            <div class="fg-achv">${h.achievements.map((a) => `<div class="${a.unlocked ? "" : "locked"}"><b>${esc(a.title)}</b><small>${esc(a.description)}</small></div>`).join("")}</div>
+            <details><summary>Comment gagner de l'XP ?</summary><ul>${h.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>`;
+        }
+        return { title: "Tableau des quêtes", html: header + body };
+      },
+    },
+
+    /** Le marchand : vendre les pièces forgées (pour de l'or, en jeu seulement) et acheter des tenues. */
+    merchant: {
+      live: true,
+      async render() {
+        const items = game.data.armory.loot.filter((i) => !game.save.sold.includes(i.id));
+        const bonus = 1 + game.goldBonus() / 100, price = (i) => Math.round(i.value * bonus);
+
+        const weapons = new Map(game.data.armory.weapons.map((w) => [w.key, w]));
+        const row = (i) => {
+          const w = weapons.get(i.weaponKey);
+          const type = w ? game.weaponType(w) : "sword";
+          return `<div class="fg-item">${weaponImg(type, i.grade)}<div><b>${esc(i.title)}</b> ${gradeTag(i.grade)}<small>${esc(w?.path ?? i.weaponKey)} · #${i.iid} · note ${i.score}</small></div><button type="button" class="fg-btn" data-fg-sell="${esc(i.id)}">Vendre ${price(i)} or</button></div>`;
+        };
+        const commons = items.filter((i) => i.grade === "common");
+        const gold = game.save.gold;
+        const cos = game.cosmetics.map((c) => {
+          const owned = game.save.owned.includes(c.id), worn = game.save.worn[c.id] !== false;
+          const rankName = c.rank ? game.data.hero.prestige.ranks.find((x) => x.id === c.rank)?.name : "";
+          const locked = c.rank && game.rankOrder.indexOf(c.rank) > game.rankIndex();
+          const buy = c.rank ? `<button type="button" class="fg-btn" data-fg-buy="${c.id}" ${locked ? "disabled" : ""}>${locked ? `Rang ${esc(rankName)} requis` : "Prendre (offert)"}</button>` : `<button type="button" class="fg-btn" data-fg-buy="${c.id}" ${gold < c.price ? "disabled" : ""}>Acheter ${c.price} or</button>`;
+          const btn = owned ? `<button type="button" class="fg-btn ghost" data-fg-wear="${c.id}">${worn ? "Ranger" : "Porter"}</button>` : buy;
+          return `<div class="fg-item no-icon"><div><b>${esc(c.name)}</b><small>${c.rank ? `Tenue de prestige, rang ${esc(rankName)}` : "Une tenue pour ton forgeron"}</small></div>${btn}</div>`;
+        }).join("");
+        return {
+          title: "Marchand Sélim",
+          html: `<p class="fg-note">« Je rachète tout ce que tes apprentis ont forgé. » Ton or : <b>${gold}</b>. Vendre ne supprime rien sur ta forge : c'est du jeu.${game.goldBonus() ? ` Ton rang te vaut <b>+${game.goldBonus()} %</b> sur chaque vente.` : ""}</p>
+            ${items.length ? items.slice(0, 12).map(row).join("") : `<p class="fg-note">Aucune pièce à vendre. Chaque demande de fusion ouverte par l'agent en devient une.</p>`}
+            ${commons.length > 1 ? `<div class="fg-inline"><button type="button" class="fg-btn ghost" data-fg-sellcommons>Tout vendre : ${commons.length} pièces communes (${commons.reduce((s, i) => s + price(i), 0)} or)</button></div>` : ""}
+            <h4>Tenues</h4>${cos}`,
+        };
+      },
+    },
+
+    /** Un apprenti au travail : ce qu'il fait, et un lien vers sa tâche. */
+    worker: {
+      async render({ worker }) {
+        const [kind, id] = worker.id.split("-");
+        const labels = { working: "Au travail", waiting: "Attend son tour", done: "A fini sa pièce", blocked: "A une question", failed: "S'est brisé la lame" };
+        return {
+          title: "Un apprenti",
+          html: `<p><b>${esc(worker.label)}</b></p><p><span class="fg-tag">${esc(labels[worker.state] ?? worker.state)}</span></p><p class="fg-bubble-copy">« ${esc(worker.line)} »</p>
+            <div class="fg-inline"><button type="button" class="fg-btn" data-fg-go="${kind === "dev" ? "#dev" : "#reviews"}/${esc(id)}">${kind === "dev" ? "Voir la tâche de l'agent" : "Voir la revue"}</button></div>`,
+        };
+      },
+    },
+  };
+
+  /* ---------- ouverture, fermeture ---------- */
+  async function render() {
+    if (!current) return;
+    const { def, params, el } = current;
+    let out;
+    try {
+      out = await def.render(params, current.sel);
+    } catch (err) {
+      out = { title: "La forge est silencieuse", html: `<p class="fg-note">${esc(err.message)}</p>` };
+    }
+    if (!current || current.el !== el) return;
+    el.querySelector("h3").textContent = out.title;
+    el.querySelector(".fg-pbody").innerHTML = out.html;
+    current.before = out.before;
+    out.after?.();
+  }
+
+  function open(id, params, g) {
+    game = g;
+    close(true);
+    const def = defs[id];
+    if (!def) return;
+    // Les réglages de la page Paramètres partagent des identifiants avec les popups : on la vide, elle se recharge à la prochaine visite
+    const settings = document.getElementById("settings");
+    if (settings) settings.innerHTML = "";
+    const back = document.createElement("div");
+    back.className = "fg-popup-back";
+    back.innerHTML = `<div class="fg-popup ${def.wide ? "wide" : ""}" role="dialog" aria-modal="true"><button type="button" class="fg-x" aria-label="Fermer">✕</button><h3>…</h3><div class="fg-pbody"><p class="fg-note">Un instant…</p></div></div>`;
+    back.addEventListener("click", onClick);
+    document.querySelector(".fg-popups").append(back);
+    current = { id, params, def, el: back, sel: undefined };
+    game.setPopup(true);
+    A.sfx.open();
+    render();
+  }
+
+  function close(silent = false) {
+    if (!current) return;
+    current.before?.();
+    current.el.remove();
+    current = null;
+    game?.setPopup(false);
+    if (!silent) { A.sfx.close(); game?.refresh(); }
+  }
+
+  /** Après une action des réglages (jeton, projet) : les popups qui affichent ces réglages se redessinent. */
+  document.addEventListener("ra:changed", () => { if (current?.def.rerender) render(); });
+
+  /* ---------- actions dans les popups ---------- */
+  async function launch(key) {
+    const [source, projectId, iid] = key.split(":");
+    const i = state.issues.find((x) => x.source === source && String(x.projectId) === projectId && String(x.iid) === iid);
+    if (!i) return;
+    const answer = await ask({
+      title: `Lancer l'agent sur #${i.iid}`,
+      okLabel: "Forger",
+      input: true,
+      placeholder: "Consignes supplémentaires (optionnel) : piste à explorer, fichiers concernés, contraintes...",
+      html: `<p><b>${esc(i.title)}</b></p><dl class="kv"><dt>Projet</dt><dd>${esc(i.projectPath)}</dd><dt>Branche créée</dt><dd><code>${esc(i.branchPreview)}</code></dd><dt>MR Draft vers</dt><dd><code>${esc(i.targetBranch)}</code></dd></dl>
+        <p class="note">L'agent lit le ticket, code sur cette branche, puis l'outil la pousse et ouvre une MR <b>Draft</b>. Aucune autre branche n'est touchée.</p>`,
+    });
+    if (!answer) return;
+    try {
+      await api("/api/tasks", { source, projectId: Number(projectId), issueIid: Number(iid), extraInstructions: answer.value });
+      state.issues = null;
+      close(true);
+      game.setPopup(false);
+      A.sfx.fanfare();
+      game.banner("L'apprenti file à l'enclume : il forge ton ticket.");
+      game.refresh();
+    } catch (err) { game.banner(err.message); A.sfx.error(); }
+  }
+
+  function onClick(ev) {
+    const t = ev.target;
+    if (t === current?.el || t.closest(".fg-x")) return close();
+    const by = (attr) => t.closest(`[${attr}]`);
+    let el;
+    if ((el = by("data-fg-sel"))) { current.sel = el.dataset.fgSel; A.sfx.select(); return render(); }
+    if ((el = by("data-fg-type"))) {
+      game.save.weapons[current.sel] = el.dataset.fgType;
+      game.persist(); A.sfx.select(); return render();
+    }
+    if ((el = by("data-fg-edit"))) { openProjectEditor(el.dataset.fgEdit); return; }
+    if (by("data-fg-new")) { openProjectEditor(null); return; }
+    if ((el = by("data-fg-launch"))) return launch(el.dataset.fgLaunch);
+    if ((el = by("data-fg-open"))) { open(el.dataset.fgOpen, {}, game); return; }
+    if ((el = by("data-fg-review"))) { close(true); game.setPopup(false); go(`#reviews/${el.dataset.fgReview}`); return; }
+    if ((el = by("data-fg-go"))) { close(true); game.setPopup(false); go(el.dataset.fgGo); return; }
+    if ((el = by("data-fg-claim"))) { game.claim([el.dataset.fgClaim]); return render(); }
+    if (by("data-fg-claimall")) { game.claim(null); return render(); }
+    if ((el = by("data-fg-sell"))) return sell([el.dataset.fgSell]);
+    if (by("data-fg-sellcommons")) return sell(game.data.armory.loot.filter((i) => i.grade === "common" && !game.save.sold.includes(i.id)).map((i) => i.id));
+    if ((el = by("data-fg-buy"))) {
+      const item = game.cosmetics.find((c) => c.id === el.dataset.fgBuy);
+      if (!item || game.save.gold < item.price || (item.rank && game.rankOrder.indexOf(item.rank) > game.rankIndex())) return A.sfx.error();
+      game.save.gold -= item.price; game.save.owned.push(item.id); game.save.worn[item.id] = true;
+      game.persist(); A.sfx.coin(); game.renderHud(); return render();
+    }
+    if ((el = by("data-fg-wear"))) {
+      const id = el.dataset.fgWear;
+      game.save.worn[id] = game.save.worn[id] === false;
+      game.persist(); A.sfx.select(); return render();
+    }
+  }
+  function sell(ids) {
+    let total = 0;
+    for (const id of ids) {
+      const item = game.data.armory.loot.find((i) => i.id === id);
+      if (!item || game.save.sold.includes(id)) continue;
+      game.save.sold.push(id);
+      total += Math.round(item.value * (1 + game.goldBonus() / 100));
+    }
+    if (!total) return;
+    game.save.gold += total;
+    game.persist(); A.sfx.coin(); game.renderHud();
+    game.banner(`Vendu pour ${total} or.`);
+    render();
+  }
+
+  window.ForgePopups = {
+    open,
+    close: () => close(),
+    /** Redessine les popups « vivants » (tableau, marchand) quand les données ont changé. */
+    update() { if (current?.def.live) render(); },
+  };
+})();

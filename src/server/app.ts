@@ -22,7 +22,9 @@ import { SecretError } from "../secrets/crypto.js";
 import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret } from "../secrets/vault.js";
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
 import type { TenantContext, TenantDeps } from "../tenants/manager.js";
-import { computeHero } from "../game/hero.js";
+import { computeArmory } from "../game/armory.js";
+import { computeHero, REVIEW_DONE, TASK_FORGED } from "../game/hero.js";
+import { computePrestige, computeProgress } from "../game/progress.js";
 import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
 
@@ -275,9 +277,9 @@ export function buildServer(base: ServerDeps) {
   }
 
   /** La forge : héros, quêtes et hauts faits déduits de l'état réel de l'outil. */
-  app.get("/api/hero", async (req) => {
+  app.get<{ Querystring: { tz?: string } }>("/api/hero", async (req) => {
     const who = req.session ?? base.local;
-    const [projects, reviews, tasks] = await Promise.all([deps.settings.listProjects(), deps.reviews.countByStatus(), deps.tasks.list()]);
+    const [projects, reviews, tasks, recentReviews] = await Promise.all([deps.settings.listProjects(), deps.reviews.countByStatus(), deps.tasks.list(500), deps.reviews.list(undefined, 500)]);
     const taskCounts: Record<string, number> = {};
     for (const task of tasks) taskCounts[task.status] = (taskCounts[task.status] ?? 0) + 1;
     // La connexion Claude est celle de la machine : elle ne compte que pour son propriétaire. Une CLI lente ne bloque pas la page (4 s au plus).
@@ -296,17 +298,35 @@ export function buildServer(base: ServerDeps) {
     }
     const activeReviews = [...(await deps.reviews.list("running", MAX_WORKERS)), ...(await deps.reviews.list("queued", MAX_WORKERS))];
     const workers = pickWorkers({ tasks, reviews: activeReviews, steps, now: Date.now() });
-    return {
-      ...computeHero({
-        forges: deps.forges.all().map((f) => f.connector.kind),
-        claudeConnected,
-        projects: projects.length,
-        devProjects: projects.filter((p) => p.devEnabled).length,
-        reviews,
-        tasks: taskCounts,
-      }),
-      workers,
-    };
+    const forgeKinds = deps.forges.all().map((f) => f.connector.kind);
+    // Progression qui donne envie de revenir : série, missions, maîtrises (le fuseau vient du navigateur, à défaut celui du serveur)
+    const tz = Number(req.query.tz);
+    const armory = computeArmory({ projects, tasks, reviews: recentReviews });
+    const progress = computeProgress({
+      now: Date.now(),
+      tzOffsetMin: req.query.tz !== undefined && Number.isFinite(tz) && Math.abs(tz) <= 840 ? Math.round(tz) : new Date().getTimezoneOffset(),
+      tasks,
+      reviews: recentReviews,
+      totals: { forged: TASK_FORGED.reduce((n, s) => n + (taskCounts[s] ?? 0), 0), reviews: REVIEW_DONE.reduce((n, s) => n + (reviews[s] ?? 0), 0) },
+      pieceGrades: armory.loot.map((i) => i.grade),
+      weaponLevels: armory.weapons.map((w) => w.level),
+    });
+    const hero = computeHero({
+      forges: forgeKinds,
+      claudeConnected,
+      projects: projects.length,
+      devProjects: projects.filter((p) => p.devEnabled).length,
+      reviews,
+      tasks: taskCounts,
+      bonusXp: progress.bonusXp,
+    });
+    return { forges: forgeKinds, ...hero, progress, prestige: computePrestige(hero.level, hero.xp), workers };
+  });
+
+  /** L'armurerie : un projet = une arme (niveau et qualité d'après le travail réel), une demande de fusion ouverte = une pièce à vendre. */
+  app.get("/api/forge/armory", async () => {
+    const [projects, tasks, reviews] = await Promise.all([deps.settings.listProjects(), deps.tasks.list(500), deps.reviews.list(undefined, 500)]);
+    return computeArmory({ projects, tasks, reviews });
   });
 
   // --- Paramètres ------------------------------------------------------------

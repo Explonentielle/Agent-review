@@ -19,10 +19,17 @@ describe("la forge : héros, niveaux et quêtes déduits de l'état réel", () =
 
   it("les règles d'XP affichées viennent des mêmes valeurs que le calcul", () => {
     const rules = computeHero(empty).rules;
-    expect(rules.length).toBe(7);
+    expect(rules.length).toBe(8);
     expect(rules[0]).toContain("+50");
     expect(rules[1]).toContain("+100");
     expect(rules[5]).toContain("+40");
+  });
+
+  it("l'XP bonus des maîtrises s'ajoute à l'XP du héros et le fait monter de niveau", () => {
+    const base = computeHero(empty);
+    const boosted = computeHero({ ...empty, bonusXp: 150 });
+    expect(boosted.xp).toBe(base.xp + 150);
+    expect(boosted.level).toBe(3);
   });
 
   it("les seuils de niveau sont quadratiques et sans trou", () => {

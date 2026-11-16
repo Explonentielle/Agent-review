@@ -88,6 +88,47 @@ describe("API de la forge : héros, quêtes et atelier", () => {
     expect(done.stats[3]!.value).toBe(1); // une pièce forgée
   });
 
+  it("le héros dit quelles forges sont branchées : ce sont les fourneaux du monde", async () => {
+    const hero = (await heroOf(await serverWith())) as HeroResponse & { forges: string[] };
+    expect(hero.forges).toEqual(h.forges.all().map((f) => f.connector.kind));
+    expect(hero.forges.length > 0).toBe(true);
+  });
+
+  it("l'armurerie : un projet est une arme, une tâche terminée est une pièce forgée", async () => {
+    const app = await serverWith();
+    const empty = (await app.inject({ method: "GET", url: "/api/forge/armory" })).json<{ weapons: Array<{ key: string }>; loot: unknown[] }>();
+    expect(empty.loot).toEqual([]);
+
+    const id = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 12, issueTitle: "Un ticket", issueUrl: "https://forge.example/i/12", extraInstructions: null });
+    await h.tasks.update(id, { status: "mr_created" });
+    const armory = (await app.inject({ method: "GET", url: "/api/forge/armory" })).json<{ weapons: Array<{ key: string; forged: number }>; loot: Array<{ id: string; weaponKey: string; iid: number }> }>();
+    expect(armory.loot.length).toBe(1);
+    expect(armory.loot[0]).toMatchObject({ id: `task-${id}`, iid: 12 });
+    expect(armory.weapons.find((w) => w.key === armory.loot[0]!.weaponKey)?.forged).toBe(1);
+  });
+
+  it("la progression : série, missions, maîtrises et prestige suivent le travail réel, et les paliers donnent de l'XP", async () => {
+    type Full = HeroResponse & { progress: { streak: { current: number; activeToday: boolean }; daily: unknown[]; weekly: unknown[]; masteries: Array<{ id: string; reached: number }>; bonusXp: number }; prestige: { rank: { id: string } } };
+    const app = await serverWith();
+    const get = async () => (await app.inject({ method: "GET", url: "/api/hero?tz=0" })).json<Full>();
+    const before = await get();
+    expect(before.progress.streak.current).toBe(0);
+    expect(before.progress.daily.length).toBe(3);
+    expect(before.progress.weekly.length).toBe(3);
+    expect(before.progress.bonusXp).toBe(0);
+    expect(before.prestige.rank.id).toBe("iron");
+
+    const id = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 7, issueTitle: "Un ticket", issueUrl: "https://forge.example/i/7", extraInstructions: null });
+    await h.tasks.update(id, { status: "mr_created" });
+    const after = await get();
+    expect(after.progress.streak).toMatchObject({ current: 1, activeToday: true });
+    expect(after.progress.masteries.find((m) => m.id === "forged")!.reached).toBe(1);
+    expect(after.progress.bonusXp).toBe(20);
+    expect(after.xp).toBe(before.xp + 40 + 20); // la pièce (+40) et le premier palier de maîtrise (+20)
+    // Un fuseau absurde est ignoré plutôt que de planter
+    expect((await app.inject({ method: "GET", url: "/api/hero?tz=abc" })).statusCode).toBe(200);
+  });
+
   it("sans terminal fourni, les routes du terminal ne sont pas montées ; avec, elles le sont", async () => {
     expect((await (await serverWith()).inject({ method: "GET", url: "/api/terminal" })).statusCode).toBe(404);
     const withTerminal = await serverWith({ connected: false });
