@@ -26,7 +26,9 @@ import { computeArmory } from "../game/armory.js";
 import { computeHero, REVIEW_DONE, TASK_FORGED } from "../game/hero.js";
 import { computePrestige, computeProgress } from "../game/progress.js";
 import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
+import { registerScribe } from "../scribe/routes.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
+import type { AgentRunner } from "../agent/runner.js";
 
 /** Ce que le serveur reçoit : les dépôts et connexions de l'utilisateur local (servis sans connexion), et de quoi servir les autres personnes. */
 export interface ServerDeps extends TenantDeps {
@@ -44,13 +46,15 @@ export interface ServerDeps extends TenantDeps {
   tenants?: (who: TenantContext) => Promise<TenantDeps>;
   /** Terminal Claude du navigateur (connexion de l'abonnement) et état de la connexion. Absent : routes non montées. */
   terminal?: TerminalFeature;
+  /** Exécuteur d'agent imposé au Scribe (tests). Absent : celui des réglages de la personne. */
+  scribeRunner?: AgentRunner;
 }
 
 /**
  * Propriétés de `ServerDeps` communes à toutes les personnes. Toutes les autres sont celles de la personne servie : une propriété ajoutée
  * plus tard est donc propre à la personne par défaut, jamais partagée par oubli.
  */
-const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal"]);
+const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal", "scribeRunner"]);
 
 type IdParams = { Params: { id: string } };
 
@@ -426,6 +430,9 @@ export function buildServer(base: ServerDeps) {
       return fail(reply, err);
     }
   });
+
+  // --- Scribe : tickets d'un projet, brouillons, création de tickets et de projets ------------------
+  registerScribe(app, { deps, whoIs: (req) => req.session ?? base.local, fail, forgeOf, classify: classifyIssue, runner: base.scribeRunner });
 
   // --- Agent dev -------------------------------------------------------------
 

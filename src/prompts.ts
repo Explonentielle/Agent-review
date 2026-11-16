@@ -3,15 +3,16 @@ import path from "node:path";
 import { PROJECT_ROOT } from "./paths.js";
 import type { ProjectSettings } from "./settings/schema.js";
 
-export type AgentKind = "review" | "dev";
+export type AgentKind = "review" | "dev" | "scribe";
 
 /** Prompt de base livré avec l'outil : valeur par défaut, remplaçable dans le dashboard. */
-const BASE_FILE: Record<AgentKind, string> = { review: "review-system.md", dev: "dev-system.md" };
+const BASE_FILE: Record<AgentKind, string> = { review: "review-system.md", dev: "dev-system.md", scribe: "scribe-system.md" };
 /** Garde-fous toujours ajoutés en dernier, jamais remplaçables depuis le dashboard. */
-const GUARDRAILS_FILE: Record<AgentKind, string> = { review: "review-guardrails.md", dev: "dev-guardrails.md" };
+const GUARDRAILS_FILE: Record<AgentKind, string> = { review: "review-guardrails.md", dev: "dev-guardrails.md", scribe: "scribe-guardrails.md" };
 const INSTRUCTIONS_TITLE: Record<AgentKind, string> = {
   review: "Instructions spécifiques du reviewer",
   dev: "Consignes générales du développeur",
+  scribe: "Consignes du scribe",
 };
 
 const readPrompt = (file: string) => readFile(path.join(PROJECT_ROOT, "prompts", file), "utf8");

@@ -20,6 +20,11 @@ export interface GithubRepo {
   default_branch: string;
 }
 
+/** Organisation dont la personne est membre. */
+export interface GithubOrg {
+  login: string;
+}
+
 export interface GithubLabel {
   name: string;
 }

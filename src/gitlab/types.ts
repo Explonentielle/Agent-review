@@ -15,6 +15,13 @@ export interface GitlabProject {
   web_url: string;
 }
 
+/** Groupe ou espace de noms où l'on peut créer un projet. */
+export interface GitlabNamespace {
+  id: number;
+  name: string;
+  full_path: string;
+}
+
 export interface GitlabMergeRequest {
   id: number;
   iid: number;

@@ -310,7 +310,7 @@ describe("serveur pour plusieurs personnes", () => {
 
   it("une personne enregistre ses jetons : ses connexions se reconstruisent sans redémarrage, celles des autres ne bougent pas", async () => {
     const before = (await get(other, "/api/secrets")).json<{ secrets: { name: string; source: string | null }[] }>().secrets.map((s) => [s.name, s.source]);
-    expect(before).toEqual([["gitlab.token", null], ["github.token", null], ["anthropic.api_key", null]]); // rien venant du .env du propriétaire
+    expect(before).toEqual([["gitlab.url", "env"], ["gitlab.token", null], ["github.token", null], ["anthropic.api_key", null]]); // seule l adresse de l instance vient du .env : aucun jeton
 
     const saved = await post(other, "/api/secrets/github.token", { value: "github_pat_DE_BOB_1234" });
     expect(saved.statusCode).toBe(200);
@@ -319,6 +319,7 @@ describe("serveur pour plusieurs personnes", () => {
     expect((await get(other, "/api/stats")).json<{ forges: { kind: string; username: string }[] }>().forges).toEqual([{ kind: "github", username: "bob-github" }]);
     expect((await get(owner, "/api/stats")).json<{ forges: { kind: string }[] }>().forges.map((f) => f.kind)).toEqual(["gitlab"]);
     expect((await get(owner, "/api/secrets")).json<{ secrets: { name: string; source: string | null }[] }>().secrets.map((s) => [s.name, s.source])).toEqual([
+      ["gitlab.url", "env"],
       ["gitlab.token", "env"],
       ["github.token", null],
       ["anthropic.api_key", null],

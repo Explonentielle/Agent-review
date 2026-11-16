@@ -119,6 +119,33 @@ export interface NewChangeRequest {
   removeSourceBranch?: boolean;
 }
 
+/** Un ticket à créer. */
+export interface NewTicket {
+  title: string;
+  description: string;
+  labels?: string[];
+}
+
+/** Où l'on peut créer un projet : le compte de la personne, ou un groupe (GitLab) ou une organisation (GitHub). */
+export interface Namespace {
+  /** Identifiant à repasser à `createProject` (numéro de groupe chez GitLab, identifiant de compte chez GitHub). */
+  id: string;
+  path: string;
+  name: string;
+  kind: "personal" | "group";
+}
+
+/** Un projet (dépôt) à créer. */
+export interface NewProject {
+  name: string;
+  description: string;
+  /** `Namespace.id` choisi ; absent : le compte personnel. */
+  namespaceId?: string;
+  private: boolean;
+  /** Initialiser le dépôt avec un README (branche par défaut créée, donc clonable tout de suite). */
+  withReadme: boolean;
+}
+
 /** Identifiants pour git (clonage, récupération, push) : jamais écrits dans l'URL du remote. */
 export interface GitCredentials {
   username: string;
@@ -149,11 +176,19 @@ export interface ForgeConnector {
   /** Noms ou motifs des branches protégées. */
   getProtectedBranches(projectId: number): Promise<string[]>;
   branchExists(projectId: number, branch: string): Promise<boolean>;
+  /** Où la personne peut créer un projet : son compte et les groupes ou organisations qui l'acceptent. */
+  listNamespaces(): Promise<Namespace[]>;
+  /** Crée un projet vide (écriture chez la forge). */
+  createProject(input: NewProject): Promise<Project>;
 
   // Tickets
   /** Tickets ouverts assignés à l'utilisateur, tous projets confondus. */
   listAssignedTickets(): Promise<Ticket[]>;
+  /** Tickets ouverts d'un projet (les plus récemment modifiés d'abord, 100 au plus), quel que soit l'assigné. */
+  listProjectTickets(projectId: number): Promise<Ticket[]>;
   getTicket(projectId: number, iid: number): Promise<Ticket | null>;
+  /** Crée un ticket (écriture chez la forge). */
+  createTicket(projectId: number, input: NewTicket): Promise<Ticket>;
   /** Discussion du ticket, dans l'ordre chronologique. */
   getTicketComments(projectId: number, iid: number): Promise<Comment[]>;
   addTicketLabels(projectId: number, iid: number, labels: string[]): Promise<void>;

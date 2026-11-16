@@ -35,7 +35,7 @@ export function buildCliArgs(req: AgentRequest): string[] {
     "--append-system-prompt", req.systemPrompt,
     "--tools", req.tools.join(","),
     // Une règle par argument : une virgule dans une règle (ex. une commande) ne la casse pas
-    "--allowedTools", ...req.allowedTools,
+    ...(req.allowedTools.length > 0 ? ["--allowedTools", ...req.allowedTools] : []),
     "--disallowedTools", ...denied,
     "--permission-mode", "dontAsk",
     "--permission-prompts", "none",

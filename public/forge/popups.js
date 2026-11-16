@@ -39,7 +39,7 @@
         return {
           title: `Forge ${fmtKind(kind)}`,
           html: `<p class="fg-status">${isLit ? `<span class="fg-tag ok">Forge allumée</span>${user ? ` compte <b>@${esc(user)}</b>` : ""}` : `<span class="fg-tag warn">Forge éteinte</span> le four chauffe dès qu'un jeton valide est enregistré`}</p>
-            ${rows.map(field).join("")}<p class="fg-note">${esc(help)}</p>
+            ${rows.map(field).join("")}<p class="fg-note">${esc(help)}</p>${window.ForgeScribe.rightsHtml(kind)}
             <p class="fg-note">Les jetons sont chiffrés dans la base de l'outil, jamais renvoyés au navigateur. Rien n'est révoqué chez ${fmtKind(kind)} quand tu éteins le four : fais-le là-bas si un jeton a fuité.</p>`,
         };
       },
@@ -66,8 +66,12 @@
         projectsData = await api("/api/projects");
         state.runtime ??= await api("/api/agent-runtime").catch(() => null);
         const weapons = game.data.armory.weapons;
-        const chosen = weapons.find((w) => w.key === sel) ?? weapons[0];
+        const chosen = weapons.find((w) => w.key === (sel ?? params.select)) ?? weapons[0];
         current.sel = chosen?.key;
+        let ticketsHtml = "";
+        if (chosen) {
+          try { ticketsHtml = ticketsSection(chosen, await projectTickets(chosen)); } catch (err) { ticketsHtml = ticketsSection(chosen, null, err.message); }
+        }
         const card = (w) => `<button type="button" class="fg-wcard ${w === chosen ? "sel" : ""}" data-fg-sel="${esc(w.key)}">${weaponImg(game.weaponType(w), w.grade)}<span><b>${esc(w.path)}</b>${gradeTag(w.grade)} <small>Niv. ${w.level}</small></span></button>`;
         const detail = chosen ? (() => {
           const type = game.weaponType(chosen), lo = xpFloor(chosen.level), hi = xpFloor(chosen.level + 1);
@@ -80,9 +84,13 @@
         })() : `<p class="fg-note">Aucune arme pour l'instant. Chaque projet que tu ajoutes devient une arme à forger.</p>`;
         return {
           title: "Le râtelier : tes projets",
-          html: `<div class="fg-weapons">${weapons.map(card).join("")}</div>${detail}
-            <div class="fg-inline"><button type="button" class="fg-btn ${chosen ? "ghost" : ""}" data-fg-new>Forger une nouvelle arme (ajouter un projet)</button></div>
+          html: `<div class="fg-weapons">${weapons.map(card).join("")}</div>${detail}${ticketsHtml}
+            <div class="fg-inline"><button type="button" class="fg-btn ${chosen ? "ghost" : ""}" data-fg-new>Forger une nouvelle arme (ajouter un projet)</button><button type="button" class="fg-btn ghost" data-fg-scribe="">Le Scribe : nouveau ticket ou projet</button></div>
             <div id="project-editor"></div>`,
+          after: () => {
+            const pre = params.prefill;
+            if (pre) { params.prefill = null; openProjectEditor(null, pre.path, pre.source); }
+          },
         };
       },
     },
@@ -223,6 +231,70 @@
     },
   };
 
+  /* ---------- tickets d'un projet (râtelier) ---------- */
+  const ticketCache = new Map(); // arme -> { at, data }
+  async function projectTickets(w) {
+    const hit = ticketCache.get(w.key);
+    if (hit && Date.now() - hit.at < 20000) return hit.data;
+    const data = await api(`/api/forge/tickets?source=${encodeURIComponent(w.source)}&projectId=${w.projectId}`);
+    ticketCache.set(w.key, { at: Date.now(), data });
+    return data;
+  }
+  function ticketsSection(w, data, err) {
+    const head = `<h4>Tickets ouverts${data ? ` (${data.tickets.length})` : ""}</h4>`;
+    const add = `<div class="fg-inline"><button type="button" class="fg-btn" data-fg-scribe="${esc(w.key)}">Nouveau ticket avec le Scribe</button></div>`;
+    if (err) return `${head}<p class="fg-note">Impossible de lire les tickets : ${esc(err)}</p>${add}`;
+    const column = { todo: ["À traiter", ""], inProgress: ["En cours", "ok"], techValidation: ["Validation technique", "warn"] };
+    const taskTag = { running: ["L'apprenti y travaille", "ok"], queued: ["En attente", ""], mr_created: ["Pièce forgée", "ok"], mr_updated: ["Pièce forgée", "ok"], blocked: ["Question de l'apprenti", "warn"], error: ["Échec", "warn"] };
+    const row = (t) => {
+      const [colName, colCls] = column[t.column] ?? ["", ""];
+      const [taskName, taskCls] = (t.task && taskTag[t.task.status]) || ["", ""];
+      const active = t.task && (t.task.status === "running" || t.task.status === "queued");
+      const forge = !active && data.devReady ? `<button type="button" class="fg-btn" data-fg-launchraw="${esc(`${w.source}:${w.projectId}:${t.iid}`)}">${t.task ? "Relancer" : "Forger"}</button>` : "";
+      return `<div class="fg-ticket"><div><b>#${t.iid} ${esc(t.title)}</b><small>${colName ? `<span class="fg-tag ${colCls}">${esc(colName)}</span> ` : ""}${taskName ? `<span class="fg-tag ${taskCls}">${esc(taskName)}</span> ` : ""}${esc(t.labels.slice(0, 3).join(", "))} · <a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">ouvrir</a></small></div>${forge}</div>`;
+    };
+    const rows = data.tickets.length ? data.tickets.slice(0, 15).map(row).join("") : `<p class="fg-note">Aucun ticket ouvert dans ce projet.</p>`;
+    const more = data.tickets.length > 15 ? `<p class="fg-note">… et ${data.tickets.length - 15} autres, dans l'onglet Tickets du tableau de bord.</p>` : "";
+    const hint = data.devReady ? "" : `<p class="fg-note">L'agent dev n'est pas autorisé sur ce projet : règle-le pour pouvoir y forger.</p>`;
+    return `${head}${hint}${rows}${more}${add}`;
+  }
+
+  /** Lance l'agent dev sur un ticket quelconque d'un projet (pas seulement ceux qui te sont assignés). */
+  async function launchTicket(info) {
+    const answer = await ask({
+      title: `Lancer l'agent sur #${info.iid}`,
+      okLabel: "Forger",
+      input: true,
+      placeholder: "Consignes supplémentaires (optionnel) : piste à explorer, fichiers concernés, contraintes...",
+      html: `<p><b>${esc(info.title)}</b></p><dl class="kv"><dt>Projet</dt><dd>${esc(info.projectPath)}</dd></dl>
+        <p class="note">L'agent lit le ticket, code sur une branche créée pour lui, puis l'outil la pousse et ouvre une MR <b>Draft</b>. Aucune autre branche n'est touchée.</p>`,
+    });
+    if (!answer) return;
+    try {
+      await api("/api/tasks", { source: info.source, projectId: Number(info.projectId), issueIid: Number(info.iid), extraInstructions: answer.value });
+      state.issues = null;
+      ticketCache.clear();
+      close(true);
+      game.setPopup(false);
+      A.sfx.fanfare();
+      game.banner("L'apprenti file à l'enclume : il forge ton ticket.");
+      game.refresh();
+    } catch (err) { game.banner(err.message); A.sfx.error(); }
+  }
+
+  /* ---------- le Scribe ---------- */
+  const scribe = window.ForgeScribe.create({
+    game: () => game,
+    rerender: () => render(),
+    sel: () => current?.sel,
+    isOpen: () => current?.id === "scribe",
+    sfx: A.sfx,
+    open: (id, params) => open(id, params ?? {}, game),
+    invalidateTickets: () => ticketCache.clear(),
+    launch: (info) => launchTicket(info),
+  });
+  defs.scribe = scribe.def;
+
   /* ---------- ouverture, fermeture ---------- */
   async function render() {
     if (!current) return;
@@ -252,6 +324,7 @@
     back.className = "fg-popup-back";
     back.innerHTML = `<div class="fg-popup ${def.wide ? "wide" : ""}" role="dialog" aria-modal="true"><button type="button" class="fg-x" aria-label="Fermer">✕</button><h3>…</h3><div class="fg-pbody"><p class="fg-note">Un instant…</p></div></div>`;
     back.addEventListener("click", onClick);
+    back.addEventListener("input", (ev) => { if (current?.id === "scribe") scribe.handleInput(ev); });
     document.querySelector(".fg-popups").append(back);
     current = { id, params, def, el: back, sel: undefined };
     game.setPopup(true);
@@ -301,6 +374,15 @@
     if (t === current?.el || t.closest(".fg-x")) return close();
     const by = (attr) => t.closest(`[${attr}]`);
     let el;
+    if (current?.id === "scribe" && scribe.handleClick(ev)) return;
+    if ((el = by("data-fg-scribe"))) { if (el.dataset.fgScribe) scribe.focus(el.dataset.fgScribe); open("scribe", {}, game); return; }
+    if ((el = by("data-fg-launchraw"))) {
+      const [source, projectId, iid] = el.dataset.fgLaunchraw.split(":");
+      const w = game.data.armory.weapons.find((x) => x.source === source && String(x.projectId) === projectId);
+      const t = ticketCache.get(w?.key)?.data.tickets.find((x) => String(x.iid) === iid);
+      if (w && t) launchTicket({ source, projectId, iid, title: t.title, projectPath: w.path });
+      return;
+    }
     if ((el = by("data-fg-sel"))) { current.sel = el.dataset.fgSel; A.sfx.select(); return render(); }
     if ((el = by("data-fg-type"))) {
       game.save.weapons[current.sel] = el.dataset.fgType;

@@ -6,6 +6,7 @@ import type {
   GitlabDiff,
   GitlabIssue,
   GitlabMergeRequest,
+  GitlabNamespace,
   GitlabNote,
   GitlabProject,
   GitlabProtectedBranch,
@@ -74,6 +75,21 @@ export class GitlabClient {
       if (err instanceof GitlabError && err.status === 404) return null;
       throw err;
     }
+  }
+
+  /** Tickets ouverts d'un projet, les plus récemment modifiés d'abord (100 au plus). */
+  listProjectIssues(projectId: number): Promise<GitlabIssue[]> {
+    return this.request("GET", `/projects/${projectId}/issues?state=opened&order_by=updated_at&per_page=100`);
+  }
+
+  /** Groupes où la personne a au moins le rôle Developer (c'est là qu'on peut en général créer un projet). */
+  listCreatableGroups(): Promise<GitlabNamespace[]> {
+    return this.request("GET", "/groups?min_access_level=30&order_by=path&per_page=100");
+  }
+
+  /** Espace de noms personnel (« moi/ »), retrouvé par le nom d'utilisateur. */
+  getNamespace(path: string): Promise<GitlabNamespace> {
+    return this.request("GET", `/namespaces/${encodeURIComponent(path)}`);
   }
 
   getCurrentUser(): Promise<GitlabCurrentUser> {
@@ -147,6 +163,11 @@ export class GitlabClient {
    */
   approveMergeRequest(projectId: number, mrIid: number, sha: string): Promise<unknown> {
     return this.request("POST", `/projects/${projectId}/merge_requests/${mrIid}/approve`, { sha });
+  }
+
+  /** Crée un projet. Sans `namespace_id`, GitLab le met dans l'espace personnel. */
+  createProject(project: { name: string; description: string; namespace_id?: number; visibility: "private" | "internal" | "public"; initialize_with_readme: boolean }): Promise<GitlabProject> {
+    return this.request("POST", "/projects", project);
   }
 
   /** Phase 4 : création d'une issue à partir d'un ticket support validé. */

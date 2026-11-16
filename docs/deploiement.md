@@ -42,6 +42,18 @@ Dans le dossier du projet sur le serveur, crée le fichier `.env` (`chmod 600 .e
 
 `openssl rand -base64 N` tire N octets au hasard et les écrit en base64. **Sauvegarde `SECRETS_MASTER_KEY` à part** (gestionnaire de mots de passe) : sans elle les jetons enregistrés sont perdus, et elle ne doit jamais être dans la même archive que les sauvegardes de la base.
 
+### Droits des jetons, et le Scribe
+
+Les jetons se saisissent dans la forge (fourneau GitHub ou GitLab) ou dans Paramètres > Connexion. Deux niveaux de droits :
+
+| | Agents seuls (le minimum) | Avec le Scribe (créer tickets et projets) |
+|---|---|---|
+| GitLab | scopes `api`, `read_repository`, `write_repository` ; rôle Developer dans les projets où l'agent code | même jeton. Tickets : rôle Reporter au moins dans le projet. Projets : dans le groupe visé, un rôle qui autorise la création de projets (Developer, Maintainer ou Owner selon les réglages du groupe) ; sans groupe, le projet va dans ton espace personnel |
+| GitHub (portée fine) | Contents, Pull requests, Issues en lecture et écriture ; Checks et Commit statuses en lecture | Tickets : rien de plus. Dépôts : « Administration » ou « Repository creation » en lecture et écriture, avec pour « Resource owner » ton compte ou l'organisation visée |
+| GitHub (classique) | scope `repo` | scope `repo` |
+
+Le Scribe vérifie ces droits à l'usage : un refus de la forge devient un message qui dit quel droit ajouter. Chaque ticket ou projet créé est tracé au journal d'audit (jamais le texte du ticket). Plafonds par personne et par heure : 30 brouillons, 40 tickets, 5 projets.
+
 ## 5. Lancer
 
 ```

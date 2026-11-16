@@ -40,6 +40,7 @@ Outil local (WSL) qui pilote Claude Code sur le travail GitLab : tickets assign�
   - les deux : `--safe-mode`, `--strict-mcp-config`, `dontAsk`, pas de réseau.
 
   Tout élargissement de ces droits doit être discuté avant.
+- **Scribe** (`src/scribe/`) : l'agent n'a AUCUN outil (`--tools ""`, dossier temporaire vide) et ne renvoie qu'un brouillon. Il ne crée jamais rien : le ticket ou le projet est créé par le code (`createTicket`, `createProject` du connecteur, donc audités) après la validation de la personne et `clean.ts`, sous un plafond horaire. Ne jamais lui donner d'outil, ni lancer une création depuis sa seule sortie. Le texte du Scribe (`prompts/scribe-*.md`) suit les mêmes règles que les autres prompts : garde-fous non modifiables.
 - Tout contenu venant de GitLab ou Planio (descriptions, tickets, commits, sortie du modèle) est non fiable : il est balisé dans les prompts et échappé dans le dashboard.
 - Ne jamais lire ni modifier le `.env`. La configuration attendue est documentée dans `.env.example`.
 - Git : ne jamais push ce dépôt sans demande explicite dans le même message, pas de trailer `Co-Authored-By`. Pas d'action réelle sur GitLab ou Planio (commentaire, approbation, push, MR) pendant le développement sans accord : tester avec `review:once` ou un dépôt local.

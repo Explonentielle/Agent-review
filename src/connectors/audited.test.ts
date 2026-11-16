@@ -41,6 +41,25 @@ describe("journal d'audit des écritures sur les forges", () => {
     expect(JSON.stringify(await audit.list())).not.toContain("confidentiel"); // le texte des commentaires n'est jamais gardé
   });
 
+  it("la création d'un ticket et d'un projet est tracée, y compris quand la forge refuse", async () => {
+    const forge = new FakeConnector({ cloneUrl: "file:///x" }, "gitlab");
+    const connector = auditConnector(forge, audit);
+
+    const ticket = await connector.createTicket(5, { title: "Ajouter un export", description: "texte confidentiel", labels: ["Statut::A traiter"] });
+    const project = await connector.createProject({ name: "Mon outil", description: "d", namespaceId: "2", private: true, withReadme: true });
+    forge.failNextWrite = new Error("403 Forbidden");
+    await expect(connector.createTicket(5, { title: "Refusé", description: "x" })).rejects.toThrow("403");
+
+    expect(forge.createdTickets.length).toBe(1); // la création refusée n est pas enregistrée chez la forge
+    expect(forge.createdProjects.length).toBe(1);
+    expect(await entries()).toEqual([
+      { action: "ticket_create", source: "gitlab", target: `5/${ticket.iid}`, outcome: "ok", error: null, detail: { title: "Ajouter un export", labels: ["Statut::A traiter"], url: ticket.url }, user: h.local.userId },
+      { action: "project_create", source: "gitlab", target: project.path, outcome: "ok", error: null, detail: { namespaceId: "2", private: true, url: project.url }, user: h.local.userId },
+      { action: "ticket_create", source: "gitlab", target: "5/?", outcome: "error", error: "403 Forbidden", detail: { title: "Refusé", labels: [], url: undefined }, user: h.local.userId },
+    ]);
+    expect(JSON.stringify(await audit.list())).not.toContain("confidentiel"); // la description d'un ticket n'est jamais gardée
+  });
+
   it("les lectures ne laissent aucune trace", async () => {
     const forge = new FakeConnector({ cloneUrl: "file:///x" });
     forge.tickets.set(1, h.ticket({ iid: 1 }));

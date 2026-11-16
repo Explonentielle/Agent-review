@@ -18,6 +18,16 @@ const CONNECTOR_WRITES: Record<string, (args: unknown[], result: unknown) => Des
       detail: { sourceBranch: request.sourceBranch, targetBranch: request.targetBranch, title: request.title, url: created?.url },
     };
   },
+  createTicket: ([projectId, input], result) => {
+    const ticket = input as { title: string; labels?: string[] };
+    const created = result as { iid?: number; url?: string } | undefined;
+    return { action: "ticket_create", target: `${projectId}/${created?.iid ?? "?"}`, detail: { title: ticket.title, labels: ticket.labels ?? [], url: created?.url } };
+  },
+  createProject: ([input], result) => {
+    const project = input as { name: string; namespaceId?: string; private: boolean };
+    const created = result as { path?: string; url?: string } | undefined;
+    return { action: "project_create", target: created?.path ?? project.name, detail: { namespaceId: project.namespaceId ?? null, private: project.private, url: created?.url } };
+  },
   commentOnChangeRequest: ([projectId, iid, body, kind]) => ({ action: "change_request_comment", target: `${projectId}/${iid}`, detail: { kind, length: String(body).length } }),
   approveChangeRequest: ([projectId, iid, headSha]) => ({ action: "change_request_approve", target: `${projectId}/${iid}`, detail: { headSha } }),
 };
@@ -37,7 +47,7 @@ async function safeRecord(audit: AuditRepo, entry: NewAuditEntry): Promise<void>
 }
 
 /**
- * Enveloppe un connecteur de forge : chaque écriture (label, MR, commentaire, approbation) est inscrite au journal d'audit, réussie ou non,
+ * Enveloppe un connecteur de forge : chaque écriture (label, ticket, projet, MR, commentaire, approbation) est inscrite au journal d'audit, réussie ou non,
  * puis son résultat ou son erreur est rendu tel quel. Les lectures passent sans trace.
  * @param connector Connecteur réel.
  * @param audit Journal de la personne et de son espace.

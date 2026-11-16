@@ -79,7 +79,7 @@ describe("plusieurs forges : chaque donnée passe par sa forge", () => {
 
     await runDevTask(id, { config: h.config, forges: onlyGitlab, costs: h.costs, settings: h.settings, tasks: h.tasks, runner: { run: async () => ({ structured: devResult, sessionId: null, costUsd: 0, numTurns: 0 }) } });
 
-    expect((await h.tasks.get(id))!.error).toMatch(/La forge « github » n'est pas configurée/);
+    expect((await h.tasks.get(id))!.error).toMatch(/Aucun jeton GitHub enregistré/);
   });
 
   describe("reviews", () => {
@@ -157,12 +157,12 @@ describe("plusieurs forges : chaque donnée passe par sa forge", () => {
 
       await runReview(id, deps);
       expect(await h.reviews.get(id)).toMatchObject({ status: "error" });
-      expect((await h.reviews.get(id))!.error).toMatch(/La forge « github » n'est pas configurée/);
+      expect((await h.reviews.get(id))!.error).toMatch(/Aucun jeton GitHub enregistré/);
 
       // Même un commentaire ou une approbation ne partent jamais chez l'autre forge
       await h.reviews.saveResult(id, { status: "auto_ok", decisionReasons: [], resultJson: JSON.stringify(reviewOk), changedLines: 1, costUsd: 0, numTurns: 1 });
-      await expect(publishComment(id, deps, false)).rejects.toThrow("La forge « github » n'est pas configurée");
-      await expect(approve(id, deps, false)).rejects.toThrow("La forge « github » n'est pas configurée");
+      await expect(publishComment(id, deps, false)).rejects.toThrow("Aucun jeton GitHub enregistré");
+      await expect(approve(id, deps, false)).rejects.toThrow("Aucun jeton GitHub enregistré");
       expect(h.connector.postedComments).toEqual([]);
       expect(h.connector.approvals).toEqual([]);
     });

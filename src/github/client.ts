@@ -6,6 +6,7 @@ import type {
   GithubFile,
   GithubIssue,
   GithubIssueComment,
+  GithubOrg,
   GithubPull,
   GithubRepo,
   GithubReview,
@@ -28,6 +29,9 @@ export class GithubError extends Error {
 
 /** Nom complet d'un dépôt : proprietaire/depot, sans rien qui puisse sortir du chemin d'API. */
 const FULL_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/** Identifiant d'organisation : lettres, chiffres et tirets, rien qui puisse sortir du chemin d'API. */
+const ORG_LOGIN = /^[A-Za-z0-9-]+$/;
 
 /** Garde-fou contre une pagination qui ne finirait pas : 100 éléments par page. */
 const MAX_PAGES = 30;
@@ -73,6 +77,16 @@ export class GithubClient {
   /** Tickets ouverts assignés à l'utilisateur du jeton, tous dépôts confondus (les PR y figurent aussi). */
   listAssignedIssues(): Promise<GithubIssue[]> {
     return this.getAll("/issues?filter=assigned&state=open&sort=updated");
+  }
+
+  /** Tickets ouverts d'un dépôt, les plus récemment modifiés d'abord (100 au plus ; les PR y figurent aussi). */
+  listRepoIssues(fullName: string): Promise<GithubIssue[]> {
+    return this.getAll(`/repos/${repoPath(fullName)}/issues?state=open&sort=updated`, 1);
+  }
+
+  /** Organisations dont la personne est membre. */
+  listOrgs(): Promise<GithubOrg[]> {
+    return this.getAll("/user/orgs");
   }
 
   getIssue(fullName: string, number: number): Promise<GithubIssue | null> {
@@ -123,6 +137,16 @@ export class GithubClient {
 
   createPull(fullName: string, pull: { title: string; head: string; base: string; body: string; draft: boolean }): Promise<GithubPull> {
     return this.request("POST", `/repos/${repoPath(fullName)}/pulls`, pull);
+  }
+
+  createIssue(fullName: string, issue: { title: string; body: string; labels?: string[] }): Promise<GithubIssue> {
+    return this.request("POST", `/repos/${repoPath(fullName)}/issues`, issue);
+  }
+
+  /** Crée un dépôt dans le compte de la personne, ou dans une organisation si `org` est donné. */
+  createRepo(repo: { name: string; description: string; private: boolean; auto_init: boolean }, org?: string): Promise<GithubRepo> {
+    if (org !== undefined && !ORG_LOGIN.test(org)) throw new Error(`Nom d'organisation invalide : ${org}`);
+    return this.request("POST", org !== undefined ? `/orgs/${org}/repos` : "/user/repos", repo);
   }
 
   addAssignees(fullName: string, number: number, logins: string[]): Promise<unknown> {

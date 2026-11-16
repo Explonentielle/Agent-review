@@ -138,3 +138,37 @@
 .fg-rankrow.done { opacity: 1; border-color: var(--green-border); background: var(--green-soft); }
 .fg-rankrow .sw { width: 14px; height: 14px; border-radius: 50%; }
 @media (prefers-reduced-motion: reduce) { .fg-streak.risk { animation: none; } }
+
+/* Le Scribe : formulaires, étiquettes, droits du jeton */
+.fg-field-in { display: block; margin: 10px 0; font: 700 12.5px "Courier New", monospace; color: var(--text-2); }
+.fg-field-in input[type="text"], .fg-field-in select, .fg-field-in textarea, .fg-ft input[type="text"] { display: block; width: 100%; margin-top: 4px; padding: 7px 10px; border: 2px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font: 400 13.5px / 1.5 ui-sans-serif, system-ui, sans-serif; box-sizing: border-box; }
+.fg-field-in textarea { resize: vertical; min-height: 88px; }
+.fg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.fg-chip { display: inline-flex; align-items: center; gap: 5px; border: 2px solid var(--border); border-radius: 14px; padding: 2px 10px; font: 600 12px ui-sans-serif, system-ui, sans-serif; color: var(--text); cursor: pointer; }
+.fg-check { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; color: var(--text); }
+.fg-ft { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; margin: 6px 0; }
+.fg-ft small { display: block; color: var(--text-2); font-size: 12px; margin-top: 3px; }
+.fg-err { border: 2px solid #e0553a; background: rgba(224, 85, 58, .12); color: var(--text); border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-size: 13px; }
+.fg-err-inline { color: #e0553a; }
+.fg-questions { border: 2px dashed var(--orange-border); border-radius: 8px; padding: 6px 12px; margin: 8px 0; font-size: 13px; }
+.fg-questions ul, .fg-rights ul { margin: 4px 0 4px 18px; padding: 0; font-size: 12.5px; color: var(--text-2); }
+.fg-done { border: 2px solid var(--green-border); background: var(--green-soft); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+.fg-wait { animation: fg-blink 1.2s steps(2, end) infinite; }
+.fg-rights { margin: 12px 0 4px; border-top: 2px solid var(--border); padding-top: 8px; }
+.fg-rights summary { cursor: pointer; font: 700 12.5px "Courier New", monospace; color: var(--text-2); }
+.fg-rights h5 { margin: 10px 0 2px; font-size: 12.5px; color: var(--text); }
+
+/* Le Scribe : aperçu du ticket ou du projet avant validation */
+.fg-sc-card { border: 2px solid var(--border-strong); border-radius: 10px; padding: 10px 16px 12px; margin: 10px 0; background: var(--surface-2); }
+.fg-sc-card-head { font: 800 11.5px "Courier New", monospace; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); }
+.fg-sc-card h4 { margin: 8px 0 6px; font-size: 17px; color: var(--text); }
+.fg-md { font-size: 13.5px; line-height: 1.55; color: var(--text); }
+.fg-md h5, .fg-md h6, .fg-md h7, .fg-sc-card h5 { margin: 12px 0 4px; font-size: 14px; color: var(--text); }
+.fg-md p { margin: 6px 0; }
+.fg-md ul, .fg-md ol { margin: 4px 0 6px 20px; padding: 0; }
+.fg-md li { margin: 2px 0; list-style: none; }
+.fg-md ol li { list-style: decimal; }
+.fg-md li input[type="checkbox"] { margin-right: 6px; vertical-align: -1px; }
+.fg-md code { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 12.5px; }
+.fg-ft-prev { border: 2px solid var(--border); border-radius: 8px; padding: 4px 10px; margin: 5px 0; }
+.fg-ft-prev summary { cursor: pointer; font-weight: 700; font-size: 13.5px; }

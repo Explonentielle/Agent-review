@@ -415,3 +415,46 @@ describe("GithubConnector", () => {
     });
   });
 });
+
+describe("GithubConnector : tickets et projets créés", () => {
+  const orgRepo: GithubRepo = { ...repo, id: 400, name: "outil", full_name: "acme/outil", html_url: "https://github.com/acme/outil", clone_url: "https://github.com/acme/outil.git" };
+
+  it("crée un ticket avec le corps et les étiquettes, sans étiquettes vides", async () => {
+    const { connector, calls } = setup({ getRepoById: repo, createIssue: { ...issue, number: 700, title: "Ajouter un export" } });
+    const ticket = await connector.createTicket(321, { title: "Ajouter un export", description: "texte", labels: [] });
+    expect(calls.find(([n]) => n === "createIssue")).toEqual(["createIssue", "acme/projet", { title: "Ajouter un export", body: "texte", labels: undefined }]);
+    expect(ticket).toMatchObject({ projectId: 321, projectPath: "acme/projet", iid: 700 });
+    await connector.createTicket(321, { title: "Autre", description: "", labels: ["bug"] });
+    expect(calls.filter(([n]) => n === "createIssue")[1]).toEqual(["createIssue", "acme/projet", { title: "Autre", body: "", labels: ["bug"] }]);
+  });
+
+  it("liste les tickets ouverts d'un dépôt sans les pull requests", async () => {
+    const { connector } = setup({ getRepoById: repo, listRepoIssues: [issue, { ...issue, number: 8, pull_request: {} }] });
+    expect((await connector.listProjectTickets(321)).map((t) => t.iid)).toEqual([609]);
+  });
+
+  it("propose le compte personnel puis les organisations", async () => {
+    const { connector } = setup({ getCurrentUser: alex, listOrgs: [{ login: "acme" }] });
+    expect(await connector.listNamespaces()).toEqual([
+      { id: "alex", path: "alex", name: "Alex Martin", kind: "personal" },
+      { id: "acme", path: "acme", name: "acme", kind: "group" },
+    ]);
+  });
+
+  it("crée un dépôt dans une organisation, ou dans le compte personnel quand c'est le compte choisi ou qu'aucun n'est choisi", async () => {
+    const { connector, calls } = setup({ getCurrentUser: alex, createRepo: orgRepo });
+    await connector.createProject({ name: "outil", description: "d", namespaceId: "acme", private: true, withReadme: true });
+    await connector.createProject({ name: "perso", description: "", namespaceId: "alex", private: false, withReadme: false });
+    await connector.createProject({ name: "perso2", description: "", private: true, withReadme: true });
+    const creations = calls.filter(([n]) => n === "createRepo");
+    expect(creations[0]).toEqual(["createRepo", { name: "outil", description: "d", private: true, auto_init: true }, "acme"]);
+    expect(creations[1]).toEqual(["createRepo", { name: "perso", description: "", private: false, auto_init: false }, undefined]);
+    expect(creations[2]![2]).toBeUndefined();
+  });
+
+  it("refuse un nom de dépôt que GitHub n'accepterait pas, sans appeler la forge", async () => {
+    const { connector, count } = setup({ getCurrentUser: alex });
+    await expect(connector.createProject({ name: "mon outil", description: "", private: true, withReadme: true })).rejects.toThrow("Nom de dépôt invalide");
+    expect(count("createRepo")).toBe(0);
+  });
+});

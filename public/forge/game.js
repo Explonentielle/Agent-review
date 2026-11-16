@@ -113,7 +113,7 @@
     add({ id: "merchant", name: "Marchand Sélim", verb: "Commercer", tiles: rect(17, 10, 6, 3), z: 13 * T, lx: 19.5, ly: 7.6, when: hasLoot, draw: (c) => { S.person(c, 19 * T, 8 * T, { ...S.LOOKS.marchand, dir: "down" }); S.stall(c, 17, 10); }, interact: merchantTalk });
     add({ id: "apprentice", name: "Apprenti", verb: "Parler", tiles: [[9, 11]], z: 12 * T, lx: 9.5, ly: 10.35, when: () => flag("claude"), draw: (c) => S.person(c, 9 * T, 11 * T, { ...S.LOOKS.apprenti, dir: "right" }), interact: apprenticeTalk });
     add({ id: "guard", name: "Gardien des revues", verb: "Parler", tiles: [[6, 11]], z: 12 * T, lx: 6.5, ly: 10.35, when: () => flag("project"), draw: (c) => S.person(c, 6 * T, 11 * T, { ...S.LOOKS.gardien, dir: "right" }), interact: guardTalk });
-    add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[15, 10]], z: 11 * T, lx: 15.5, ly: 9.35, when: () => flag("dev"), draw: (c) => S.person(c, 15 * T, 10 * T, { ...S.LOOKS.scribe, dir: "left" }), interact: scribeTalk });
+    add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[15, 10]], z: 11 * T, lx: 15.5, ly: 9.35, when: () => flag("forge"), draw: (c) => S.person(c, 15 * T, 10 * T, { ...S.LOOKS.scribe, dir: "left" }), interact: scribeTalk });
     add({ id: "door", name: "Porte", verb: "Sortir", tiles: [[11, 14], [12, 14]], z: 0, lx: 12, ly: 13.7, always: true, decor: true, draw: () => undefined, interact: doorTalk });
     return E;
   }
@@ -316,7 +316,8 @@
     openPopup("reviews");
   }
   async function scribeTalk() {
-    await say("Scribe", ["Je rédigerais volontiers tes tickets : tu me dictes, j'écris, la forge s'en charge.", "Mais j'apprends encore la plume. Reviens bientôt, patron !"]);
+    await say("Scribe", ["Tu me dictes une idée, j'écris le ticket. Ou tout un projet, avec ses premiers tickets.", "Je ne pose rien sur la forge sans que tu aies relu, patron."]);
+    openPopup("scribe");
   }
   async function merchantTalk() {
     const n = g.data.armory.loot.filter((i) => !g.save.sold.includes(i.id)).length;

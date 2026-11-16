@@ -10,7 +10,10 @@ import type {
   ForgeConnector,
   ForgeKind,
   GitCredentials,
+  Namespace,
   NewChangeRequest,
+  NewProject,
+  NewTicket,
   Project,
   Ticket,
 } from "../connectors/types.js";
@@ -42,6 +45,15 @@ export class FakeConnector implements ForgeConnector {
   postedComments: Array<{ iid: number; body: string; kind: CommentKind }> = [];
   approvals: Array<{ iid: number; headSha: string }> = [];
   addedLabels: Array<{ iid: number; labels: string[] }> = [];
+  createdTickets: Array<{ projectId: number; input: NewTicket; iid: number }> = [];
+  createdProjects: NewProject[] = [];
+  /** Où l'on peut créer un projet (la forge de test en propose deux). */
+  namespaces: Namespace[] = [
+    { id: "1", path: "alex", name: "Alex Dev", kind: "personal" },
+    { id: "2", path: "groupe", name: "Groupe", kind: "group" },
+  ];
+  /** Simule un refus de la forge à la prochaine écriture (droits insuffisants du jeton, par exemple). */
+  failNextWrite: Error | null = null;
 
   private nextIid = 12;
 
@@ -86,6 +98,50 @@ export class FakeConnector implements ForgeConnector {
 
   async branchExists(_projectId: number, branch: string): Promise<boolean> {
     return this.existingBranches.has(branch);
+  }
+
+  async listNamespaces(): Promise<Namespace[]> {
+    return this.namespaces;
+  }
+
+  async createProject(input: NewProject): Promise<Project> {
+    this.throwIfFailing();
+    this.createdProjects.push(input);
+    const slug = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const namespace = this.namespaces.find((n) => n.id === input.namespaceId) ?? this.namespaces[0]!;
+    const path = `${namespace.path}/${slug}`;
+    return { id: 100 + this.createdProjects.length, path, name: input.name, description: input.description, cloneUrl: `https://forge.example/${path}.git`, url: `https://forge.example/${path}` };
+  }
+
+  async listProjectTickets(projectId: number): Promise<Ticket[]> {
+    const created = this.createdTickets.map((c) => this.tickets.get(c.iid)).filter((t): t is Ticket => t !== undefined);
+    return [...new Set([...this.tickets.values(), ...created])].filter((t) => t.projectId === projectId);
+  }
+
+  async createTicket(projectId: number, input: NewTicket): Promise<Ticket> {
+    this.throwIfFailing();
+    const iid = this.nextIid++;
+    this.createdTickets.push({ projectId, input, iid });
+    const ticket: Ticket = {
+      projectId,
+      projectPath: this.project.path,
+      iid,
+      title: input.title,
+      description: input.description,
+      labels: input.labels ?? [],
+      url: `${this.project.url}/-/issues/${iid}`,
+      updatedAt: null,
+      milestone: null,
+      author: { id: this.me.id, username: this.me.username, name: this.me.name },
+    };
+    this.tickets.set(iid, ticket);
+    return ticket;
+  }
+
+  private throwIfFailing(): void {
+    const err = this.failNextWrite;
+    this.failNextWrite = null;
+    if (err) throw err;
   }
 
   async listAssignedTickets(): Promise<Ticket[]> {

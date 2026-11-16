@@ -7,6 +7,7 @@ import type {
   GitlabDiff,
   GitlabIssue,
   GitlabMergeRequest,
+  GitlabNamespace,
   GitlabNote,
   GitlabProject,
   GitlabUser,
@@ -22,7 +23,10 @@ import type {
   Diff,
   ForgeConnector,
   GitCredentials,
+  Namespace,
   NewChangeRequest,
+  NewProject,
+  NewTicket,
   Person,
   Project,
   Ticket,
@@ -89,6 +93,8 @@ export function toChangeRequest(mr: GitlabMergeRequest): ChangeRequest {
   };
 }
 
+const toNamespace = (n: GitlabNamespace, kind: Namespace["kind"]): Namespace => ({ id: String(n.id), path: n.full_path, name: n.name, kind });
+
 export const toDiff = (d: GitlabDiff): Diff => ({ oldPath: d.old_path, newPath: d.new_path, diff: d.diff, isNew: d.new_file, isDeleted: d.deleted_file, isRenamed: d.renamed_file });
 export const toCommit = (c: GitlabCommit): Commit => ({ shortId: c.short_id, title: c.title, authorName: c.author_name });
 export const toCheckStatus = (s: GitlabCommitStatus): CheckStatus => ({ name: s.name, status: s.status });
@@ -146,6 +152,38 @@ export class GitlabConnector implements ForgeConnector {
 
   branchExists(projectId: number, branch: string): Promise<boolean> {
     return this.client.branchExists(projectId, branch);
+  }
+
+  async listNamespaces(): Promise<Namespace[]> {
+    const groups = (await this.client.listCreatableGroups()).map((g) => toNamespace(g, "group"));
+    // L'espace personnel n'est pas indispensable : sans lui, les groupes restent proposés
+    try {
+      const me = await this.client.getCurrentUser();
+      return [toNamespace(await this.client.getNamespace(me.username), "personal"), ...groups];
+    } catch {
+      return groups;
+    }
+  }
+
+  async createProject(input: NewProject): Promise<Project> {
+    const namespaceId = input.namespaceId === undefined ? undefined : Number(input.namespaceId);
+    if (namespaceId !== undefined && !Number.isInteger(namespaceId)) throw new Error(`Groupe invalide : ${input.namespaceId}`);
+    const project = await this.client.createProject({
+      name: input.name,
+      description: input.description,
+      namespace_id: namespaceId,
+      visibility: input.private ? "private" : "public",
+      initialize_with_readme: input.withReadme,
+    });
+    return toProject(project);
+  }
+
+  async listProjectTickets(projectId: number): Promise<Ticket[]> {
+    return (await this.client.listProjectIssues(projectId)).map(toTicket);
+  }
+
+  async createTicket(projectId: number, input: NewTicket): Promise<Ticket> {
+    return toTicket(await this.client.createIssue(projectId, { title: input.title, description: input.description, labels: input.labels }));
   }
 
   async listAssignedTickets(): Promise<Ticket[]> {
