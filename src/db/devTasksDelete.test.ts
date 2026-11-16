@@ -83,6 +83,22 @@ describe.each(backends)("suppression et historique des tâches de dev : $name", 
     expect((await ta.events(mine)).map((e) => e.text)).toEqual(["journal d'A"]);
   });
 
+  it("retrouve la tâche qui a ouvert une MR : la plus récente, sans mélanger espaces ni forges", async () => {
+    const ta = createDevTaskRepo(db, a);
+    const tb = createDevTaskRepo(db, b);
+    const first = await ta.insert(ISSUE);
+    await ta.update(first, { status: "mr_created", mr_iid: 7, mr_url: "u" });
+    const followup = await ta.insert({ ...ISSUE, followup: { parentId: first, branch: "feature/609-x", baseBranch: "develop", targetBranch: "develop", mrIid: 7, mrUrl: "u" } });
+    const other = await ta.insert({ ...ISSUE, issueIid: 700 });
+    await ta.update(other, { status: "mr_created", mr_iid: 8, mr_url: "u" });
+
+    expect((await ta.findByMergeRequest("gitlab", 1, 7))?.id).toBe(followup); // la reprise est la plus récente, même ticket
+    expect((await ta.findByMergeRequest("gitlab", 1, 8))?.issue_iid).toBe(700);
+    expect(await ta.findByMergeRequest("gitlab", 1, 99)).toBeUndefined();
+    expect(await ta.findByMergeRequest("github", 1, 7)).toBeUndefined(); // autre forge
+    expect(await tb.findByMergeRequest("gitlab", 1, 7)).toBeUndefined(); // autre espace
+  });
+
   it("liste les essais d'un ticket, du plus ancien au plus récent, sans ceux d'un autre espace ni d'une autre forge", async () => {
     const ta = createDevTaskRepo(db, a);
     const tb = createDevTaskRepo(db, b);

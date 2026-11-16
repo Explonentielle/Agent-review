@@ -161,6 +161,43 @@ describe.each(BACKENDS)("review, de bout en bout, base %s (faux connecteur, vrai
     expect(h.connector.approvals).toHaveLength(1);
   });
 
+  it("un ticket cité dans le titre qui est supprimé ou illisible ne fait pas échouer la review : elle va au bout avec les autres tickets", async () => {
+    // Titre généré d'après un ticket : « #609 » est le vrai ticket, « #2 » et « #4 » sont cités dans une phrase (le #2 a été supprimé)
+    h.connector.changeRequests.set(7, { ...cr, title: "#609 - Import (#2 au lieu de #4)" });
+    h.connector.failingTickets.add(2);
+    const runner = runnerReturning(reviewOk);
+    const id = await newReview();
+    await runReview(id, deps(runner, { forceShadow: true }));
+
+    const row = (await h.reviews.get(id))!;
+    expect(row.error).toBeNull();
+    expect(row.status).toBe("auto_ok");
+    expect(runner.requests[0]!.prompt).toContain("Importer un fichier Excel"); // le ticket #609 est bien dans le contexte
+  });
+
+  it("MR faite par l'agent dev : la review lit le ticket exact de la tâche et ne devine plus d'après le titre", async () => {
+    // Le titre cite #2 et #4 dans une phrase (comme « Corriger… (#2 au lieu de #4) ») ; le vrai ticket est le #609, enregistré par la tâche
+    h.connector.changeRequests.set(7, { ...cr, title: "#609 - Import (#2 au lieu de #4)" });
+    const taskId = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 609, issueTitle: "Import", issueUrl: "u", extraInstructions: null });
+    await h.tasks.update(taskId, { status: "mr_created", branch: "feature/609-import", mr_iid: 7, mr_url: cr.url });
+    h.connector.ticketReads = [];
+    const runner = runnerReturning(reviewOk);
+    const id = await newReview();
+    await runReview(id, deps(runner, { forceShadow: true, tasks: h.tasks }));
+
+    expect(h.connector.ticketReads).toEqual([609]); // ni #2 ni #4 ne sont interrogés
+    expect((await h.reviews.get(id))!.status).toBe("auto_ok");
+    expect(runner.requests[0]!.prompt).toContain("Importer un fichier Excel");
+  });
+
+  it("MR sans tâche de l'agent (une MR de collègue) : la review devine d'après le texte, comme avant", async () => {
+    h.connector.changeRequests.set(7, { ...cr, title: "#609 - Import", description: "Voir aussi #610" });
+    h.connector.ticketReads = [];
+    const id = await newReview();
+    await runReview(id, deps(runnerReturning(reviewOk), { forceShadow: true, tasks: h.tasks }));
+    expect(h.connector.ticketReads.sort()).toEqual([609, 610]);
+  });
+
   it("review de la MR de l'agent dev (la tienne) : même en mode « auto », jamais de commentaire ni d'approbation automatiques", async () => {
     await h.settings.save({ ...(await h.settings.get()), actionMode: "auto" });
     // La MR a été ouverte par l'utilisateur de l'outil (l'agent dev agit en son nom) : auteur = utilisateur de la forge

@@ -160,6 +160,17 @@ export function createDevTaskRepo(db: Db, workspaceId: number) {
     },
 
     /**
+     * La tâche de l'agent dev la plus récente qui a ouvert (ou repris) cette demande de fusion : c'est le lien exact entre une MR et son ticket.
+     * @param source Forge de la demande.
+     * @param projectId Projet chez la forge.
+     * @param mrIid Numéro de la demande.
+     * @returns La tâche, ou undefined si cette MR n'a pas été faite par l'agent dev de cet espace.
+     */
+    findByMergeRequest(source: ForgeKind, projectId: number, mrIid: number): Promise<DevTaskRow | undefined> {
+      return db.get<DevTaskRow>("SELECT * FROM dev_tasks WHERE workspace_id = ? AND source = ? AND project_id = ? AND mr_iid = ? ORDER BY id DESC LIMIT 1", [workspaceId, source, projectId, mrIid]);
+    },
+
+    /**
      * Tous les essais de l'agent sur un ticket, du plus ancien au plus récent.
      * @returns Les tâches de l'espace pour ce ticket.
      */

@@ -173,7 +173,7 @@ export class TenantManager {
     const settings = createSettingsStore(db, ctx.workspaceId);
     const costs = createCostRepo(db, ctx.workspaceId);
 
-    const reviewDeps: PipelineDeps = { config, forges, costs, reviews, settings };
+    const reviewDeps: PipelineDeps = { config, forges, costs, reviews, settings, tasks };
     const devDeps: DevDeps = { config, forges, costs, settings, tasks };
     // Deux files séparées : une review n'attend pas la fin d'une tâche de dev (et inversement) ; la limite commune borne la machine entière
     const reviewQueue = new SerialQueue((id) => limits.review.run(() => (hooks.runReview ?? runReview)(id, reviewDeps)));

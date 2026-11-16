@@ -47,6 +47,10 @@ export class FakeConnector implements ForgeConnector {
   addedLabels: Array<{ iid: number; labels: string[] }> = [];
   createdTickets: Array<{ projectId: number; input: NewTicket; iid: number }> = [];
   createdProjects: NewProject[] = [];
+  /** Tickets dont la lecture échoue (supprimé, droits, réseau) : pour tester qu'ils ne cassent pas une review. */
+  failingTickets = new Set<number>();
+  /** Numéros des tickets lus (dans l'ordre) : pour vérifier lesquels une review va chercher. */
+  ticketReads: number[] = [];
   readied: number[] = [];
   merges: Array<{ iid: number; headSha: string }> = [];
   /** Où l'on peut créer un projet (la forge de test en propose deux). */
@@ -151,6 +155,8 @@ export class FakeConnector implements ForgeConnector {
   }
 
   async getTicket(_projectId: number, iid: number): Promise<Ticket | null> {
+    this.ticketReads.push(iid);
+    if (this.failingTickets.has(iid)) throw new Error(`Ticket ${iid} illisible (simulé)`);
     return this.tickets.get(iid) ?? null;
   }
 

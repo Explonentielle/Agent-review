@@ -50,13 +50,22 @@
     const { dir = "down", frame = 0, skin = "#f2c9a0", hair = "#3a2a1c", tunic = "#3e6fb0", apron = "#6b4423", hat = null, beard = false, item = null, bald = false, cape = null } = o;
     const yb = y + T;
     px(c, x + 3, yb - 2, 10, 2, "rgba(0,0,0,.25)");
-    if (cape) px(c, x + 3, yb - 12, 10, 9, cape);
+    // Vue de face, la cape ne dépasse que derrière les épaules (dessinée avant le corps)
+    if (cape && dir === "down") px(c, x + 3, yb - 12, 10, 9, cape);
     px(c, x + 5, yb - 4 + (frame === 1 ? 1 : 0), 2, frame === 1 ? 3 : 4, "#3b3a47");
     px(c, x + 9, yb - 4 + (frame === 2 ? 1 : 0), 2, frame === 2 ? 3 : 4, "#3b3a47");
     px(c, x + 4, yb - 11, 8, 8, tunic);
     if (dir !== "up") px(c, x + 5, yb - 9, 6, 6, apron);
     px(c, x + 2, yb - 11, 2, 6, tunic); px(c, x + 12, yb - 11, 2, 6, tunic);
     px(c, x + 2, yb - 5, 2, 2, skin); px(c, x + 12, yb - 5, 2, 2, skin);
+    // De dos la cape couvre tout le dos ; de profil elle pend du côté qui suit (dessinée par-dessus le corps)
+    if (cape && dir !== "down") {
+      const [cx, cw] = dir === "up" ? [x + 3, 10] : dir === "left" ? [x + 9, 5] : [x + 2, 5];
+      px(c, cx, yb - 12, cw, 10, cape);
+      px(c, cx, yb - 12, cw, 2, "rgba(255,255,255,.18)");
+      px(c, cx, yb - 3, cw, 1, "rgba(0,0,0,.28)");
+      if (dir === "up") px(c, x + 7, yb - 10, 2, 7, "rgba(0,0,0,.18)");
+    }
     px(c, x + 4, yb - 18, 8, 7, skin);
     if (!bald) {
       px(c, x + 4, yb - 18, 8, dir === "up" ? 7 : 3, hair);

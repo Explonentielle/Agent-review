@@ -201,3 +201,14 @@ describe("client GitHub : fusion d'une PR", () => {
     await expect(client().markPullReady("PR_x")).rejects.toThrow(/Resource not accessible/);
   });
 });
+
+describe("client GitHub : ressource supprimée", () => {
+  it("un ticket supprimé (410) ou absent (404) est « introuvable » : null, pas une erreur ; une autre erreur reste une exception", async () => {
+    stubFetch(() => reply({ message: "This issue was deleted" }, 410));
+    expect(await client().getIssue("acme/projet", 2)).toBeNull();
+    stubFetch(() => reply({ message: "Not Found" }, 404));
+    expect(await client().getIssue("acme/projet", 2)).toBeNull();
+    stubFetch(() => reply({ message: "Server Error" }, 500));
+    await expect(client().getIssue("acme/projet", 2)).rejects.toThrow(GithubError);
+  });
+});
