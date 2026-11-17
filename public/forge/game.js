@@ -105,12 +105,12 @@
   /* ---------- caractéristiques et arène (la logique du combat est dans public/forge/combat.js) ---------- */
   const ARENA_ROOM = "arene", ARENA_MASTER = "maitre-armes", ARENA_GATE_X = 18, ARENA_DAILY_GOLD = 150;
   const heroLevel = () => g.data.hero?.level ?? 1;
-  /** L'équipement porté, tel que le combat le lit : l'arme (type et rareté) et la rareté de chaque tenue. */
+  /** L'équipement porté, tel que le combat le lit : l'arme (type, rareté, graine) et pour chaque tenue sa rareté, ses statistiques et ses bonus d'attaque. */
   function arenaEquipment() {
     const cat = items.catalog(), out = {};
     for (const slot of Object.keys(C.SLOT_STAT)) {
       const id = g.save.equip?.[slot], item = id && items.owns(id) ? cat.get(id) : null;
-      if (item) out[slot] = slot === "weapon" ? { type: item.weapon, rarity: item.rarity, seed: item.seed } : { rarity: item.rarity };
+      if (item) out[slot] = slot === "weapon" ? { type: item.weapon, rarity: item.rarity, seed: item.seed } : { rarity: item.rarity, stats: item.stats, affixes: item.affixes };
     }
     return out;
   }
@@ -766,7 +766,7 @@
       tile("Points de vie", d.maxHp, "Vitalité"), tile("Dégâts", d.damage, esc(b.weapon.spec.name) + (b.weapon.training ? " d'entraînement" : "")), tile("Vitesse", d.speed, "Agilité"),
       tile("Critique", `${Math.round(d.crit * 100)} %`, "Chance"), tile("Roulade", `${d.dashCd} s`, "Agilité"), tile("Or gagné", `+${Math.round((d.goldMult - 1) * 100)} %`, "Chance"),
     ].join("");
-    const worn = Object.entries(b.slots).map(([slot, sl]) => `${C.SLOT_NAME[slot]} ${items.rarityName(sl.rarity).toLowerCase()} : ${(sl.lines ?? [{ stat: sl.stat, points: sl.points }]).map((l) => `+${l.points} ${C.STATS.find((x) => x.id === l.stat).name.toLowerCase()}`).join(", ")}${sl.standard === false ? ` (${sl.label})` : ""}`);
+    const worn = Object.entries(b.slots).map(([slot, sl]) => `${C.SLOT_NAME[slot]} ${items.rarityName(sl.rarity).toLowerCase()} : ${(sl.lines ?? [{ stat: sl.stat, points: sl.points }]).map((l) => `+${l.points} ${C.STATS.find((x) => x.id === l.stat).name.toLowerCase()}`).concat((sl.affixes || []).map((a) => a.text)).join(", ")}${sl.standard === false ? ` (${sl.label})` : ""}`);
     return `<div class="fg-pf">
       <div class="fg-box fg-pf-head"><div class="fg-pf-level"><span><b>${left}</b> point${left > 1 ? "s" : ""} à répartir</span><span>1 point par niveau (niveau ${h.level})</span></div>
         <small class="fg-note">${left > 0 ? "Plus tu montes de niveau en travaillant, plus tu en gagnes." : "Tous tes points sont répartis."}</small>

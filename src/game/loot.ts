@@ -20,11 +20,22 @@ export interface LootItem {
   value?: string;
   /** Arme : type dessiné par le jeu (épée, hache...). */
   weapon?: string;
+  /**
+   * Tenue : points de caractéristique en plus de celui de son emplacement (ex. `{ force: 2 }`). Absent : aucun, comme avant.
+   * Les valeurs sont revérifiées et plafonnées par `gearExtras` (`public/forge/combat.js`).
+   */
+  stats?: Partial<Record<StatId, number>>;
+  /** Tenue : bonus d'attaque, les mêmes effets que ceux d'une arme (`AFFIXES` de `combat.js`). Absent : aucun. */
+  affixes?: Array<{ id: AffixId; value: number }>;
 }
+
+export type StatId = "force" | "agilite" | "vitalite" | "chance";
+export type AffixId = "burn" | "knockback" | "lifesteal" | "freeze" | "stun" | "lightning" | "precision";
 
 export const RARITIES: Grade[] = ["common", "rare", "epic", "legendary"];
 
-const cosmetic = (id: string, rarity: Grade, name: string, part: CosmeticPart, value: string): LootItem => ({ id, kind: "cosmetic", rarity, name, part, value });
+/** Une tenue du catalogue. `extras` : ses statistiques et bonus d'attaque, absents pour une tenue ordinaire. */
+const cosmetic = (id: string, rarity: Grade, name: string, part: CosmeticPart, value: string, extras: Pick<LootItem, "stats" | "affixes"> = {}): LootItem => ({ id, kind: "cosmetic", rarity, name, part, value, ...extras });
 
 /** Tenues qui peuvent tomber. Les couleurs et les couvre-chefs sont dessinés par le jeu (`public/forge/sprites.js`). */
 const COSMETICS: LootItem[] = [
