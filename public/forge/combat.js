@@ -298,6 +298,10 @@
     // Les effets de l'arme et ceux des équipements s'ajoutent, effet par effet
     const affixValues = {};
     for (const a of [...(wroll.affixes || []), ...gearAffixes]) affixValues[a.id] = (affixValues[a.id] || 0) + a.value;
+    // Le cumul d'un même effet ne dépasse jamais la valeur d'une arme légendaire (sinon le givre pourrait inverser la vitesse des ennemis)
+    for (const id of Object.keys(affixValues)) {
+      if (Object.hasOwn(AFFIXES, id)) affixValues[id] = Math.round(Math.min(affixValues[id], AFFIXES[id].range[1] * AFFIX_TIER.legendary) * 1000) / 1000;
+    }
     const critBase = (spec.critBonus || 0) + (affixValues.precision || 0);
     const derived = {
       maxHp: Math.round(50 + 2 * level + 8 * total.vitalite),

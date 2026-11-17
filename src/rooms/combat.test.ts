@@ -198,7 +198,19 @@ describe("arène : statistiques et bonus d'attaque d'une tenue", () => {
     const seed = Array.from({ length: 400 }, (_, i) => `s${i}`).find((s) => C.rollWeapon("sword", "legendary", s).affixes.some((a) => a.id === "lifesteal"))!;
     const own = C.rollWeapon("sword", "legendary", seed).affixes.find((a) => a.id === "lifesteal")!.value;
     const both = C.build({ level: 1, equipment: { weapon: { type: "sword", rarity: "legendary", seed }, cape: { rarity: "rare", affixes: [{ id: "lifesteal", value: 0.05 }] } } });
-    expect(both.affixValues["lifesteal"]).toBeCloseTo(own + 0.05, 5);
+    // Le cumul est plafonné à la valeur d'une arme légendaire (0,08 × 1,2)
+    expect(both.affixValues["lifesteal"]).toBeCloseTo(Math.min(own + 0.05, 0.08 * 1.2), 5);
+  });
+
+  it("le cumul d'un même effet est plafonné : le givre ne peut pas inverser la vitesse des ennemis", () => {
+    const seed = Array.from({ length: 400 }, (_, i) => `s${i}`).find((s) => C.rollWeapon("sword", "legendary", s).affixes.some((a) => a.id === "freeze"))!;
+    const gear = { rarity: "rare", affixes: [{ id: "freeze", value: 0.54 }] };
+    const b = C.build({ level: 1, equipment: { weapon: { type: "sword", rarity: "legendary", seed }, cape: gear, apron: gear, hat: gear } });
+    expect(b.affixValues["freeze"]).toBeCloseTo(0.45 * 1.2, 5);
+    expect(1 - (b.affixValues["freeze"] ?? 0)).toBeGreaterThan(0);
+    // Sans arme à givre, trois tenues portant le givre sont aussi plafonnées
+    const worn = C.build({ level: 1, equipment: { cape: gear, apron: gear, hat: gear } });
+    expect(worn.affixValues["freeze"]).toBeCloseTo(0.45 * 1.2, 5);
   });
 
   it("une tenue sans bonus ne change pas les effets de l'arme", () => {
