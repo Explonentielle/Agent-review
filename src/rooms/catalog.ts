@@ -8,14 +8,11 @@
 export const GRID = { width: 24, height: 15, floorTop: 3, floorBottom: 13, doorRow: 14 } as const;
 
 export const THEMES = ["forge", "castle", "tavern"] as const;
-export type Theme = (typeof THEMES)[number];
 
 /** Apparences de personnages disponibles (voir `LOOKS` dans `sprites.js`). */
 export const NPC_LOOKS = ["brann", "apprenti", "apprenti2", "apprenti3", "gardien", "scribe", "marchand", "king", "queen", "noble", "armurier"] as const;
-export type NpcLook = (typeof NPC_LOOKS)[number];
 
 export const COLORS = ["red", "blue", "green", "purple", "gold"] as const;
-export type Color = (typeof COLORS)[number];
 
 export const DIRECTIONS = ["up", "down", "left", "right"] as const;
 

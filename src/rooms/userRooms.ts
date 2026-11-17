@@ -189,5 +189,3 @@ export function createRoomStore(root: string, workspaceId: number) {
     },
   };
 }
-
-export type RoomStore = ReturnType<typeof createRoomStore>;

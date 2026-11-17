@@ -18,7 +18,7 @@ import { renderTemplate, slugify } from "../dev/templates.js";
 import { errorMessage, log } from "../logger.js";
 import { PROJECT_ROOT } from "../paths.js";
 import { readDefaultSystemPrompt } from "../prompts.js";
-import { approve, publishComment, type PipelineDeps } from "../review/pipeline.js";
+import { approve, publishComment } from "../review/pipeline.js";
 import type { Finding, ReviewResult } from "../review/schema.js";
 import { SecretError } from "../secrets/crypto.js";
 import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret } from "../secrets/vault.js";

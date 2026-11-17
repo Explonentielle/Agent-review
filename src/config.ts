@@ -111,8 +111,6 @@ const EnvSchema = z
     }
   });
 
-export type ActionMode = "shadow" | "comment" | "auto";
-
 /** Connexion par compte de forge (OAuth). Absente de la configuration : pas de connexion, l'outil sert l'utilisateur local. */
 export interface AuthConfig {
   /** Adresse publique de l'outil, sans barre finale. */
