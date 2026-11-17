@@ -22,7 +22,7 @@ Commandes : flèches ou ZQSD pour bouger, **Espace** pour frapper (le coup part 
 
 **Points** : un par niveau du forgeron (le niveau vient du serveur : il se gagne en travaillant). Les points répartis ne dépassent jamais le niveau ; « Réinitialiser » les rend, sans frais.
 
-**Équipement** : chaque emplacement nourrit sa caractéristique. L'arme donne de la Force, la cape de l'Agilité, le tablier de la Vitalité, le couvre-chef de la Chance. Commun +1, rare +2, épique +4, légendaire +7 points. La rareté d'une arme multiplie aussi ses dégâts (x 1, 1,15, 1,35, 1,6). Sans arme équipée, on se bat avec une épée d'entraînement.
+**Équipement** : la cape donne de l'Agilité (commun +1, rare +2, épique +4, légendaire +7 points), le tablier de la Vitalité, le couvre-chef de la Chance. **L'arme est unique** : voir « Armes uniques » plus bas. Sans arme équipée, on se bat avec une épée d'entraînement.
 
 ## Les armes
 
@@ -39,6 +39,26 @@ Les sept types de la forge ont chacun leur façon de se battre.
 | Bâton | 13 | 0,85 s | longue (200) | Trait lent qui traverse tout et **ralentit** de 40 % pendant 1,5 s ; contre le seigneur : 15 % pendant 0,75 s |
 
 Le profil de l'arme équipée (et son effet) s'affiche en haut de **Profil > Combat**, dans l'introduction de l'arène et dans les explications du Maître d'armes. La rareté multiplie toujours les dégâts, et la Force s'y ajoute.
+
+## Armes uniques et choix de l'arme
+
+Une arme du butin n'est plus un modèle fixe : **chaque exemplaire est unique**. Ses valeurs sont tirées dans des fourchettes qui dépendent de sa rareté (`ROLL_RANGES`, `combat.js`), à partir de son type, de sa rareté et d'une **graine** (l'identifiant de l'événement de butin). Même graine, mêmes valeurs : recharger ne change rien, rien à stocker, et un futur serveur de PvP pourra recalculer l'arme depuis l'événement.
+
+| Rareté | Dégâts (x) | Cadence (x délai) | Force | Lignes de bonus en plus | Points par ligne |
+|---|---|---|---|---|---|
+| Commun | 0,90 à 1,10 | 1,06 à 0,94 | 1 à 2 | 0 | |
+| Rare | 1,00 à 1,30 | 1,04 à 0,92 | 2 à 4 | 0 à 1 | 1 à 3 |
+| Épique | 1,20 à 1,50 | 1,00 à 0,88 | 4 à 7 | 1 à 2 | 2 à 5 |
+| Légendaire | 1,40 à 1,80 | 0,96 à 0,82 | 7 à 12 | 2 à 3 | 3 à 7 |
+
+Les fourchettes se **chevauchent** : un bon rare peut valoir mieux qu'un mauvais épique, et un jet parfait ou très faible existe à chaque rareté. Les lignes de bonus tombent sur des caractéristiques différentes (Agilité, Vitalité, Chance), jamais deux fois la même. La **qualité du jet** (0 à 100 %, moyenne des tirages) s'affiche : jet faible, moyen, bon, très bon, exceptionnel. Une arme sans graine (ancienne sauvegarde, objet du catalogue, arme d'entraînement) vaut la moyenne de sa rareté, comme avant.
+
+**Où les armes tombent** : une pièce forgée, une review terminée (une fois sur deux), une pièce fusionnée (meilleures chances) et, un peu, **la création d'un projet** (une fois sur trois environ, raretés plus basses, seuls les 20 premiers projets comptent : créer un projet est facile). Un échange de 3 objets contre 1 de la rareté au-dessus donne aussi une arme tirée au sort.
+
+**Comment équiper une arme** :
+- **Dans l'arène** : à l'écran d'introduction (avant chaque combat), la rangée de pastilles montre toutes tes armes. **Flèches gauche et droite** (ou Q et D), ou un clic sur une pastille, changent l'arme, et les valeurs du forgeron se recalculent aussitôt. Après un combat : « Changer d'arme (A) ».
+- **Chez le Maître d'armes** : « Changer d'arme » ouvre la page **Armes** du profil.
+- **Dans le profil** (P), onglet **Armes** : l'arme portée en détail, puis toutes les armes avec leurs dégâts, leur cadence, leurs bonus, la qualité du jet et la différence de dégâts par seconde avec l'arme portée. Le sac (I) permet aussi de les équiper.
 
 ## Les bots et les vagues
 

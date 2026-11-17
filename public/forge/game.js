@@ -114,7 +114,7 @@
     const cat = items.catalog(), out = {};
     for (const slot of Object.keys(C.SLOT_STAT)) {
       const id = g.save.equip?.[slot], item = id && items.owns(id) ? cat.get(id) : null;
-      if (item) out[slot] = slot === "weapon" ? { type: item.weapon, rarity: item.rarity } : { rarity: item.rarity };
+      if (item) out[slot] = slot === "weapon" ? { type: item.weapon, rarity: item.rarity, seed: item.seed } : { rarity: item.rarity };
     }
     return out;
   }
@@ -478,7 +478,8 @@
   /* ---------- l'arène : le Maître d'armes explique, puis on combat des bots avec son équipement ---------- */
   const ARENA_HELP = [
     "Chaque niveau te donne un point à répartir entre quatre caractéristiques : Force pour les dégâts, Agilité pour la vitesse, Vitalité pour les points de vie, Chance pour les critiques et l'or.",
-    "Ton équipement compte aussi : l'arme donne de la Force, la cape de l'Agilité, le tablier de la Vitalité, le couvre-chef de la Chance. Plus l'objet est rare, plus il donne.",
+    "Ton équipement compte aussi : la cape donne de l'Agilité, le tablier de la Vitalité, le couvre-chef de la Chance. Plus l'objet est rare, plus il donne.",
+    "Chaque arme est unique : ses dégâts, sa cadence et ses points de caractéristique sont tirés au hasard dans la fourchette de sa rareté. Un bon rare peut valoir mieux qu'un mauvais épique, et un jet parfait existe à chaque rareté. Avant chaque combat, tu choisis ton arme sur l'écran d'introduction (flèches gauche et droite), ou dans ton profil, onglet Armes.",
     "Chaque arme a son effet. La dague est rapide, très courte, et frappe souvent en critique. La lance transperce deux ennemis alignés. L'arc tire vite et loin, mais faiblement. Le marteau assomme et secoue le sol autour de l'impact. Le bâton ralentit ceux qu'il touche. La hache balaie tout devant toi, et l'épée reste équilibrée.",
     "Cinq vagues de bots, puis le Seigneur des braises. Tu gagnes un peu d'or, jamais d'objet rare : ceux-là viennent de ton vrai travail. Les points se règlent dans ton profil, onglet Combat.",
   ];
@@ -487,10 +488,11 @@
     if (!g.save.arena.met) { g.save.arena.met = true; persist(); await say(npc.name, ARENA_HELP); }
     for (;;) {
       const left = pointsLeft();
-      const answer = await choose(npc.name, left > 0 ? `Tu as ${left} point${left > 1 ? "s" : ""} de caractéristique à répartir.` : "Que veux-tu faire ?", ["Combattre", "Mes caractéristiques", "Comment ça marche ?", "Plus tard"]);
+      const answer = await choose(npc.name, left > 0 ? `Tu as ${left} point${left > 1 ? "s" : ""} de caractéristique à répartir.` : "Que veux-tu faire ?", ["Combattre", "Changer d'arme", "Mes caractéristiques", "Comment ça marche ?", "Plus tard"]);
       if (answer === 0) return playArena();
-      if (answer === 1) return openCustomizer(false, "combat");
-      if (answer !== 2) return;
+      if (answer === 1) return openCustomizer(false, "arsenal");
+      if (answer === 2) return openCustomizer(false, "combat");
+      if (answer !== 3) return;
       await say(npc.name, ARENA_HELP);
     }
   }
@@ -502,6 +504,9 @@
   async function playArena() {
     arena ??= window.ForgeArena.create({
       stage: g.el.stage, sfx: A.sfx, look: playerLook, onFightEnd: arenaFightEnd,
+      // Le choix de l'arme depuis l'écran d'introduction : les armes du sac, et l'équipement de l'une d'elles (renvoie le forgeron recalculé)
+      weapons: () => items.weapons(),
+      equipWeapon: (id) => { if (!items.equip(id)) return null; persist(); renderHud(); return { built: combatBuild(), equipment: arenaEquipment() }; },
       onKeysCaptured: (on) => { g.play = on; if (on) { g.keys = []; g.player.path = []; } },
     });
     const a = g.save.arena;
@@ -745,7 +750,7 @@
       tile("Points de vie", d.maxHp, "Vitalité"), tile("Dégâts", d.damage, esc(b.weapon.spec.name) + (b.weapon.training ? " d'entraînement" : "")), tile("Vitesse", d.speed, "Agilité"),
       tile("Critique", `${Math.round(d.crit * 100)} %`, "Chance"), tile("Roulade", `${d.dashCd} s`, "Agilité"), tile("Or gagné", `+${Math.round((d.goldMult - 1) * 100)} %`, "Chance"),
     ].join("");
-    const worn = Object.entries(b.slots).map(([slot, sl]) => `${C.SLOT_NAME[slot]} ${items.rarityName(sl.rarity).toLowerCase()} : +${sl.points} ${C.STATS.find((x) => x.id === sl.stat).name.toLowerCase()}`);
+    const worn = Object.entries(b.slots).map(([slot, sl]) => `${C.SLOT_NAME[slot]} ${items.rarityName(sl.rarity).toLowerCase()} : ${(sl.lines ?? [{ stat: sl.stat, points: sl.points }]).map((l) => `+${l.points} ${C.STATS.find((x) => x.id === l.stat).name.toLowerCase()}`).join(", ")}${sl.standard === false ? ` (${sl.label})` : ""}`);
     return `<div class="fg-pf">
       <div class="fg-box fg-pf-head"><div class="fg-pf-level"><span><b>${left}</b> point${left > 1 ? "s" : ""} à répartir</span><span>1 point par niveau (niveau ${h.level})</span></div>
         <small class="fg-note">${left > 0 ? "Plus tu montes de niveau en travaillant, plus tu en gagnes." : "Tous tes points sont répartis."}</small>
@@ -769,7 +774,7 @@
     const el = document.createElement("div");
     el.className = "fg-custom";
     const swatches = (key, list) => `<div class="fg-swatches" data-key="${key}">${list.map((c) => `<button type="button" class="fg-sw ${look[key] === c ? "on" : ""}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>`;
-    const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Sac"], ["look", "Apparence"], ["trade", "Échange"], ["combat", "Combat"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
+    const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Sac"], ["arsenal", "Armes"], ["look", "Apparence"], ["trade", "Échange"], ["combat", "Combat"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
     // Hors création du personnage, le popup a toujours la même taille : aperçu et équipement à gauche, l'onglet choisi à droite
     el.innerHTML = `<div class="fg-card ${first ? "" : "wide"}">
       ${first ? "" : `<button type="button" class="fg-x" data-cancel aria-label="Fermer" title="Fermer sans enregistrer l'apparence (Échap)"></button>`}

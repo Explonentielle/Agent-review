@@ -27,14 +27,27 @@
     const save = () => g.save;
     const thumbs = new Map();
 
-    /** Boutique et butin réunis, par identifiant. */
+    /** Boutique et butin réunis, par identifiant. Une arme tirée au sort est un exemplaire unique : « identifiant-du-modèle#graine ». */
     function catalog() {
       const map = new Map();
       for (const item of ctx.baseItems) map.set(item.id, { kind: "cosmetic", ...item });
       for (const item of g.lootCatalog || []) map.set(item.id, { ...item });
       for (const item of map.values()) if (item.kind === "weapon") item.part = "weapon";
+      // Les exemplaires uniques possédés : le modèle du catalogue, plus leur graine (qui fixe leurs valeurs)
+      for (const id of Object.keys(save().items || {})) {
+        const [baseId, seed] = splitId(id), base = seed ? map.get(baseId) : null;
+        if (base?.kind === "weapon") map.set(id, { ...base, id, seed, unique: true });
+      }
       return map;
     }
+    /** Sépare « modèle#graine ». */
+    const splitId = (id) => { const i = String(id).indexOf("#"); return i < 0 ? [String(id), ""] : [id.slice(0, i), id.slice(i + 1)]; };
+    /** Identifiant sous lequel un objet de butin entre dans le sac : une arme est unique (modèle et graine de l'événement). */
+    const dropId = (d, cat) => (cat.get(d.itemId)?.kind === "weapon" && d.seed ? `${d.itemId}#${d.seed}` : d.itemId);
+    /** Fiche de combat d'une arme du sac (valeurs tirées, bonus, qualité du jet). */
+    const cardOf = (item) => (item?.kind === "weapon" ? window.ForgeCombat.weaponCard(item.weapon, item.rarity, item.seed) : null);
+    const fmt = (n) => String(n).replace(".", ",");
+    const STAT_NAME = { force: "Force", agilite: "Agilité", vitalite: "Vitalité", chance: "Chance" };
 
     /** Remet en forme une sauvegarde plus ancienne : objets possédés avec leur origine, un objet porté par emplacement. */
     function migrate() {
@@ -98,11 +111,15 @@
       const given = firstRun ? fresh.slice(0, FIRST_RUN_LOOT) : fresh; // les plus récents d'abord
       for (const d of fresh) s.looted.push(d.eventId);
       if (s.looted.length > MAX_LOOTED) s.looted = s.looted.slice(-MAX_LOOTED);
-      for (const d of given) { add(d.itemId, "loot"); if (!s.fresh.includes(d.itemId)) s.fresh.push(d.itemId); }
+      const ids = new Map();
+      for (const d of given) { const id = dropId(d, cat); ids.set(d, id); add(id, "loot"); if (!s.fresh.includes(id)) s.fresh.push(id); }
       const best = [...given].sort((a, b) => RARITIES.indexOf(b.rarity) - RARITIES.indexOf(a.rarity))[0];
       const rare = best && RARITIES.indexOf(best.rarity) >= 2;
-      if (given.length <= 3) for (const d of given) ctx.banner(`Butin : ${cat.get(d.itemId).name} (${rarityName(d.rarity)})`);
-      else ctx.banner(`${given.length} objets de butin, dont ${cat.get(best.itemId).name} (${rarityName(best.rarity)})`);
+      const after = catalog();
+      /** Nom d'un objet tombé, avec la qualité du jet pour une arme : « Épée d'acier, bon jet ». */
+      const label = (d) => { const item = after.get(ids.get(d)), card = cardOf(item); return `${item.name} (${rarityName(d.rarity)}${card && !card.standard ? `, ${card.label}` : ""})`; };
+      if (given.length <= 3) for (const d of given) ctx.banner(`Butin : ${label(d)}`);
+      else ctx.banner(`${given.length} objets de butin, dont ${label(best)}`);
       if (rare) ctx.sfx.fanfare(); else ctx.sfx.coin();
       ctx.renderHud();
       ctx.rerender();
@@ -122,7 +139,7 @@
         if (used[id] > freeCopies(id)) return { ok: false, why: "Un objet porté ne s'échange pas." };
       }
       const target = cat.get(getId);
-      if (!target || target.rarity !== NEXT[rarity] || target.rank) return { ok: false, why: `Choisis un objet ${rarityName(NEXT[rarity]).toLowerCase()} à recevoir.` };
+      if (!target || target.unique || target.rarity !== NEXT[rarity] || target.rank) return { ok: false, why: `Choisis un objet ${rarityName(NEXT[rarity]).toLowerCase()} à recevoir.` };
       return { ok: true, why: "" };
     }
     function trade(giveIds, getId) {
@@ -136,8 +153,10 @@
         if (src) from[src]--;
         if (s.items[id].n <= 0) delete s.items[id];
       }
-      add(getId, "trade");
-      s.fresh.push(getId);
+      // Une arme reçue en échange est unique elle aussi : sa graine est tirée à l'instant de l'échange
+      const received = catalog().get(getId)?.kind === "weapon" ? `${getId}#trade-${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}` : getId;
+      add(received, "trade");
+      s.fresh.push(received);
       return true;
     }
 
@@ -160,7 +179,44 @@
 
     /** Origine d'un objet en clair : « Obtenu, Acheté ». */
     const sourcesText = (id) => Object.keys(save().items[id]?.from || {}).filter((k) => save().items[id].from[k] > 0).map((k) => SOURCES[k] ?? k).join(", ");
-    const byRarity = (a, b) => RARITIES.indexOf(b.rarity) - RARITIES.indexOf(a.rarity) || a.name.localeCompare(b.name, "fr");
+    const quality = (item) => cardOf(item)?.quality ?? 0;
+    const byRarity = (a, b) => RARITIES.indexOf(b.rarity) - RARITIES.indexOf(a.rarity) || quality(b) - quality(a) || a.name.localeCompare(b.name, "fr");
+
+    /** Les valeurs d'une arme en une ligne : « 12 dégâts · 0,45 s · +3 Force, +2 Agilité ». */
+    function weaponLine(card) {
+      const bonus = card.lines.map((l) => `+${l.points} ${STAT_NAME[l.stat]}`).join(", ");
+      return `${fmt(card.damage)} dégâts · ${fmt(card.cooldown)} s${bonus ? ` · ${bonus}` : ""}`;
+    }
+    /** Jauge de qualité du jet : de faible à exceptionnel. */
+    const qualityHtml = (card) => card.standard ? "" : `<span class="fg-qual" title="Qualité du tirage de cette arme"><span class="fg-qbar"><i style="width:${Math.round(card.quality * 100)}%"></i></span>${esc(card.label)} · ${Math.round(card.quality * 100)} %</span>`;
+
+    /** Page « Armes » : l'arme portée en détail, puis toutes les armes du sac à comparer avec elle, une par une. */
+    function arsenalHtml() {
+      const cat = catalog(), s = save();
+      const weapons = [...cat.values()].filter((i) => i.kind === "weapon" && owns(i.id)).sort(byRarity);
+      const worn = cat.get(s.equip.weapon), ref = worn && owns(worn.id) ? cardOf(worn) : null;
+      const head = worn && ref
+        ? `<div class="fg-box fg-wworn" style="--rc:${color(worn.rarity)}"><img src="${thumb(worn)}" alt="" class="fg-ithumb"><div><b>${esc(worn.name)}</b> ${tag(worn.rarity)}<small>${esc(weaponLine(ref))}</small><small>${esc(ref.perk)}</small>${qualityHtml(ref)}</div></div>`
+        : `<div class="fg-box fg-wworn"><div><b>Épée d'entraînement</b><small>Aucune arme portée : choisis-en une ci-dessous.</small></div></div>`;
+      const cards = weapons.map((item) => {
+        const card = cardOf(item), isWorn = isEquipped(item.id), isNew = s.fresh.includes(item.id);
+        const diff = ref && !isWorn ? card.dps - ref.dps : 0;
+        const delta = ref && !isWorn ? `<em class="${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "+" : "-"}${fmt(Math.abs(Math.round(diff * 10) / 10))} dégâts/s</em>` : "";
+        return `<div class="fg-icard fg-wcard ${isWorn ? "worn" : ""}" style="--rc:${color(item.rarity)}"><img src="${thumb(item)}" alt="" class="fg-ithumb">
+          <div><div class="fg-icard-name"><b>${esc(item.name)}</b></div>
+          <small>${tag(item.rarity)} ${delta}</small><small>${esc(card.perk)}</small><small>${esc(weaponLine(card))} · ${fmt(card.dps)} dégâts/s</small>${qualityHtml(card)}</div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
+          <button type="button" class="fg-mini" ${isWorn ? "disabled" : `data-it-equip="${esc(item.id)}"`}>${isWorn ? "Portée" : "Équiper"}</button></div>`;
+      }).join("");
+      return `<p class="fg-note">Chaque arme est unique : ses dégâts, sa cadence et ses bonus sont tirés au hasard dans la fourchette de sa rareté. Les dégâts par seconde permettent de comparer (sans tes caractéristiques ni les coups critiques).</p>
+        ${head}<h4>Mes armes (${weapons.length})</h4>
+        <div class="fg-igrid">${cards || `<p class="fg-empty">Aucune arme pour l'instant. Elles tombent en forgeant, en faisant relire ou fusionner une pièce, et un peu en créant un projet.</p>`}</div>`;
+    }
+
+    /** Les armes du sac, de la meilleure rareté à la moins bonne, pour les choisir depuis l'arène. */
+    function weapons() {
+      const cat = catalog();
+      return [...cat.values()].filter((i) => i.kind === "weapon" && owns(i.id)).sort(byRarity).map((item) => ({ id: item.id, name: item.name, rarity: item.rarity, icon: thumb(item), card: cardOf(item), worn: isEquipped(item.id), line: weaponLine(cardOf(item)) }));
+    }
 
     /** Les quatre emplacements du forgeron, avec l'icône de l'objet porté : affichés à côté de son aperçu. */
     function slotsHtml(cat) {
@@ -173,16 +229,16 @@
 
     function inventoryHtml() {
       const cat = catalog(), s = save();
-      const all = [...cat.values()];
-      const mine = all.filter((i) => owns(i.id));
+      const all = [...cat.values()].filter((i) => !i.unique); // la collection : une case par modèle, pas par exemplaire d'arme
+      const mine = [...cat.values()].filter((i) => owns(i.id));
       const shown = mine.filter((i) => ui.cat === "all" || i.part === ui.cat).sort(byRarity);
-      const progress = RARITIES.map((r) => `<span><i style="background:${color(r)}"></i>${rarityName(r)} ${mine.filter((i) => i.rarity === r).length}/${all.filter((i) => i.rarity === r).length}</span>`).join("");
+      const progress = RARITIES.map((r) => `<span><i style="background:${color(r)}"></i>${rarityName(r)} ${all.filter((i) => owns(i.id) && i.rarity === r).length}/${all.filter((i) => i.rarity === r).length}</span>`).join("");
       const filters = [["all", "Tout"], ...PARTS.map((p) => [p, PART_NAME[p]])].map(([k, label]) => `<button type="button" class="fg-fchip ${ui.cat === k ? "on" : ""}" data-it-cat="${k}">${label}</button>`).join("");
       const cards = shown.map((item) => {
         const worn = isEquipped(item.id), isNew = s.fresh.includes(item.id);
         return `<div class="fg-icard ${worn ? "worn" : ""}" style="--rc:${color(item.rarity)}"><img src="${thumb(item)}" alt="" class="fg-ithumb">
           <div><div class="fg-icard-name"><b title="${esc(item.name)}">${esc(item.name)}</b>${count(item.id) > 1 ? `<em>×${count(item.id)}</em>` : ""}</div>
-          <small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small><small class="fg-origin">${esc(sourcesText(item.id))}</small></div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
+          <small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small>${item.kind === "weapon" ? `<small>${esc(weaponLine(cardOf(item)))}</small>${qualityHtml(cardOf(item))}` : ""}<small class="fg-origin">${esc(sourcesText(item.id))}</small></div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
           <button type="button" class="fg-mini" data-it-${worn ? "unequip" : "equip"}="${worn ? item.part : esc(item.id)}">${worn ? "Retirer" : "Équiper"}</button></div>`;
       }).join("");
       // L'en-tête (progression et filtres) reste en haut pendant que la liste défile
@@ -193,11 +249,11 @@
     function tradeHtml() {
       const cat = catalog(), all = [...cat.values()];
       const rarity = ui.give.length ? cat.get(ui.give[0])?.rarity : null;
-      const tradable = all.filter((i) => NEXT[i.rarity] && freeCopies(i.id) > 0 && (!rarity || i.rarity === rarity)).sort(byRarity);
+      const tradable = all.filter((i) => owns(i.id) && NEXT[i.rarity] && freeCopies(i.id) > 0 && (!rarity || i.rarity === rarity)).sort(byRarity);
       const chosen = (id) => ui.give.filter((x) => x === id).length;
       const give = tradable.map((item) => `<button type="button" class="fg-pick ${chosen(item.id) ? "on" : ""}" style="--rc:${color(item.rarity)}" data-it-give="${esc(item.id)}"><img src="${thumb(item)}" alt=""><span><b>${esc(item.name)}</b><small>${tag(item.rarity)} · ${freeCopies(item.id) - chosen(item.id)} libre${freeCopies(item.id) - chosen(item.id) > 1 ? "s" : ""}${chosen(item.id) ? ` · ${chosen(item.id)} donné${chosen(item.id) > 1 ? "s" : ""}` : ""}</small></span></button>`).join("");
       const targetRarity = rarity ? NEXT[rarity] : null;
-      const rewards = targetRarity ? all.filter((i) => i.rarity === targetRarity && !i.rank).sort(byRarity) : [];
+      const rewards = targetRarity ? all.filter((i) => i.rarity === targetRarity && !i.rank && !i.unique).sort(byRarity) : [];
       const want = rewards.map((item) => `<button type="button" class="fg-pick ${ui.get === item.id ? "on" : ""}" style="--rc:${color(item.rarity)}" data-it-get="${esc(item.id)}"><img src="${thumb(item)}" alt=""><span><b>${esc(item.name)}</b><small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}${owns(item.id) ? ` · tu en as ${count(item.id)}` : ""}</small></span></button>`).join("");
       const check = tradeValidity(ui.give, ui.get ?? "");
       const left = `<section><h4>Je donne (${ui.give.length}/${TRADE_COUNT})${ui.give.length ? `<button type="button" class="fg-mini" data-it-clear>Vider</button>` : ""}</h4>
@@ -211,7 +267,7 @@
 
     /** Avancement de la collection : objets différents possédés sur le total du catalogue. */
     function collection() {
-      const all = [...catalog().values()];
+      const all = [...catalog().values()].filter((i) => !i.unique);
       return { owned: all.filter((i) => owns(i.id)).length, total: all.length };
     }
 
@@ -221,7 +277,7 @@
     /** Contenu des onglets « Inventaire » et « Échange » de la page du personnage. */
     function panelHtml(tab) {
       ui.tab = tab;
-      return tab === "trade" ? tradeHtml() : inventoryHtml();
+      return tab === "trade" ? tradeHtml() : tab === "arsenal" ? arsenalHtml() : inventoryHtml();
     }
 
     /** Clics du panneau. @returns Vrai si le clic était pour les objets. */
@@ -259,7 +315,7 @@
     const freshCount = () => save().fresh.length;
     function markSeen() { save().fresh = []; }
 
-    return { catalog, migrate, count, owns, isEquipped, add, equip, unequip, look, claim, tradeValidity, trade, thumb, panelHtml, equippedHtml, collection, onClick, freshCount, markSeen, rarityName, color, ui };
+    return { catalog, migrate, count, owns, isEquipped, add, equip, unequip, look, claim, tradeValidity, trade, thumb, panelHtml, equippedHtml, collection, onClick, freshCount, markSeen, rarityName, color, weapons, ui };
   }
 
   window.ForgeItems = { create, RARITIES, NEXT, PART_NAME, TRADE_COUNT };

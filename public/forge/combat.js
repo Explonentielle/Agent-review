@@ -35,6 +35,66 @@
   };
   const TRAINING_WEAPON = { type: "sword", rarity: "common" };
 
+  /* ---------- armes uniques : chaque exemplaire a ses propres valeurs, tirées dans la fourchette de sa rareté ---------- */
+  /**
+   * Fourchettes par rareté. `dmg` : multiplicateur des dégâts. `cd` : multiplicateur du délai entre deux coups, de la pire valeur (lente) à la
+   * meilleure (rapide). `force` : points de Force de l'arme. `extra` : nombre de lignes de bonus sur d'autres caractéristiques, et `extraPts` leurs points.
+   * Les fourchettes se chevauchent d'une rareté à l'autre : un bon rare vaut mieux qu'un mauvais épique, et un jet parfait existe à chaque rareté.
+   */
+  const ROLL_RANGES = {
+    common: { dmg: [0.9, 1.1], cd: [1.06, 0.94], force: [1, 2], extra: [0, 0], extraPts: [1, 2] },
+    rare: { dmg: [1.0, 1.3], cd: [1.04, 0.92], force: [2, 4], extra: [0, 1], extraPts: [1, 3] },
+    epic: { dmg: [1.2, 1.5], cd: [1.0, 0.88], force: [4, 7], extra: [1, 2], extraPts: [2, 5] },
+    legendary: { dmg: [1.4, 1.8], cd: [0.96, 0.82], force: [7, 12], extra: [2, 3], extraPts: [3, 7] },
+  };
+  /** Sans graine (arme du catalogue, ancienne sauvegarde) : la valeur moyenne de la rareté, comme avant les tirages. */
+  const standardRoll = (type, rarity) => ({
+    type, rarity, seed: "", dmgMult: RARITY_DMG[rarity], cdMult: 1, bonus: { ...zeroStats(), force: RARITY_STAT[rarity] }, lines: [{ stat: "force", points: RARITY_STAT[rarity] }], quality: 0.5, label: "valeur moyenne", standard: true,
+  });
+  const TRAINING_ROLL = { type: "sword", rarity: "common", seed: "", dmgMult: 1, cdMult: 1, bonus: null, lines: [], quality: 0.5, label: "", standard: true };
+  /** Graine de texte (FNV-1a) : de quoi tirer toujours les mêmes valeurs pour une même arme. */
+  function hashSeed(text) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return h >>> 0;
+  }
+  const qualityLabel = (q) => (q < 0.38 ? "jet faible" : q < 0.62 ? "jet moyen" : q < 0.78 ? "bon jet" : q < 0.9 ? "très bon jet" : "jet exceptionnel");
+  /**
+   * Les valeurs d'une arme : le même (type, rareté, graine) donne toujours le même résultat, sur le navigateur comme sur un futur serveur de PvP.
+   * @param type Type d'arme (sword, axe...).
+   * @param rarity common, rare, epic ou legendary.
+   * @param seed Graine de l'exemplaire (l'identifiant de l'événement de butin) ; absente : valeur moyenne.
+   * @returns { dmgMult, cdMult, bonus (points par caractéristique), lines, quality (0 à 1), label }, ou null si le type ou la rareté est inconnu.
+   */
+  function rollWeapon(type, rarity, seed) {
+    if (!Object.hasOwn(WEAPONS, type) || !RARITIES.includes(rarity)) return null;
+    if (typeof seed !== "string" || !seed) return standardRoll(type, rarity);
+    const rg = ROLL_RANGES[rarity], rnd = mulberry32(hashSeed(`${type}|${rarity}|${seed}`));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const pick = ([lo, hi]) => { const v = lo + Math.min(hi - lo, Math.floor(rnd() * (hi - lo + 1))); return { v, t: hi > lo ? (v - lo) / (hi - lo) : 0.5 }; };
+    const tDmg = rnd(), tCd = rnd(), force = pick(rg.force), count = pick(rg.extra).v;
+    const ts = [tDmg, tCd, force.t];
+    const bonus = { ...zeroStats(), force: force.v }, lines = [{ stat: "force", points: force.v }];
+    const others = STAT_IDS.filter((id) => id !== "force");
+    for (let i = 0; i < count; i++) {
+      const stat = others.splice(Math.floor(rnd() * others.length), 1)[0], pts = pick(rg.extraPts);
+      bonus[stat] += pts.v; lines.push({ stat, points: pts.v }); ts.push(pts.t);
+    }
+    const quality = Math.round((ts.reduce((a, b) => a + b, 0) / ts.length) * 1000) / 1000;
+    return {
+      type, rarity, seed, dmgMult: Math.round(lerp(rg.dmg[0], rg.dmg[1], tDmg) * 1000) / 1000, cdMult: Math.round(lerp(rg.cd[0], rg.cd[1], tCd) * 1000) / 1000,
+      bonus, lines, quality, label: qualityLabel(quality), standard: false,
+    };
+  }
+  /** Fiche d'une arme pour l'afficher et la comparer : valeurs propres à l'arme, sans la Force ni l'Agilité du forgeron. */
+  function weaponCard(type, rarity, seed) {
+    const roll = rollWeapon(type, rarity, seed);
+    if (!roll) return null;
+    const spec = WEAPONS[type];
+    const damage = round1(spec.dmg * roll.dmgMult), cooldown = Math.round(spec.cd * roll.cdMult * 1000) / 1000;
+    return { type, rarity, name: spec.name, perk: spec.perk, damage, cooldown, dps: round1(damage / cooldown), reach: spec.ranged ? spec.range : spec.reach, ranged: Boolean(spec.ranged), lines: roll.lines, quality: roll.quality, label: roll.label, standard: roll.standard };
+  }
+
   /* ---------- l'arène : 24 x 15 tuiles, quatre piliers ---------- */
   const BOUNDS = { x0: 1 * T, x1: 23 * T, y0: 2 * T, y1: 14 * T };
   const PILLARS = [[6, 5], [17, 5], [6, 10], [17, 10]];
@@ -103,29 +163,38 @@
     const eq = opts.equipment || {};
     const bonus = zeroStats();
     const slots = {};
+    let roll = null;
     for (const slot of Object.keys(SLOT_STAT)) {
       const item = eq[slot];
       if (!item || !RARITIES.includes(item.rarity)) continue;
-      if (slot === "weapon" && !WEAPONS[item.type]) continue;
+      if (slot === "weapon") {
+        // L'arme est unique : ses points se répartissent sur plusieurs caractéristiques selon son tirage
+        roll = rollWeapon(item.type, item.rarity, item.seed);
+        if (!roll) continue;
+        for (const id of STAT_IDS) bonus[id] += roll.bonus[id];
+        slots.weapon = { rarity: item.rarity, stat: "force", points: roll.bonus.force, lines: roll.lines, quality: roll.quality, label: roll.label, standard: roll.standard };
+        continue;
+      }
       bonus[SLOT_STAT[slot]] += RARITY_STAT[item.rarity];
       slots[slot] = { rarity: item.rarity, stat: SLOT_STAT[slot], points: RARITY_STAT[item.rarity] };
     }
     const total = Object.fromEntries(STAT_IDS.map((id) => [id, base[id] + bonus[id]]));
-    const w = eq.weapon && WEAPONS[eq.weapon.type] && RARITIES.includes(eq.weapon.rarity) ? eq.weapon : TRAINING_WEAPON;
+    const w = roll ? eq.weapon : TRAINING_WEAPON;
+    const wroll = roll ?? TRAINING_ROLL;
     const spec = WEAPONS[w.type];
     const agi = total.agilite;
     const derived = {
       maxHp: Math.round(50 + 2 * level + 8 * total.vitalite),
       speed: round1(62 * (1 + 0.012 * Math.min(agi, 50))),
-      damage: round1(spec.dmg * RARITY_DMG[w.rarity] * (1 + 0.06 * total.force)),
-      cooldown: Math.round((spec.cd / (1 + 0.01 * Math.min(agi, 60))) * 1000) / 1000,
+      damage: round1(spec.dmg * wroll.dmgMult * (1 + 0.06 * total.force)),
+      cooldown: Math.round((spec.cd * wroll.cdMult / (1 + 0.01 * Math.min(agi, 60))) * 1000) / 1000,
       // Le critique de base de l'arme (dague) s'ajoute à celui de la Chance et relève le plafond d'autant
       crit: Math.round(Math.min(0.5 + (spec.critBonus || 0), 0.05 + 0.012 * total.chance + (spec.critBonus || 0)) * 1000) / 1000,
       critMult: spec.critMult || 1.6,
       dashCd: round1(Math.max(0.7, 1.6 - 0.02 * agi)),
       goldMult: Math.round((1 + Math.min(0.5, 0.01 * total.chance)) * 100) / 100,
     };
-    return { level, base, bonus, total, slots, weapon: { type: w.type, rarity: w.rarity, training: w === TRAINING_WEAPON, spec }, derived };
+    return { level, base, bonus, total, slots, weapon: { type: w.type, rarity: w.rarity, training: w === TRAINING_WEAPON, spec, roll: wroll }, derived };
   }
 
   /** Or gagné pour un combat : par vague terminée, plus une prime de victoire, majoré par la Chance. */
@@ -454,6 +523,6 @@
 
   globalThis.ForgeCombat = {
     T, W, H, STEP, STATS, STAT_IDS, RARITIES, RARITY_STAT, SLOT_STAT, SLOT_NAME, RARITY_DMG, WEAPONS, TRAINING_WEAPON, BOTS, WAVES, BOUNDS, OBSTACLES, HERO_START, SPAWNS,
-    pointsFor, spent, normalizeStats, build, reward, create,
+    ROLL_RANGES, rollWeapon, weaponCard, pointsFor, spent, normalizeStats, build, reward, create,
   };
 })();

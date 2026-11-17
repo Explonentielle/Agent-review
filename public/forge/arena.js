@@ -6,6 +6,7 @@
   const T = C.T, W = C.W, H = C.H;
   const px = (c, x, y, w, h, col) => S.px(c, Math.round(x), Math.round(y), w, h, col);
   const pct = (v) => `${Math.round(v * 100)} %`;
+  const round2 = (v) => String(Math.round(v * 100) / 100).replace(".", ",");
 
   /** Apparence des bots (les mêmes pièces de dessin que les personnages de la forge). `scale` : taille entière du dessin. */
   const BOT_LOOKS = {
@@ -114,7 +115,8 @@
     let current = null; // l'arène ouverte, pour la fermer quand on quitte la forge
     function start(options) {
       return new Promise((resolve) => {
-        const built = options.built, d = built.derived;
+        // Le forgeron et son équipement peuvent changer sur l'écran d'introduction (choix de l'arme)
+        let built = options.built, d = built.derived, w = built.weapon, equipment = options.equipment;
         const root = document.createElement("div");
         root.className = "fg-play";
         root.innerHTML = `<div class="fg-play-card" role="dialog" aria-modal="true" aria-label="L'arène">
@@ -127,26 +129,49 @@
         const hudEl = root.querySelector(".fg-play-hud"), msgEl = root.querySelector(".fg-play-msg");
         const bg = document.createElement("canvas"); bg.width = W * T; bg.height = H * T;
         drawStatic(bg.getContext("2d"));
-        const look = ctx.look();
+        let look = ctx.look();
         const keys = new Set();
         let fight = null, phase = "intro", raf = 0, last = 0, t = 0, acc = 0, endAt = 0, lastResult = null, runs = 0, banner = "", bannerT = 0;
         ctx.onKeysCaptured(true);
         current = quit;
 
-        const w = built.weapon;
-        const bonusLine = Object.keys(built.slots).length ? `Équipement : ${Object.entries(built.slots).map(([slot, s]) => `${C.SLOT_NAME[slot].toLowerCase()} +${s.points} ${C.STATS.find((x) => x.id === s.stat).name.toLowerCase()}`).join(", ")}.` : "Aucun équipement porté : équipe ton sac pour gagner des caractéristiques.";
+        const statName = (id) => C.STATS.find((x) => x.id === id).name.toLowerCase();
+        const lineText = (s) => (s.lines ?? [{ stat: s.stat, points: s.points }]).map((l) => `+${l.points} ${statName(l.stat)}`).join(", ");
+        /** Les armes du sac en pastilles : on choisit ici, avant le combat (flèches gauche et droite, ou un clic). */
+        function weaponPicker() {
+          const all = ctx.weapons ? ctx.weapons() : [];
+          if (!all.length) return `<p class="fg-play-note">Aucune arme dans ton sac : tu te bats avec l'épée d'entraînement. Elles tombent quand tu travailles.</p>`;
+          const chips = all.map((x) => `<button type="button" class="fg-pw ${x.worn ? "on" : ""}" style="--rc:${S.GRADE[x.rarity]?.c ?? "#9aa0ab"}" data-pw="${esc(x.id)}" title="${esc(x.name)} : ${esc(x.line)}"><img src="${x.icon}" alt="${esc(x.name)}"></button>`).join("");
+          return `<div class="fg-pw-row"><button type="button" class="fg-mini" data-pw-step="-1" aria-label="Arme précédente">‹</button><div class="fg-pw-list">${chips}</div><button type="button" class="fg-mini" data-pw-step="1" aria-label="Arme suivante">›</button></div>`;
+        }
         function showIntro() {
           phase = "intro";
+          const bonusLine = Object.keys(built.slots).length ? `Équipement : ${Object.entries(built.slots).map(([slot, s]) => `${C.SLOT_NAME[slot].toLowerCase()} ${lineText(s)}`).join(" · ")}.` : "Aucun équipement porté : équipe ton sac pour gagner des caractéristiques.";
+          const r = w.roll, jet = w.training || r.standard ? "" : ` · ${esc(r.label)} (${Math.round(r.quality * 100)} %)`;
           msgEl.hidden = false;
           msgEl.innerHTML = `<h3>${C.WAVES.length} vagues, un seigneur</h3>
-            <p>Arme : <b>${esc(w.spec.name)}</b>${w.training ? " d'entraînement" : ""} · ${esc(w.spec.blurb)}</p>
-            <p>${d.maxHp} PV · ${d.damage} dégâts · vitesse ${d.speed} · critique ${pct(d.crit)} · roulade ${d.dashCd} s</p>
+            ${weaponPicker()}
+            <p>Arme : <b>${esc(w.spec.name)}</b>${w.training ? " d'entraînement" : ` ${esc(S.GRADE[w.rarity]?.name.toLowerCase() ?? "")}`}${jet}</p>
+            <p class="fg-play-note">${esc(w.spec.perk)}</p>
+            <p>${d.maxHp} PV · ${d.damage} dégâts · ${round2(1 / d.cooldown)} coups/s · vitesse ${d.speed} · critique ${pct(d.crit)} · roulade ${d.dashCd} s</p>
             <p>${esc(bonusLine)}</p>
             ${options.best ? `<p>Ton record : ${options.best.wave} vague${options.best.wave > 1 ? "s" : ""} terminée${options.best.wave > 1 ? "s" : ""}${options.best.wins ? `, ${options.best.wins} victoire${options.best.wins > 1 ? "s" : ""}` : ""}.</p>` : ""}
-            <p class="fg-play-key">Appuie sur Entrée pour combattre</p>`;
+            <p class="fg-play-key">Flèches gauche et droite : changer d'arme · Entrée : combattre</p>`;
+          msgEl.querySelector(".fg-pw.on")?.scrollIntoView({ block: "nearest", inline: "center" });
+        }
+        /** Équipe l'arme voisine (`step`) ou l'arme `id`, puis recalcule le forgeron et réaffiche l'introduction. */
+        function equipWeapon(step, id) {
+          const all = ctx.weapons ? ctx.weapons() : [];
+          if (!all.length || !ctx.equipWeapon) return;
+          const i = Math.max(0, all.findIndex((x) => x.worn)), target = id ?? all[(i + step + all.length) % all.length].id;
+          const res = ctx.equipWeapon(target);
+          if (!res) return;
+          built = res.built; d = built.derived; w = built.weapon; equipment = res.equipment; look = ctx.look();
+          ctx.sfx.select?.();
+          showIntro();
         }
         function restart() {
-          fight = C.create({ level: built.level, stats: built.base, equipment: options.equipment, seed: (Date.now() ^ (runs++ * 2654435761)) >>> 0 });
+          fight = C.create({ level: built.level, stats: built.base, equipment, seed: (Date.now() ^ (runs++ * 2654435761)) >>> 0 });
           msgEl.hidden = true; phase = "fight"; acc = 0; banner = ""; endAt = 0;
         }
         function showEnd() {
@@ -158,7 +183,7 @@
             <p>${esc(fight.ending)}</p>
             <p>${r.cleared} vague${r.cleared > 1 ? "s" : ""} sur ${C.WAVES.length} · ${r.kills} bot${r.kills > 1 ? "s" : ""} vaincu${r.kills > 1 ? "s" : ""} · ${Math.round(r.time)} s</p>
             <p>Or gagné : <b>${given.gold}</b>${given.note ? ` <small>${esc(given.note)}</small>` : ""}</p>
-            <p class="fg-play-key"><button type="button" class="fg-btn" data-play-again>Rejouer (R)</button> <button type="button" class="fg-btn ghost" data-play-quit>Quitter (Échap)</button></p>`;
+            <p class="fg-play-key"><button type="button" class="fg-btn" data-play-again>Rejouer (R)</button> <button type="button" class="fg-btn ghost" data-play-arms>Changer d'arme (A)</button> <button type="button" class="fg-btn ghost" data-play-quit>Quitter (Échap)</button></p>`;
         }
         function quit() {
           current = null;
@@ -176,7 +201,10 @@
           ev.stopImmediatePropagation();
           if (key === "escape") { ev.preventDefault(); return quit(); }
           if (phase === "intro" && (key === "enter" || key === " ")) { ev.preventDefault(); restart(); return; }
+          if (phase === "intro" && (key === "arrowleft" || key === "q")) { ev.preventDefault(); equipWeapon(-1); return; }
+          if (phase === "intro" && (key === "arrowright" || key === "d")) { ev.preventDefault(); equipWeapon(1); return; }
           if (phase === "end" && key === "r") { ev.preventDefault(); restart(); return; }
+          if (phase === "end" && key === "a") { ev.preventDefault(); fight = null; showIntro(); return; }
           if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright", "shift"].includes(key)) ev.preventDefault();
           keys.add(key);
         }
@@ -186,9 +214,13 @@
         document.addEventListener("keyup", onKeyUp, true);
         window.addEventListener("blur", onBlur);
         root.addEventListener("click", (ev) => {
+          const chip = ev.target.closest("[data-pw]"), step = ev.target.closest("[data-pw-step]");
           if (ev.target.closest("[data-play-quit]")) quit();
+          else if (chip) equipWeapon(0, chip.dataset.pw);
+          else if (step) equipWeapon(Number(step.dataset.pwStep));
           else if (ev.target.closest("[data-play-again]")) restart();
-          else if (phase === "intro" && ev.target.closest(".fg-play-msg")) restart();
+          else if (ev.target.closest("[data-play-arms]")) { fight = null; showIntro(); }
+          else if (phase === "intro" && ev.target.closest(".fg-play-msg") && !ev.target.closest(".fg-pw-row")) restart();
         });
 
         const input = () => {

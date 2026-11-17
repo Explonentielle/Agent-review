@@ -74,7 +74,7 @@ const WEAPONS: LootItem[] = WEAPON_TYPES.flatMap((t) =>
 /** Tout ce qui peut tomber. */
 export const LOOT_CATALOG: LootItem[] = [...COSMETICS, ...WEAPONS];
 
-export type LootEventKind = "forge" | "review" | "merge";
+export type LootEventKind = "forge" | "review" | "merge" | "project";
 
 export interface LootEvent {
   /** Identifiant stable : il sert de graine au tirage et à savoir si le butin a déjà été ramassé. */
@@ -91,6 +91,11 @@ export interface Drop {
   at: string;
   itemId: string;
   rarity: Grade;
+  /**
+   * Graine de l'exemplaire (l'identifiant de l'événement). Une arme est unique : ses dégâts, sa cadence et ses bonus sont tirés dans les
+   * fourchettes de sa rareté à partir de (type, rareté, graine), par `rollWeapon` (`public/forge/combat.js`), donc toujours les mêmes.
+   */
+  seed: string;
 }
 
 /** Poids des raretés (commun, rare, épique, légendaire), sur 100. */
@@ -99,11 +104,15 @@ const WEIGHTS: Record<LootEventKind, [number, number, number, number]> = {
   review: [55, 30, 11, 4],
   // Une fusion est un aboutissement : de meilleures chances
   merge: [35, 35, 20, 10],
+  // Créer un projet est facile : peu de chances de bon butin
+  project: [72, 22, 5, 1],
 };
 /** Une pièce de meilleure qualité déplace des chances du commun vers les raretés supérieures (de 0 à 3 crans). */
 const QUALITY_SHIFT: Record<Grade, number> = { common: 0, rare: 1, epic: 2, legendary: 3 };
-/** Chance qu'une review rapporte quelque chose (forge et fusion rapportent toujours). */
-const REVIEW_CHANCE = 0.5;
+/** Chance qu'un événement rapporte quelque chose (forge et fusion rapportent toujours). */
+const DROP_CHANCE: Partial<Record<LootEventKind, number>> = { review: 0.5, project: 0.35 };
+/** Créer un projet est trop facile pour nourrir un butin sans fin : seuls les premiers projets créés comptent. */
+const PROJECT_MAX_EVENTS = 20;
 /** Part des armes parmi les objets qui tombent. */
 const WEAPON_SHARE = 0.35;
 
@@ -145,11 +154,12 @@ export function rarityWeights(kind: LootEventKind, quality: Grade): [number, num
 /**
  * Tirage du butin d'un événement.
  * @param event Événement réel (pièce forgée, review terminée, pièce fusionnée).
- * @returns L'objet qui tombe, ou null si l'événement ne rapporte rien (une review sur deux).
+ * @returns L'objet qui tombe, ou null si l'événement ne rapporte rien (une review sur deux, un projet sur trois).
  */
 export function rollDrop(event: LootEvent): Drop | null {
   const rand = seededRandom(event.id);
-  if (event.kind === "review" && rand() >= REVIEW_CHANCE) return null;
+  const chance = DROP_CHANCE[event.kind];
+  if (chance !== undefined && rand() >= chance) return null;
 
   const weights = rarityWeights(event.kind, event.quality);
   let pick = rand() * 100;
@@ -163,7 +173,7 @@ export function rollDrop(event: LootEvent): Drop | null {
   const wantWeapon = rand() < WEAPON_SHARE;
   const pool = LOOT_CATALOG.filter((item) => item.rarity === rarity && (item.kind === "weapon") === wantWeapon);
   const item = pool[Math.floor(rand() * pool.length)]!;
-  return { eventId: event.id, event: event.kind, at: event.at, itemId: item.id, rarity };
+  return { eventId: event.id, event: event.kind, at: event.at, itemId: item.id, rarity, seed: event.id };
 }
 
 /** Ce que le calcul lit de l'outil. */
@@ -172,6 +182,8 @@ export interface LootInput {
   reviews: Array<{ id: number; status: string; updated_at: string }>;
   /** Tâches dont la MR a été fusionnée depuis l'outil. */
   mergedTaskIds: number[];
+  /** Projets créés depuis l'outil (lignes `project_create` réussies du journal) : un petit butin, plafonné. */
+  projects?: Array<{ id: number; created_at: string }>;
 }
 
 /**
@@ -191,6 +203,9 @@ export function lootEvents(input: LootInput): LootEvent[] {
   for (const review of input.reviews) {
     if (REVIEW_DONE.includes(review.status)) events.push({ id: `review-${review.id}`, kind: "review", at: review.updated_at, quality: "common" });
   }
+  // Les premiers projets créés seulement (les plus anciens), pour que créer des projets à la chaîne ne rapporte pas sans fin
+  const firstProjects = [...(input.projects ?? [])].sort((a, b) => a.id - b.id).slice(0, PROJECT_MAX_EVENTS);
+  for (const project of firstProjects) events.push({ id: `project-${project.id}`, kind: "project", at: project.created_at, quality: "common" });
   return events.sort((a, b) => b.at.localeCompare(a.at));
 }
 
