@@ -27,7 +27,7 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* ---------- progression de jeu, dans ce navigateur ---------- */
-  const freshSave = () => ({ v: 1, name: "", look: { skin: SKINS[0], hair: HAIRS[1], tunic: TUNICS[0] }, gold: 0, sold: [], owned: [], worn: {}, weapons: {}, seen: [], hiddenWorkers: [], lastLevel: 0, created: false, intro: false, claimed: {}, lastRank: "", stats: { force: 0, agilite: 0, vitalite: 0, chance: 0 }, arena: { met: false, bestWave: 0, wins: 0, fights: 0, day: "", goldToday: 0 } });
+  const freshSave = () => ({ v: 1, name: "", look: { skin: SKINS[0], hair: HAIRS[1], tunic: TUNICS[0] }, gold: 0, sold: [], owned: [], worn: {}, weapons: {}, seen: [], hiddenWorkers: [], shop: { day: "", bought: [], salt: "" }, lastLevel: 0, created: false, intro: false, claimed: {}, lastRank: "", stats: { force: 0, agilite: 0, vitalite: 0, chance: 0 }, arena: { met: false, bestWave: 0, wins: 0, fights: 0, day: "", goldToday: 0 } });
   function loadSave() {
     const save = freshSave();
     try {
@@ -38,6 +38,11 @@
     save.hiddenWorkers = save.hiddenWorkers.filter((id) => typeof id === "string").slice(-60);
     for (const k of ["worn", "weapons", "claimed"]) if (!save[k] || typeof save[k] !== "object" || Array.isArray(save[k])) save[k] = {};
     if (typeof save.lastRank !== "string") save.lastRank = "";
+    // Marchand : le jour du stock, ce qui est déjà acheté aujourd'hui et le sel de cette sauvegarde (voir shop.js)
+    if (!save.shop || typeof save.shop !== "object" || Array.isArray(save.shop)) save.shop = { day: "", bought: [], salt: "" };
+    if (typeof save.shop.day !== "string") save.shop.day = "";
+    if (typeof save.shop.salt !== "string") save.shop.salt = "";
+    save.shop.bought = Array.isArray(save.shop.bought) ? save.shop.bought.filter((id) => typeof id === "string").slice(0, 20) : [];
     // Caractéristiques et arène : remises en forme (le plafond de points suit le niveau, il est appliqué à chaque lecture)
     save.stats = C.normalizeStats(save.stats, 99);
     const plain = (v) => v && typeof v === "object" && !Array.isArray(v);
@@ -375,15 +380,25 @@
   }
   const piecesReady = () => g.pieces.filter((p) => p.readiness && p.readiness.ok);
   const piecesUnread = () => g.pieces.filter((p) => !p.review || p.review.current === false);
+  /** Voile « chargement » sur la scène : on voit qu'une action est en cours (la forge met quelques secondes à répondre). @returns La fonction qui l'enlève. */
+  function busyStage(text) {
+    const veil = document.createElement("div");
+    veil.className = "fg-loading";
+    veil.setAttribute("role", "status");
+    veil.innerHTML = `<div class="fg-loading-box"><span class="fg-spin" aria-hidden="true"></span><b>${esc(text)}</b><small>Chez ta forge, ça peut prendre quelques secondes.</small></div>`;
+    g.el.stage.append(veil);
+    return () => veil.remove();
+  }
   /** Fusionne une pièce que le Maître juré vient de proposer : le choix du dialogue est la confirmation. */
   async function mergePieceNow(p) {
+    const done = busyStage("Fusion en cours…");
     try {
       await api(`/api/tasks/${p.taskId}/merge`, {});
       A.sfx.fanfare();
       banner(`Pièce fusionnée dans ${p.mr.targetBranch}.`);
       g.pieces = g.pieces.filter((x) => x.taskId !== p.taskId);
       refresh();
-    } catch (err) { banner(err.message); A.sfx.error(); }
+    } catch (err) { banner(err.message); A.sfx.error(); } finally { done(); }
   }
   async function guardTalk() {
     await loadPieces();

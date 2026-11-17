@@ -377,3 +377,11 @@ span.fg-type { cursor: default; }
 .fg-finding code { font-size: 11px; overflow-wrap: anywhere; }
 .fg-fixbox { display: grid; gap: 8px; margin: 10px 0; padding: 10px; border: 2px dashed var(--border-strong); border-radius: 10px; }
 .fg-fixbox textarea { width: 100%; margin-top: 4px; font: inherit; background: var(--surface-2); color: inherit; border: 2px solid var(--border); border-radius: 8px; padding: 6px 8px; resize: vertical; }
+
+/* Loader : voile et roue pendant une action longue (fusion) */
+.fg-loading { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(10, 8, 14, .66); backdrop-filter: blur(1px); }
+.fg-loading-box { display: grid; justify-items: center; gap: 8px; padding: 18px 26px; border: 2px solid #c9a35b; border-radius: 12px; background: #1d1814; color: #f5e9c8; text-align: center; }
+.fg-loading-box small { color: #d8cfb4; font-size: 11.5px; }
+.fg-spin { width: 30px; height: 30px; border: 4px solid rgba(255, 211, 122, .25); border-top-color: #ffd37a; border-radius: 50%; animation: fg-rot .8s linear infinite; }
+@keyframes fg-rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fg-spin { animation-duration: 2.4s; } }

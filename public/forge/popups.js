@@ -250,7 +250,7 @@
       },
     },
 
-    /** Le marchand : vendre les pièces forgées (pour de l'or, en jeu seulement) et acheter des tenues. */
+    /** Le marchand : le stock du jour (armes uniques et tenues tirées au hasard), le rachat des objets du sac, des pièces forgées, et des tenues fixes. */
     merchant: {
       live: true,
       async render() {
@@ -273,11 +273,29 @@
           const btn = owned ? `<button type="button" class="fg-btn ghost" data-fg-wear="${c.id}">${worn ? "Retirer" : "Équiper"}</button>` : buy;
           return `<div class="fg-item no-icon"><div><b>${esc(c.name)}</b> ${gradeTag(c.rarity)}<small>${c.rank ? `Tenue de prestige, rang ${esc(rankName)}` : "Une tenue pour ton forgeron"}</small></div>${btn}</div>`;
         }).join("");
+
+        // Stock du jour : armes uniques (valeurs tirées) et tenues, renouvelé chaque jour à minuit
+        const midnight = new Date(); midnight.setHours(24, 0, 0, 0);
+        const hours = Math.max(1, Math.ceil((midnight - Date.now()) / 3600000));
+        const offerRow = (o) => `<div class="fg-item"><img class="fg-ithumb" src="${game.items.thumb(o.item)}" alt=""><div><b>${esc(o.item.name)}</b> ${gradeTag(o.item.rarity)}${game.items.detailHtml(o.item)}</div>${o.bought ? `<button type="button" class="fg-btn ghost" disabled>Acheté</button>` : `<button type="button" class="fg-btn" data-fg-offer="${esc(o.offerId)}" ${gold < o.price ? "disabled" : ""}>Acheter ${o.price} or</button>`}</div>`;
+        const stock = game.items.shopOffers();
+        // Rachat des objets du sac : ceux qu'on ne porte pas ; un objet vendu quitte le sac
+        const sellable = game.items.sellable();
+        const sellRow = ({ item, copies, price: p }) => `<div class="fg-item"><img class="fg-ithumb" src="${game.items.thumb(item)}" alt=""><div><b>${esc(item.name)}</b>${copies > 1 ? ` <em>×${copies}</em>` : ""} ${gradeTag(item.rarity)}${game.items.detailHtml(item)}</div><button type="button" class="fg-btn" data-fg-sellitem="${esc(item.id)}">Vendre ${Math.round(p * bonus)} or</button></div>`;
+        const sellCommons = sellable.filter((x) => x.item.rarity === "common");
         return {
           title: "Marchand Sélim",
-          html: `<p class="fg-note">« Je rachète tout ce que tes apprentis ont forgé. » Ton or : <b>${gold}</b>. Vendre ne supprime rien sur ta forge : c'est du jeu.${game.goldBonus() ? ` Ton rang te vaut <b>+${game.goldBonus()} %</b> sur chaque vente.` : ""}</p>
+          html: `<p class="fg-note">« Je rachète tout, et ma marchandise change chaque jour. » Ton or : <b>${gold}</b>.${game.goldBonus() ? ` Ton rang te vaut <b>+${game.goldBonus()} %</b> sur chaque vente.` : ""}</p>
+            <h4>Stock du jour <small class="fg-note">nouveau stock dans environ ${hours} h</small></h4>
+            ${stock.length ? stock.map(offerRow).join("") : `<p class="fg-note">Rien en rayon aujourd'hui.</p>`}
+            <h4>Vendre mes objets</h4>
+            <p class="fg-note">Le marchand rachète à 40 % de sa valeur. Un objet vendu quitte ton sac pour de bon ; un objet porté ne se vend pas.</p>
+            ${sellable.length ? sellable.slice(0, 12).map(sellRow).join("") + (sellable.length > 12 ? `<p class="fg-note">… et ${sellable.length - 12} autre${sellable.length - 12 > 1 ? "s" : ""} dans ton sac.</p>` : "") : `<p class="fg-note">Rien à vendre : tout est porté, ou ton sac est vide.</p>`}
+            ${sellCommons.length > 1 ? `<div class="fg-inline"><button type="button" class="fg-btn ghost" data-fg-sellall-common>Tout vendre : ${sellCommons.length} objets communs (${sellCommons.reduce((t, x) => t + Math.round(x.price * x.copies * bonus), 0)} or)</button></div>` : ""}
+            <h4>Pièces forgées</h4>
+            <p class="fg-note">Les demandes de fusion que tes apprentis ont ouvertes se vendent aussi. Vendre une pièce ne supprime rien sur ta forge : c'est du jeu.</p>
             ${items.length ? items.slice(0, 12).map(row).join("") : `<p class="fg-note">Aucune pièce à vendre. Chaque demande de fusion ouverte par l'agent en devient une.</p>`}
-            ${commons.length > 1 ? `<div class="fg-inline"><button type="button" class="fg-btn ghost" data-fg-sellcommons>Tout vendre : ${commons.length} pièces communes (${commons.reduce((s, i) => s + price(i), 0)} or)</button></div>` : ""}
+            ${commons.length > 1 ? `<div class="fg-inline"><button type="button" class="fg-btn ghost" data-fg-sellcommons>Tout vendre : ${commons.length} pièces communes (${commons.reduce((t, i) => t + price(i), 0)} or)</button></div>` : ""}
             <h4>Tenues</h4>${cos}`,
         };
       },
@@ -467,6 +485,18 @@
     } catch (err) { game.banner(err.message); A.sfx.error(); render(); }
   }
 
+  /** Voile « chargement » sur la fenêtre ouverte : on voit qu'une action est en cours et rien d'autre ne répond. @returns La fonction qui l'enlève. */
+  function busy(text) {
+    const host = current?.el;
+    if (!host) { game.banner(text); return () => undefined; }
+    const veil = document.createElement("div");
+    veil.className = "fg-loading";
+    veil.setAttribute("role", "status");
+    veil.innerHTML = `<div class="fg-loading-box"><span class="fg-spin" aria-hidden="true"></span><b>${esc(text)}</b><small>Chez ta forge, ça peut prendre quelques secondes.</small></div>`;
+    host.append(veil);
+    return () => veil.remove();
+  }
+
   /** Fusionne la pièce dans la branche cible du projet, après confirmation. Le serveur revérifie toutes les règles. */
   async function mergePiece(taskId, target) {
     const ok = await ask({
@@ -476,6 +506,7 @@
         <p class="note">Pour revenir en arrière, il faudra annuler la fusion chez ta forge. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p>`,
     });
     if (!ok) return;
+    const done = busy("Fusion en cours…");
     try {
       await api(`/api/tasks/${taskId}/merge`, {});
       ticketCache.clear();
@@ -484,7 +515,8 @@
       game.banner(`Pièce fusionnée dans ${target}.`);
       game.refresh();
       render();
-    } catch (err) { game.banner(err.message); A.sfx.error(); render(); }
+    } catch (err) { done(); game.banner(err.message); A.sfx.error(); render(); return; }
+    done();
   }
 
   /** Relance l'apprenti dont la pièce est forgée, avec la consigne saisie dans la popup : même MR, nouvelle tâche. Un message vide n'est pas envoyé. */
@@ -648,6 +680,15 @@
     if (by("data-fg-claimall")) { game.claim(null); return render(); }
     if ((el = by("data-fg-sell"))) return sell([el.dataset.fgSell]);
     if (by("data-fg-sellcommons")) return sell(game.data.armory.loot.filter((i) => i.grade === "common" && !game.save.sold.includes(i.id)).map((i) => i.id));
+    if ((el = by("data-fg-offer"))) {
+      const r = game.items.buyOffer(el.dataset.fgOffer);
+      if (!r.ok) { game.banner(r.why); return A.sfx.error(); }
+      game.persist(); A.sfx.coin(); game.renderHud();
+      game.banner(`Acheté : ${r.item.name} pour ${r.price} or.`);
+      return render();
+    }
+    if ((el = by("data-fg-sellitem"))) return sellItems([el.dataset.fgSellitem]);
+    if (by("data-fg-sellall-common")) return sellItems(game.items.sellable().filter((x) => x.item.rarity === "common").flatMap((x) => Array(x.copies).fill(x.item.id)));
     if ((el = by("data-fg-buy"))) {
       const item = game.cosmetics.find((c) => c.id === el.dataset.fgBuy);
       if (!item || game.save.gold < item.price || (item.rank && game.rankOrder.indexOf(item.rank) > game.rankIndex())) return A.sfx.error();
@@ -662,6 +703,27 @@
       else game.items.equip(id);
       game.persist(); A.sfx.select(); return render();
     }
+  }
+  /** Vend des objets du sac : chacun quitte le sac. Un objet épique ou légendaire demande une confirmation (on ne le retrouvera pas). */
+  async function sellItems(ids) {
+    const first = ids.length === 1 ? game.items.catalog().get(ids[0]) : null;
+    if (first && ["epic", "legendary"].includes(first.rarity)) {
+      const ok = await ask({ title: `Vendre ${first.name} ?`, okLabel: "Vendre", html: `<p>Cet objet (${esc(S.GRADE[first.rarity].name.toLowerCase())}) <b>quittera ton sac pour de bon</b> : une arme est unique, tu ne pourras pas la racheter.</p>` });
+      if (!ok) return;
+    }
+    let total = 0, count = 0;
+    for (const id of ids) {
+      const r = game.items.sellItem(id);
+      if (!r) continue;
+      total += Math.round(r.price * (1 + game.goldBonus() / 100));
+      count++;
+    }
+    if (!count) { game.banner("Cet objet ne peut pas être vendu (il est porté)."); return A.sfx.error(); }
+    game.save.gold += total;
+    game.persist(); A.sfx.coin(); game.renderHud();
+    game.banner(`${count > 1 ? `${count} objets vendus` : "Vendu"} pour ${total} or.`);
+    if (game.customUi) game.customUi.redraw();
+    render();
   }
   function sell(ids) {
     let total = 0;

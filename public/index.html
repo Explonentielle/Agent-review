@@ -142,6 +142,7 @@
   .sev-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
   .pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .25; } }
+  @keyframes ra-rot { to { transform: rotate(360deg); } }
 
   /* ---------- Détail ---------- */
   .detail-pane { display: flex; flex-direction: column; }
@@ -1397,7 +1398,7 @@ function loadForgeAssets() {
     css.rel = "stylesheet";
     css.href = "/forge/forge.css";
     document.head.append(css);
-    for (const file of ["sprites", "audio", "items", "popups", "combat", "arena", "game"]) {
+    for (const file of ["sprites", "audio", "items", "popups", "combat", "shop", "arena", "game"]) {
       await new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = `/forge/${file}.js`;
@@ -2292,11 +2293,15 @@ document.addEventListener("click", async (e) => {
   if (act === "piece-merge") {
     const target = t.dataset.target;
     if (!(await ask({ title: `Fusionner dans ${target} ?`, html: `<p>La MR de l'agent est <b>fusionnée dans la branche <code>${esc(target)}</code></b> chez ta forge, avec le code relu par l'agent de review. La branche de l'agent n'est pas supprimée.</p><p class="note">Pour revenir en arrière, il faudra annuler la fusion chez ta forge. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p>`, okLabel: "Fusionner" }))) return;
+    // Loader : la forge met quelques secondes à répondre, le bouton le dit au lieu de rester muet
+    const label = t.textContent;
+    t.disabled = true;
+    t.innerHTML = '<span style="display:inline-block;width:14px;height:14px;margin-right:8px;vertical-align:-2px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:ra-rot .7s linear infinite"></span>Fusion en cours…';
     try {
       await api(`/api/tasks/${state.taskId}/merge`, {});
       toast("MR fusionnée.");
       state.issues = null;
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { toast(err.message, true); t.disabled = false; t.textContent = label; }
     return loadPiece(state.taskId);
   }
   if (act === "task-relaunch") {

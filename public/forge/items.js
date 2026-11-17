@@ -28,13 +28,13 @@
     const thumbs = new Map();
 
     /** Boutique et butin réunis, par identifiant. Une arme tirée au sort est un exemplaire unique : « identifiant-du-modèle#graine ». */
-    function catalog() {
+    function catalog(extra = []) {
       const map = new Map();
       for (const item of ctx.baseItems) map.set(item.id, { kind: "cosmetic", ...item });
       for (const item of g.lootCatalog || []) map.set(item.id, { ...item });
       for (const item of map.values()) if (item.kind === "weapon") item.part = "weapon";
       // Les exemplaires uniques possédés : le modèle du catalogue, plus leur graine (qui fixe leurs valeurs)
-      for (const id of Object.keys(save().items || {})) {
+      for (const id of [...Object.keys(save().items || {}), ...extra]) {
         const [baseId, seed] = splitId(id), base = seed ? map.get(baseId) : null;
         if (base?.kind === "weapon") {
           // Une arme épique ou légendaire prend un surnom de son premier effet : « Lance mythique des braises »
@@ -313,11 +313,66 @@
       return true;
     }
 
+    /* ---------- le marchand : stock du jour tiré au hasard, achat, et vente des objets du sac (voir shop.js) ---------- */
+    /** Qualité du jet d'une arme (0 à 1), ou null pour un objet sans jet. */
+    const qualityOf = (item) => { const c = cardOf(item); return c && !c.standard ? c.quality : null; };
+    /** Retire un exemplaire du sac : il disparaît pour de bon quand il n'en reste plus (et avec lui son « nouveau »). */
+    function remove(id) {
+      const s = save(), entry = s.items[id];
+      if (!entry || entry.n <= 0) return false;
+      entry.n--;
+      const src = ["loot", "trade", "bought", "prestige"].find((k) => entry.from[k] > 0);
+      if (src) entry.from[src]--;
+      if (entry.n <= 0) delete s.items[id];
+      s.fresh = s.fresh.filter((x) => s.items[x]);
+      s.owned = Object.keys(s.items).filter((k) => s.items[k].n > 0);
+      return true;
+    }
+    /** L'état du marchand dans la sauvegarde : le jour, ce qui a été acheté aujourd'hui, et le sel qui rend le stock propre à cette sauvegarde. */
+    function shopState() {
+      const s = save(), day = window.ForgeShop.dayKey();
+      if (!s.shop || typeof s.shop !== "object" || Array.isArray(s.shop)) s.shop = {};
+      if (typeof s.shop.salt !== "string" || !s.shop.salt) s.shop.salt = Math.random().toString(36).slice(2, 10);
+      if (s.shop.day !== day || !Array.isArray(s.shop.bought)) { s.shop.day = day; s.shop.bought = []; }
+      return s.shop;
+    }
+    /** Le stock du jour : chaque offre avec son objet (arme unique ou tenue) et son prix. Une offre achetée reste affichée, marquée comme telle. */
+    function shopOffers() {
+      const shop = shopState(), offers = window.ForgeShop.offers(shop.salt, shop.day, g.lootCatalog || []);
+      const cat = catalog(offers.map((o) => o.itemId));
+      return offers.filter((o) => cat.has(o.itemId)).map((o) => ({ ...o, item: cat.get(o.itemId), bought: shop.bought.includes(o.offerId) }));
+    }
+    /** Achète une offre du jour. @returns { ok, why } ou { ok, item, price } */
+    function buyOffer(offerId) {
+      const o = shopOffers().find((x) => x.offerId === offerId), s = save();
+      if (!o) return { ok: false, why: "Cette offre n'existe plus : le stock a changé." };
+      if (o.bought) return { ok: false, why: "Déjà acheté aujourd'hui." };
+      if (s.gold < o.price) return { ok: false, why: "Pas assez d'or." };
+      s.gold -= o.price;
+      s.shop.bought.push(offerId);
+      add(o.itemId, "bought");
+      if (!s.fresh.includes(o.itemId)) s.fresh.push(o.itemId);
+      return { ok: true, item: o.item, price: o.price };
+    }
+    /** Les objets du sac que le marchand rachète : ceux qu'on ne porte pas (une tenue de prestige ne se vend pas). */
+    function sellable() {
+      return [...catalog().values()].filter((i) => owns(i.id) && !i.rank && freeCopies(i.id) > 0).sort(byRarity).map((item) => ({ item, copies: freeCopies(item.id), price: window.ForgeShop.sellPrice(item, qualityOf(item)) }));
+    }
+    /** Vend un exemplaire : il quitte le sac. @returns { item, price } (prix de base, sans le bonus de rang), ou null si l'objet est porté, absent ou de prestige. */
+    function sellItem(id) {
+      const item = catalog().get(id);
+      if (!item || item.rank || freeCopies(id) <= 0) return null;
+      const price = window.ForgeShop.sellPrice(item, qualityOf(item));
+      return remove(id) ? { item, price } : null;
+    }
+    /** Le détail d'un objet en quelques lignes (arme : valeurs, effets, jet ; tenue : emplacement), pour les listes du marchand. */
+    const detailHtml = (item) => (item.kind === "weapon" ? `<small>${esc(weaponLine(cardOf(item)))}</small>${affixesHtml(cardOf(item))}${qualityHtml(cardOf(item))}` : `<small>${PART_NAME[item.part] ?? ""}</small>`);
+
     /** Objets nouveaux (butin ou échange pas encore vus dans le sac). */
     const freshCount = () => save().fresh.length;
     function markSeen() { save().fresh = []; }
 
-    return { catalog, migrate, count, owns, isEquipped, add, equip, unequip, look, claim, tradeValidity, trade, thumb, panelHtml, equippedHtml, collection, onClick, freshCount, markSeen, rarityName, color, weapons, ui };
+    return { catalog, migrate, count, owns, isEquipped, add, equip, unequip, look, claim, tradeValidity, trade, thumb, panelHtml, equippedHtml, collection, onClick, freshCount, markSeen, rarityName, color, weapons, remove, shopOffers, buyOffer, sellable, sellItem, detailHtml, ui };
   }
 
   window.ForgeItems = { create, RARITIES, NEXT, PART_NAME, TRADE_COUNT };

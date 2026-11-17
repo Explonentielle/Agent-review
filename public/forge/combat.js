@@ -75,6 +75,8 @@
     return h >>> 0;
   }
   /** La qualité est un rang : « meilleur que X % des tirages possibles de cette arme ». */
+  /** Tirage pseudo-aléatoire à graine de texte : la même graine donne toujours la même suite de nombres entre 0 et 1. */
+  const seededRandom = (text) => mulberry32(hashSeed(String(text)));
   const qualityLabel = (q) => (q < 0.2 ? "jet faible" : q < 0.5 ? "jet moyen" : q < 0.8 ? "bon jet" : q < 0.95 ? "très bon jet" : "jet exceptionnel");
   function erf(x) {
     const s = Math.sign(x), a = Math.abs(x), t = 1 / (1 + 0.3275911 * a);
@@ -696,6 +698,6 @@
 
   globalThis.ForgeCombat = {
     T, W, H, STEP, STATS, STAT_IDS, RARITIES, RARITY_STAT, SLOT_STAT, SLOT_NAME, RARITY_DMG, WEAPONS, TRAINING_WEAPON, BOTS, WAVES, BOUNDS, OBSTACLES, HERO_START, SPAWNS,
-    BOSS_ORDER, waveFor, ROLL_RANGES, AFFIXES, rollWeapon, weaponCard, gearExtras, GEAR_MAX_POINTS, pointsFor, spent, normalizeStats, build, reward, create,
+    BOSS_ORDER, waveFor, seededRandom, ROLL_RANGES, AFFIXES, rollWeapon, weaponCard, gearExtras, GEAR_MAX_POINTS, pointsFor, spent, normalizeStats, build, reward, create,
   };
 })();
