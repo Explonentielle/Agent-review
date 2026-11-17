@@ -154,14 +154,41 @@
     archer: { name: "Archer", weapon: "bow", rarity: "common", hp: 22, dmg: 5, speed: 42, ranged: true, pref: 95, windup: 0.45, cd: 1.7, projSpeed: 140, range: 220, r: 5 },
     mage: { name: "Mage", weapon: "staff", rarity: "rare", hp: 26, dmg: 7, speed: 38, ranged: true, pref: 110, windup: 0.6, cd: 2.3, projSpeed: 95, range: 220, r: 5 },
     seigneur: { name: "Seigneur des braises", weapon: "axe", rarity: "legendary", hp: 200, dmg: 11, speed: 42, reach: 26, windup: 0.5, cd: 1.4, boss: true, r: 8 },
+    // Vagues sans fin : un assassin très rapide (on ne le fuit pas : on le tue vite ou on roule) et deux boss de plus
+    assassin: { name: "Assassin", weapon: "dagger", rarity: "rare", hp: 20, dmg: 6, speed: 90, reach: 14, windup: 0.24, cd: 1.0, r: 5 },
+    colosse: { name: "Colosse de pierre", weapon: "hammer", rarity: "legendary", hp: 330, dmg: 15, speed: 30, reach: 30, windup: 0.85, cd: 2.2, knock: 120, boss: true, chargeSpeed: 150, minions: ["brute"], r: 9 },
+    archimage: { name: "Archimage", weapon: "staff", rarity: "legendary", hp: 250, dmg: 12, speed: 40, ranged: true, pref: 125, windup: 0.5, cd: 1.25, projSpeed: 125, range: 270, boss: true, minions: ["archer", "archer"], r: 8 },
   };
   const WAVES = [
     { name: "Les rôdeurs", bots: ["gobelin", "gobelin"] },
     { name: "La garde", bots: ["gobelin", "gobelin", "soldat"] },
     { name: "Tirs croisés", bots: ["soldat", "soldat", "archer"] },
     { name: "Les brutes", bots: ["brute", "mage", "gobelin", "gobelin"] },
-    { name: "Le Seigneur des braises", bots: ["seigneur"] },
+    { name: "Le Seigneur des braises", bots: ["seigneur"], boss: true },
   ];
+  /* ---------- vagues sans fin : après la 5e, des vagues calculées (sans hasard), et un boss toutes les 5 vagues ---------- */
+  const BOSS_ORDER = ["seigneur", "colosse", "archimage"];
+  const WAVE_NAMES = ["Les maraudeurs", "Pluie de flèches", "Ruée des lames", "Les mercenaires", "La horde", "Sorciers et brutes", "Embuscade", "Les vétérans"];
+  /** Coût de chaque bot dans le « budget » d'une vague : plus la vague est haute, plus le budget et le nombre d'ennemis montent. */
+  const WAVE_POOL = [["gobelin", 1], ["soldat", 1.6], ["archer", 1.8], ["assassin", 1.5], ["mage", 2.2], ["brute", 3]];
+  const MAX_WAVE_BOTS = 10;
+  /**
+   * Composition d'une vague. Les cinq premières sont celles de la campagne ; ensuite, une vague sur cinq est un boss (Seigneur, Colosse, Archimage, et on recommence),
+   * les autres tirent dans un budget qui grandit avec le numéro, de façon déterministe (le même numéro donne toujours la même vague).
+   * @param n Numéro de la vague (à partir de 1).
+   * @returns { name, bots, boss? }
+   */
+  function waveFor(n) {
+    if (n >= 1 && n <= WAVES.length) return WAVES[n - 1];
+    if (n % 5 === 0) { const type = BOSS_ORDER[(n / 5 - 1) % BOSS_ORDER.length]; return { name: BOTS[type].name, bots: [type], boss: true }; }
+    const bots = [];
+    let budget = 3 + 1.5 * n, i = n * 7;
+    for (let tries = 0; tries < 60 && bots.length < MAX_WAVE_BOTS && budget >= 1; tries++, i += 5) {
+      const [type, cost] = WAVE_POOL[i % WAVE_POOL.length];
+      if (cost <= budget) { bots.push(type); budget -= cost; }
+    }
+    return { name: WAVE_NAMES[n % WAVE_NAMES.length], bots };
+  }
 
   const HERO_R = 5;
   const DASH_SPEED = 230, DASH_TIME = 0.17, DASH_INV = 0.24, HIT_INV = 0.5;
@@ -242,10 +269,13 @@
     return { level, base, bonus, total, slots, weapon: { type: w.type, rarity: w.rarity, training: w === TRAINING_WEAPON, spec, roll: wroll }, derived };
   }
 
-  /** Or gagné pour un combat : par vague terminée, plus une prime de victoire, majoré par la Chance. */
+  /**
+   * Or gagné pour un combat : par vague terminée, plus une prime de victoire, majoré par la Chance.
+   * Sans fin (`result.endless`) : pas de victoire finale, mais une prime de 25 pour chaque boss vaincu (une vague sur cinq).
+   */
   function reward(result, built) {
     let gold = 0;
-    for (let w = 1; w <= result.cleared; w++) gold += 3 + 2 * w;
+    for (let w = 1; w <= result.cleared; w++) gold += 3 + 2 * w + (result.endless && w % 5 === 0 ? 25 : 0);
     if (result.state === "won") gold += 25;
     return Math.round(gold * (built?.derived.goldMult ?? 1));
   }
@@ -260,6 +290,8 @@
     const d = built.derived, wp = built.weapon.spec;
     const rng = mulberry32(opts.seed ?? 1);
     const level = built.level;
+    /** Sans fin : les vagues continuent après le seigneur, un boss toutes les 5 vagues, jusqu'à la défaite. Sinon : la campagne de 5 vagues. */
+    const endless = Boolean(opts.endless);
     /** Les effets spéciaux de l'arme portée, par identifiant : { burn: 0.2, lifesteal: 0.05 ... } */
     const aff = {};
     for (const a of built.weapon.roll.affixes || []) aff[a.id] = a.value;
@@ -268,7 +300,7 @@
       cd: 0, windup: 0, dashT: 0, dashCd: 0, dash: [0, -1], inv: 0, hurt: 0, swing: 0, stun: 0, kb: null,
     };
     const fight = {
-      built, hero, bots: [], shots: [], fx: [], t: 0, state: "between", timer: 1.2, wave: 0, waves: WAVES.length, kills: 0, cleared: 0, damageDealt: 0, ending: "", events: [],
+      built, hero, bots: [], shots: [], fx: [], t: 0, state: "between", timer: 1.2, wave: 0, waves: endless ? 0 : WAVES.length, endless, kills: 0, cleared: 0, damageDealt: 0, ending: "", events: [],
     };
     const emit = (name) => fight.events.push(name);
 
@@ -295,8 +327,10 @@
     /* ----- bots ----- */
     function spawnBot(type, wave, at) {
       const spec = BOTS[type];
-      const hpScale = (1 + 0.04 * (level - 1)) * (1 + 0.06 * (wave - 1));
-      const dmgScale = (1 + 0.025 * (level - 1)) * (1 + 0.06 * (wave - 1));
+      // Au-delà de la 5e vague, la hausse s'accélère un peu (jusqu'à la 5e : exactement comme la campagne)
+      const late = 0.004 * Math.max(0, wave - 5) ** 2;
+      const hpScale = (1 + 0.04 * (level - 1)) * (1 + 0.06 * (wave - 1) + late);
+      const dmgScale = (1 + 0.025 * (level - 1)) * (1 + 0.06 * (wave - 1) + late);
       const hp = Math.round(spec.hp * hpScale);
       const bot = {
         type, spec, x: at[0], y: at[1], r: spec.r, hp, maxHp: hp, dmg: round1(spec.dmg * dmgScale), alive: true, dying: 0, face: [0, 1],
@@ -308,7 +342,7 @@
     function startWave(n) {
       fight.wave = n;
       fight.state = "fighting";
-      const list = WAVES[n - 1].bots;
+      const list = waveFor(n).bots;
       list.forEach((type, i) => spawnBot(type, n, SPAWNS[(i * 2 + n) % SPAWNS.length]));
       emit("wave");
     }
@@ -499,7 +533,7 @@
         const [ux, uy] = norm(h.x - b.x, h.y - b.y);
         if (b.rush) {
           b.rush.t -= STEP;
-          move(b, b.rush.dir[0] * 210 * STEP, b.rush.dir[1] * 210 * STEP);
+          move(b, b.rush.dir[0] * (b.spec.chargeSpeed || 210) * STEP, b.rush.dir[1] * (b.spec.chargeSpeed || 210) * STEP);
           if (!b.rush.done && dd <= b.r + h.r + 2) { b.rush.done = true; hurtHero(b.dmg * 1.6, b.x, b.y, 90); }
           if (b.rush.t <= 0) { b.rush = null; b.stun = 0.7; b.chargeCd = 4.5; }
           continue;
@@ -517,10 +551,11 @@
         if (b.spec.boss) {
           if (!b.summoned && b.hp < b.maxHp / 2) {
             b.summoned = true;
-            spawnBot("gobelin", fight.wave, SPAWNS[3]); spawnBot("gobelin", fight.wave, SPAWNS[4]);
+            (b.spec.minions || ["gobelin", "gobelin"]).forEach((type, i) => spawnBot(type, fight.wave, SPAWNS[3 + (i % 2)]));
             emit("summon");
           }
-          if (b.chargeCd <= 0 && dd > 50 && dd < 190) {
+          // L'Archimage tire de loin au lieu de charger
+          if (!b.spec.ranged && b.chargeCd <= 0 && dd > 50 && dd < 190) {
             b.pending = "charge"; b.chargeDir = [ux, uy]; b.windup = 0.6; b.tell = { kind: "charge", dir: [ux, uy] };
             emit("tell");
             continue;
@@ -579,7 +614,7 @@
         if (fight.timer <= 0) startWave(fight.wave + 1);
       } else if (fight.state === "fighting" && aliveBots().length === 0 && fight.bots.every((b) => b.spawnT <= 0)) {
         fight.cleared = fight.wave;
-        if (fight.wave >= WAVES.length) { fight.state = "won"; fight.ending = "L'arène est à toi !"; emit("win"); return; }
+        if (!endless && fight.wave >= WAVES.length) { fight.state = "won"; fight.ending = "L'arène est à toi !"; emit("win"); return; }
         fight.state = "between"; fight.timer = BETWEEN_TIME;
         hero.hp = Math.min(hero.maxHp, hero.hp + Math.round(hero.maxHp * 0.35));
         emit("clear");
@@ -598,15 +633,15 @@
         updateShots();
         updateFx();
         updateFlow();
-        if (fight.t > TIME_LIMIT && fight.state !== "won") { fight.state = "lost"; fight.ending = "Le temps est écoulé."; emit("lose"); }
+        if (fight.t > (endless ? 3 * TIME_LIMIT : TIME_LIMIT) && fight.state !== "won") { fight.state = "lost"; fight.ending = "Le temps est écoulé."; emit("lose"); }
       }
     };
     fight.hud = () => ({
-      state: fight.state, hp: hero.hp, maxHp: hero.maxHp, wave: fight.wave, waves: fight.waves, waveName: WAVES[Math.max(0, Math.min(fight.wave, fight.waves) - 1)].name,
+      state: fight.state, hp: hero.hp, maxHp: hero.maxHp, wave: fight.wave, waves: fight.waves, endless, waveName: waveFor(Math.max(1, endless ? fight.wave : Math.min(fight.wave, fight.waves))).name, boss: fight.wave >= 1 && Boolean(waveFor(fight.wave).boss),
       botsLeft: aliveBots().length, kills: fight.kills, time: fight.t, dashReady: hero.dashCd <= 0, dashPct: clamp(1 - hero.dashCd / d.dashCd, 0, 1), ending: fight.ending,
-      next: fight.state === "between" ? Math.min(fight.wave + 1, fight.waves) : 0,
+      next: fight.state === "between" ? (endless ? fight.wave + 1 : Math.min(fight.wave + 1, fight.waves)) : 0,
     });
-    fight.result = () => ({ state: fight.state, cleared: fight.cleared, wave: fight.wave, kills: fight.kills, time: round1(fight.t), damage: Math.round(fight.damageDealt), gold: reward({ state: fight.state, cleared: fight.cleared }, built) });
+    fight.result = () => ({ state: fight.state, cleared: fight.cleared, wave: fight.wave, kills: fight.kills, time: round1(fight.t), damage: Math.round(fight.damageDealt), endless, gold: reward({ state: fight.state, cleared: fight.cleared, endless }, built) });
     /** Les événements sonores survenus depuis le dernier appel (touche, critique, vague...). */
     fight.drain = () => fight.events.splice(0);
     return fight;
@@ -614,6 +649,6 @@
 
   globalThis.ForgeCombat = {
     T, W, H, STEP, STATS, STAT_IDS, RARITIES, RARITY_STAT, SLOT_STAT, SLOT_NAME, RARITY_DMG, WEAPONS, TRAINING_WEAPON, BOTS, WAVES, BOUNDS, OBSTACLES, HERO_START, SPAWNS,
-    ROLL_RANGES, AFFIXES, rollWeapon, weaponCard, pointsFor, spent, normalizeStats, build, reward, create,
+    BOSS_ORDER, waveFor, ROLL_RANGES, AFFIXES, rollWeapon, weaponCard, pointsFor, spent, normalizeStats, build, reward, create,
   };
 })();

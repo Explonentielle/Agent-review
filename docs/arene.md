@@ -7,7 +7,7 @@ Une salle de la forge où l'on se bat en temps réel contre des bots, avec l'éq
 1. Quand ta première arme est posée au râtelier, une **herse de fer** apparaît dans le mur du bas de la forge (une autre porte que les portes magiques violettes du mur du fond). Maître Brann t'y envoie.
 2. Dans la salle de l'arène, le **Maître d'armes** t'explique tout, puis propose : combattre, régler ses caractéristiques, ou réécouter les règles.
 3. **Chaque niveau te donne un point** à répartir entre quatre caractéristiques, dans **Profil > Combat**. Les objets que tu portes en ajoutent selon leur rareté.
-4. Le combat : **cinq vagues de bots, puis le Seigneur des braises**. À la fin, un peu d'or et un record.
+4. Le combat : **des vagues de bots sans fin, un boss toutes les 5 vagues** (le Seigneur des braises à la 5e). Tu combats jusqu'à tomber ; à la fin, un peu d'or et un record.
 
 Commandes : flèches ou ZQSD pour bouger, **Espace** pour frapper (le coup part vers l'ennemi proche, devant toi), **Maj** pour une roulade (intouchable un instant), Échap pour quitter, R pour rejouer.
 
@@ -86,11 +86,19 @@ Les effets s'appliquent aux coups de l'arme (corps à corps et projectiles), pas
 | 4 Les brutes | 1 brute (marteau), 1 mage (bâton), 2 gobelins |
 | 5 Le Seigneur des braises | le seigneur (hache légendaire) : une **charge annoncée** (bande rouge au sol), et du renfort quand il passe sous la moitié de sa vie |
 
+### Vagues sans fin
+
+Le jeu n'est plus limité à cinq vagues : après le Seigneur, **les vagues continuent** jusqu'à ce que tu tombes, ou que tu battes en retraite avec Échap (les vagues déjà terminées comptent pour l'or et le record). Les cinq premières sont celles du tableau ci-dessus ; ensuite :
+- **Un boss toutes les 5 vagues**, dans cet ordre, puis on recommence plus fort : Seigneur des braises (5, 20, 35...), **Colosse de pierre** (10, 25...) : énorme et lent, il charge lentement et appelle des brutes ; **Archimage** (15, 30...) : il ne charge pas, il tire de loin des traits magiques et appelle des archers.
+- **Des groupes calculés, sans hasard** : un budget qui grandit avec le numéro (3 + 1,5 x numéro) est dépensé en gobelins, soldats, archers, mages, brutes et **assassins** (très rapides et fragiles : on ne les fuit pas, on les tue vite ou on roule), au plus 10 ennemis. Le même numéro donne toujours la même vague.
+- **Une difficulté qui accélère** : au-delà de la 5e vague, les ennemis gagnent en plus 0,4 % x (vague - 5)² de vie et de dégâts. Jusqu'à la 5e : exactement comme avant.
+- **Les styles** : les bots de mêlée sont plus lents que toi (62 de vitesse de base contre 30 à 56), sauf les assassins (90), donc l'arc et le bâton tiennent à distance ; les archers, les mages et l'Archimage punissent ceux qui ne bougent pas ; la lance, la hache et le marteau règlent les groupes ; la dague, les assassins.
+
 Chaque bot **arme son coup** : un « ! » rouge apparaît au-dessus de lui avant de frapper, ce qui laisse le temps de rouler. Les bots deviennent plus solides avec le niveau du forgeron (+4 % de vie et +2,5 % de dégâts par niveau) et avec la vague. On récupère 35 % de sa vie entre deux vagues.
 
 ## Récompenses
 
-Par vague terminée : 3 + 2 x numéro de la vague, plus 25 pour la victoire (70 or au total pour les cinq vagues), majoré par la Chance. **Plafond de 150 or par jour.** L'arène donne aussi un record (vagues terminées, victoires).
+Par vague terminée : 3 + 2 x numéro de la vague, plus **25 par boss vaincu** (une vague sur cinq), majoré par la Chance : 45 or pour cinq vagues, 70 avec le premier boss, 190 pour dix vagues. **Plafond de 150 or par jour.** L'arène donne aussi un record (vagues terminées) et compte les parties où le premier boss est tombé. Battre en retraite (Échap) ou tomber rapporte la même chose : seules les vagues terminées comptent.
 
 **Pas d'XP, pas d'objet rare, pas de classement** : la progression est dans le navigateur, donc modifiable à la main. Ces récompenses viendraient de données falsifiables ; l'XP et le butin restent ceux du vrai travail, calculés par le serveur.
 

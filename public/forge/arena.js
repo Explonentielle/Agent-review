@@ -16,6 +16,9 @@
     archer: { skin: "#d9a066", hair: "#8a3b12", tunic: "#2f7a5a", apron: "#6b4423", hat: "feather" },
     mage: { skin: "#e0b088", hair: "#e8e4da", tunic: "#4a3f9a", apron: "#f0d078", hat: "wizard", beard: true },
     seigneur: { skin: "#c88a60", hair: "#3a2a1c", tunic: "#7a1f2e", apron: "#f0d078", hat: "crown", beard: true, scale: 2 },
+    assassin: { skin: "#d9a066", hair: "#23252b", tunic: "#2a2a38", apron: "#1d1d28", hat: "scribe" },
+    colosse: { skin: "#9a9aa6", hair: "#6a6a76", tunic: "#55555f", apron: "#3a3a44", hat: "viking", beard: true, bald: true, scale: 2 },
+    archimage: { skin: "#d8c7e8", hair: "#ffffff", tunic: "#5a2f9a", apron: "#c9a3ff", hat: "wizard", beard: true, scale: 2 },
   };
   const SFX = { swing: "blip", "swing-hit": "hammer", hit: "hammer", crit: "coin", shoot: "blip", "bot-shoot": "blip", hurt: "error", kill: "bump", dash: "step", wave: "spawn", clear: "coin", win: "fanfare", lose: "error", summon: "spawn", charge: "bump", shock: "bump" };
 
@@ -131,7 +134,7 @@
         root.innerHTML = `<div class="fg-play-card" role="dialog" aria-modal="true" aria-label="L'arène">
           <div class="fg-play-top"><b>L'arène</b><span class="fg-play-hud"></span><button type="button" class="fg-x" data-play-quit aria-label="Quitter" title="Quitter (Échap)"></button></div>
           <div class="fg-play-view"><canvas width="${W * T}" height="${H * T}"></canvas><div class="fg-play-msg"></div></div>
-          <div class="fg-play-help">Flèches ou ZQSD : bouger · Espace : frapper · Maj : roulade (tu ne peux pas être touché) · Échap : quitter</div></div>`;
+          <div class="fg-play-help">Flèches ou ZQSD : bouger · Espace : frapper · Maj : roulade (tu ne peux pas être touché) · Échap : battre en retraite</div></div>`;
         ctx.stage.append(root);
         const canvas = root.querySelector("canvas"), c = canvas.getContext("2d");
         c.imageSmoothingEnabled = false;
@@ -158,7 +161,8 @@
           const bonusLine = Object.keys(built.slots).length ? `Équipement : ${Object.entries(built.slots).map(([slot, s]) => `${C.SLOT_NAME[slot].toLowerCase()} ${lineText(s)}`).join(" · ")}.` : "Aucun équipement porté : équipe ton sac pour gagner des caractéristiques.";
           const r = w.roll, jet = w.training || r.standard ? "" : ` · ${esc(r.label)} (${Math.round(r.quality * 100)} %)`;
           msgEl.hidden = false;
-          msgEl.innerHTML = `<h3>${C.WAVES.length} vagues, un seigneur</h3>
+          msgEl.innerHTML = `<h3>Vagues sans fin</h3>
+            <p class="fg-play-note">Un boss toutes les 5 vagues : le Seigneur, le Colosse, l'Archimage, puis on recommence, plus fort. Tu combats jusqu'à tomber ; Échap bat en retraite et garde tes vagues.</p>
             ${weaponPicker()}
             <p>Arme : <b>${esc(w.spec.name)}</b>${w.training ? " d'entraînement" : ` ${esc(S.GRADE[w.rarity]?.name.toLowerCase() ?? "")}`}${jet}</p>
             <p class="fg-play-note">${esc(w.spec.perk)}</p>
@@ -181,7 +185,7 @@
           showIntro();
         }
         function restart() {
-          fight = C.create({ level: built.level, stats: built.base, equipment, seed: (Date.now() ^ (runs++ * 2654435761)) >>> 0 });
+          fight = C.create({ level: built.level, stats: built.base, equipment, endless: true, seed: (Date.now() ^ (runs++ * 2654435761)) >>> 0 });
           msgEl.hidden = true; phase = "fight"; acc = 0; banner = ""; endAt = 0;
         }
         function showEnd() {
@@ -189,13 +193,18 @@
           const r = fight.result(), given = ctx.onFightEnd(r) ?? { gold: 0, note: "" };
           lastResult = { ...r, gold: given.gold };
           msgEl.hidden = false;
-          msgEl.innerHTML = `<h3 class="${r.state}">${r.state === "won" ? "Victoire !" : "Défaite"}</h3>
+          msgEl.innerHTML = `<h3 class="${r.state}">${r.endless ? "Tu es tombé" : r.state === "won" ? "Victoire !" : "Défaite"}</h3>
             <p>${esc(fight.ending)}</p>
-            <p>${r.cleared} vague${r.cleared > 1 ? "s" : ""} sur ${C.WAVES.length} · ${r.kills} bot${r.kills > 1 ? "s" : ""} vaincu${r.kills > 1 ? "s" : ""} · ${Math.round(r.time)} s</p>
+            <p>${r.cleared} vague${r.cleared > 1 ? "s" : ""} terminée${r.cleared > 1 ? "s" : ""}${r.endless ? "" : ` sur ${C.WAVES.length}`} · ${r.kills} bot${r.kills > 1 ? "s" : ""} vaincu${r.kills > 1 ? "s" : ""} · ${Math.round(r.time)} s</p>
             <p>Or gagné : <b>${given.gold}</b>${given.note ? ` <small>${esc(given.note)}</small>` : ""}</p>
             <p class="fg-play-key"><button type="button" class="fg-btn" data-play-again>Rejouer (R)</button> <button type="button" class="fg-btn ghost" data-play-arms>Changer d'arme (A)</button> <button type="button" class="fg-btn ghost" data-play-quit>Quitter (Échap)</button></p>`;
         }
         function quit() {
+          // Battre en retraite en plein combat : les vagues déjà terminées comptent (or et record)
+          if (phase === "fight" && fight && fight.state !== "won" && fight.state !== "lost" && fight.cleared > 0) {
+            const r = { ...fight.result(), state: "retreat" }, given = ctx.onFightEnd(r) ?? { gold: 0 };
+            lastResult = { ...r, gold: given.gold };
+          }
           current = null;
           cancelAnimationFrame(raf);
           document.removeEventListener("keydown", onKey, true);
@@ -290,12 +299,12 @@
               acc -= C.STEP;
               for (const e of fight.drain()) {
                 if (SFX[e]) ctx.sfx[SFX[e]]?.();
-                if (e === "wave") { banner = fight.wave === C.WAVES.length ? "Le Seigneur des braises" : `Vague ${fight.wave} · ${C.WAVES[fight.wave - 1].name}`; bannerT = 2; }
+                if (e === "wave") { const info = C.waveFor(fight.wave); banner = info.boss ? `Vague ${fight.wave} · BOSS : ${info.name}` : `Vague ${fight.wave} · ${info.name}`; bannerT = 2.2; }
                 if (e === "clear") { banner = "Vague terminée"; bannerT = 1.5; }
               }
             }
             const h = fight.hud();
-            hudEl.innerHTML = `<span>Vague ${Math.max(1, h.wave)}/${h.waves}</span><span>Ennemis ${h.botsLeft}</span><span>Vaincus ${h.kills}</span>`;
+            hudEl.innerHTML = `<span>Vague ${Math.max(1, h.wave)}${h.waves ? `/${h.waves}` : ""}${h.boss ? " (boss)" : ""}</span><span>Ennemis ${h.botsLeft}</span><span>Vaincus ${h.kills}</span>`;
             if (h.state === "won" || h.state === "lost") { if (!endAt) endAt = now + 900; if (now >= endAt) { endAt = 0; showEnd(); } }
           }
           draw();

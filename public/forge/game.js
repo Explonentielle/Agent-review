@@ -481,7 +481,8 @@
     "Ton équipement compte aussi : la cape donne de l'Agilité, le tablier de la Vitalité, le couvre-chef de la Chance. Plus l'objet est rare, plus il donne.",
     "Chaque arme est unique : ses dégâts, sa cadence et ses points de caractéristique sont tirés au hasard dans la fourchette de sa rareté. Un bon rare peut valoir mieux qu'un mauvais épique, et un jet parfait existe à chaque rareté. Avant chaque combat, tu choisis ton arme sur l'écran d'introduction (flèches gauche et droite), ou dans ton profil, onglet Armes.",
     "Chaque arme a son effet. La dague est rapide, très courte, et frappe souvent en critique. La lance transperce deux ennemis alignés. L'arc tire vite et loin, mais faiblement. Le marteau assomme et secoue le sol autour de l'impact. Le bâton ralentit ceux qu'il touche. La hache balaie tout devant toi, et l'épée reste équilibrée.",
-    "Cinq vagues de bots, puis le Seigneur des braises. Tu gagnes un peu d'or, jamais d'objet rare : ceux-là viennent de ton vrai travail. Les points se règlent dans ton profil, onglet Combat.",
+    "Les vagues de bots ne s'arrêtent pas : un boss toutes les 5 vagues (le Seigneur des braises, le Colosse de pierre, l'Archimage, puis on recommence, plus fort). Tu combats jusqu'à tomber, ou tu bats en retraite avec Échap et tes vagues comptent. Chaque style a sa place : l'arc et le bâton pour tenir à distance, la lance pour la portée, la dague pour les assassins rapides, le marteau et la hache pour les groupes.",
+    "Tu gagnes un peu d'or par vague (plafonné par jour), jamais d'objet rare : ceux-là viennent de ton vrai travail. Les points se règlent dans ton profil, onglet Combat.",
   ];
   async function arenaTalk(npc) {
     await say(npc.name, npc.lines.map(fillName));
@@ -518,7 +519,7 @@
     const a = g.save.arena, now = new Date(), day = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
     if (a.day !== day) { a.day = day; a.goldToday = 0; }
     a.fights++;
-    if (result.state === "won") a.wins++;
+    if (result.state === "won" || result.cleared >= C.WAVES.length) a.wins++; // le premier boss est tombé dans cette partie
     const record = result.cleared > a.bestWave;
     if (record) a.bestWave = result.cleared;
     const wanted = C.reward(result, combatBuild()), gold = Math.max(0, Math.min(wanted, ARENA_DAILY_GOLD - a.goldToday));
@@ -761,7 +762,7 @@
       <h4>Équipement</h4>
       <p class="fg-note">${worn.length ? esc(worn.join(" · ")) : "Aucun équipement porté : équipe des objets du sac pour gagner des points."}</p>
       <h4>Arène</h4>
-      <p class="fg-note">${a.fights ? `${a.fights} combat${a.fights > 1 ? "s" : ""}, ${a.wins} victoire${a.wins > 1 ? "s" : ""}, record : ${a.bestWave} vague${a.bestWave > 1 ? "s" : ""} sur ${C.WAVES.length}.` : "Pas encore de combat : la herse de fer, en bas à droite de la forge, mène à l'arène."}</p>
+      <p class="fg-note">${a.fights ? `${a.fights} combat${a.fights > 1 ? "s" : ""}, record :${a.bestWave} vague${a.bestWave > 1 ? "s" : ""}, premier boss vaincu ${a.wins} fois.` : "Pas encore de combat : la herse de fer, en bas à droite de la forge, mène à l'arène."}</p>
       <p><button type="button" class="fg-mini" data-stat-reset>Réinitialiser mes points</button></p>
     </div>`;
   }
