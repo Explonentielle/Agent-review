@@ -83,7 +83,10 @@ export interface LootEvent {
   at: string;
   /** Qualité de la pièce (forge et fusion) : une meilleure pièce donne de meilleures chances. */
   quality: Grade;
-  /** Type d'arme du projet concerné : une arme qui tombe est toujours de ce type (absent : aucun projet connu, tous les types sont possibles). */
+  /**
+   * Type d'arme du projet concerné : une arme qui tombe est toujours de ce type. Absent : aucun projet connu, tous les types sont possibles,
+   * sauf pour un projet créé (`project`) dont le type n'est pas encore fixé, qui ne rapporte que des tenues.
+   */
   weaponType?: WeaponTypeId;
 }
 
@@ -172,7 +175,8 @@ export function rollDrop(event: LootEvent): Drop | null {
     rarity = RARITIES[i]!;
   }
 
-  const wantWeapon = rand() < WEAPON_SHARE;
+  // Un projet créé qui n'est pas encore au râtelier n'a pas de type d'arme : il ne donne pas d'arme (le nombre de tirages ne change pas)
+  const wantWeapon = rand() < WEAPON_SHARE && !(event.kind === "project" && !event.weaponType);
   const pool = LOOT_CATALOG.filter((item) => item.rarity === rarity && (item.kind === "weapon") === wantWeapon && (!wantWeapon || !event.weaponType || item.weapon === event.weaponType));
   const item = pool[Math.floor(rand() * pool.length)]!;
   return { eventId: event.id, event: event.kind, at: event.at, itemId: item.id, rarity, seed: event.id };

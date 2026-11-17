@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { PROJECT_ROOT } from "../paths.js";
 import { WEAPON_TYPE_IDS, computeArmory, defaultWeaponType, type ArmoryProject } from "./armory.js";
 import { LOOT_CATALOG, computeDrops, rollDrop, type LootEvent } from "./loot.js";
 
@@ -10,6 +13,16 @@ describe("le type d'arme d'un projet", () => {
   it("les types du serveur sont ceux du catalogue du butin", () => {
     const inCatalog = new Set(LOOT_CATALOG.flatMap((i) => (i.weapon ? [i.weapon] : [])));
     expect([...inCatalog].sort()).toEqual([...WEAPON_TYPE_IDS].sort());
+  });
+
+  it("les types et les noms du navigateur (sprites, sélecteur du dashboard) sont ceux du serveur", () => {
+    const read = (file: string) => readFileSync(path.join(PROJECT_ROOT, file), "utf8");
+    const sprites = read("public/forge/sprites.js");
+    const spriteTypes = [...sprites.slice(sprites.indexOf("const TYPES = ["), sprites.indexOf("];", sprites.indexOf("const TYPES = [")) ).matchAll(/id: "(\w+)"/g)].map((m) => m[1]);
+    expect([...spriteTypes].sort()).toEqual([...WEAPON_TYPE_IDS].sort());
+    const html = read("public/index.html");
+    const names = html.match(/const WEAPON_TYPE_NAMES = \{([^}]*)\}/)?.[1] ?? "";
+    expect([...names.matchAll(/(\w+):/g)].map((m) => m[1]).sort()).toEqual([...WEAPON_TYPE_IDS].sort());
   });
 
   it("un projet sans type en reçoit un fixe, toujours le même", () => {
@@ -55,6 +68,16 @@ describe("le type d'arme d'un projet", () => {
 
     const free = computeDrops({ tasks: Array.from({ length: 300 }, (_, i) => ({ ...task(i + 1, 1), source: undefined, project_id: undefined })), reviews: [], mergedTaskIds: [] });
     expect(new Set(free.flatMap((d) => weaponOf(d.itemId) ?? [])).size).toBeGreaterThan(1);
+  });
+
+  it("un projet créé dont le type n'est pas encore fixé ne rapporte aucune arme", () => {
+    const created = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, created_at: "2026-11-16 12:00:00", source: "gitlab", path: `g/inconnu${i}` }));
+    for (let i = 0; i < 300; i++) {
+      const drop = rollDrop({ id: `project-${i}`, kind: "project", at: "2026-11-16", quality: "common" });
+      if (drop) expect(weaponOf(drop.itemId)).toBeUndefined();
+    }
+    const drops = computeDrops({ tasks: [], reviews: [], mergedTaskIds: [], projects: created, weaponProjects: [project(1, "axe")] });
+    expect(drops.every((d) => weaponOf(d.itemId) === undefined)).toBe(true);
   });
 
   it("le tirage reste déterministe", () => {
