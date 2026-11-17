@@ -9,7 +9,7 @@
 
   /** Apparence des bots (les mêmes pièces de dessin que les personnages de la forge). `scale` : taille entière du dessin. */
   const BOT_LOOKS = {
-    gobelin: { skin: "#6aa84f", hair: "#2f5a2a", tunic: "#6b4a2a", apron: "#4a3a2a", hat: "bandana", bald: true },
+    gobelin: { skin: "#6aa84f", hair: "#2f5a2a", tunic: "#6b4a2a", apron: "#4a3a2a", hat: "bandana", bald: true, ears: true },
     soldat: { skin: "#e0b088", hair: "#3a2a1c", tunic: "#8a2a2a", apron: "#9aa0ab", hat: "helmet" },
     brute: { skin: "#c88a60", hair: "#3a2a1c", tunic: "#5a4a3a", apron: "#3a2a1c", hat: "viking", beard: true },
     archer: { skin: "#d9a066", hair: "#8a3b12", tunic: "#2f7a5a", apron: "#6b4423", hat: "feather" },

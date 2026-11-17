@@ -1,4 +1,4 @@
-/* Dessin de la forge : pixel art généré par du code (aucune image). Tuile de 16 px, personnages de 16 x 20 px. */
+/* Dessin de la forge : pixel art généré par du code (aucune image). Tuile de 16 px, personnages de 16 x 16 px (coiffes en plus). */
 (() => {
   "use strict";
   const T = 16;
@@ -59,63 +59,103 @@
     return iconCache.get(key);
   }
 
-  /** Un personnage dont les pieds touchent le bas de la tuile (x, y). `look` : peau, cheveux, tunique, tablier, chapeau, cape, barbe, objet tenu. */
+  /**
+   * Un personnage de 16 x 16 px dont les pieds touchent le bas de la tuile (x, y) : grosse tête ronde, corps court, contour sombre.
+   * Les coiffes dépassent d'au plus 6 px au-dessus. Le dessin est écrit pour la face, le dos et la droite ; la gauche en est le miroir.
+   * `o` : dir (down, up, left, right), frame (0 repos, 1 et 2 pas), skin, hair, tunic, apron, hat, cape, beard, bald, long (cheveux longs), ears (oreilles pointues), item.
+   */
   function person(c, x, y, o = {}) {
-    const { dir = "down", frame = 0, skin = "#f2c9a0", hair = "#3a2a1c", tunic = "#3e6fb0", apron = "#6b4423", hat = null, beard = false, item = null, bald = false, cape = null } = o;
+    const { dir = "down", frame = 0, skin = "#f2c9a0", hair = "#3a2a1c", tunic = "#3e6fb0", apron = "#6b4423", hat = null, beard = false, item = null, bald = false, cape = null, long = false, ears = false } = o;
     const yb = y + T;
     // Ombre au sol : deux bandes, pour un contour arrondi
     px(c, x + 2, yb - 1, 12, 2, "rgba(0,0,0,.22)"); px(c, x + 4, yb - 2, 8, 1, "rgba(0,0,0,.16)");
     const L = [];
-    const r = (dx, dy, w, h, col) => L.push([dx, dy, w, h, col]); // coordonnées relatives au coin haut gauche de la tuile (x, y)
-    // Vue de face, la cape ne dépasse que derrière les épaules (dessinée avant le corps)
-    if (cape && dir === "down") { r(3, 4, 10, 9, cape); r(3, 4, 2, 9, HI); r(11, 4, 2, 9, SH); }
-    // Jambes et bottes
-    r(5, 12 + (frame === 1 ? 1 : 0), 2, frame === 1 ? 3 : 4, "#3b3a47"); r(9, 12 + (frame === 2 ? 1 : 0), 2, frame === 2 ? 3 : 4, "#3b3a47");
-    r(5, 15, 2, 1, "#23252b"); r(9, 15, 2, 1, "#23252b");
-    // Torse, tablier, ceinture, bras et mains
-    r(4, 5, 8, 8, tunic); r(4, 5, 8, 1, HI); r(10, 6, 2, 7, SH);
-    if (dir !== "up") { r(5, 7, 6, 6, apron); r(5, 7, 6, 1, SH); r(10, 8, 1, 5, SH); }
-    r(4, 11, 8, 1, "#3a2a1c");
-    r(2, 5, 2, 6, tunic); r(12, 5, 2, 6, tunic); r(2, 5, 2, 1, HI); r(13, 6, 1, 5, SH);
-    r(2, 11, 2, 2, skin); r(12, 11, 2, 2, skin); r(2, 12, 2, 1, SH); r(12, 12, 2, 1, SH);
-    // De dos la cape couvre tout le dos ; de profil elle pend du côté qui suit (dessinée par-dessus le corps)
-    if (cape && dir !== "down") {
-      const [cx, cw] = dir === "up" ? [3, 10] : dir === "left" ? [9, 5] : [2, 5];
-      r(cx, 4, cw, 10, cape);
-      r(cx, 4, cw, 2, "rgba(255,255,255,.18)");
-      r(cx, 13, cw, 1, "rgba(0,0,0,.28)");
-      if (dir === "up") r(7, 6, 2, 7, "rgba(0,0,0,.18)");
+    const flip = dir === "left";
+    const side = dir === "left" || dir === "right";
+    const r = (dx, dy, w, h, col) => L.push([flip ? T - dx - w : dx, dy, w, h, col]); // coordonnées relatives au coin haut gauche de la tuile (x, y), retournées pour la gauche
+    const rr = (dx, dy, w, h, col) => L.push([dx, dy, w, h, col]); // objets tenus : toujours du même côté de l'écran
+    const PANTS = "#55506a", BOOT = "#6a4326", BELT = "#3a2a1c", EYE = "#23252b", CHEEK = "rgba(220,90,90,.3)", MOUTH = "rgba(110,40,36,.6)";
+
+    // Vue de face, la cape ne dépasse que derrière les épaules et s'évase derrière les jambes
+    if (cape && dir === "down") { r(3, 8, 10, 4, cape); r(2, 12, 12, 3, cape); r(3, 8, 1, 6, HI); r(12, 8, 1, 6, SH); r(2, 14, 12, 1, SH); }
+
+    // Jambes : en marchant, la jambe levée ne montre que sa botte, un rang plus haut
+    if (!side) {
+      for (const [lx, fx, lift] of [[5, 4, frame === 1], [9, 9, frame === 2]]) {
+        if (lift) { r(lx, 13, 2, 1, BOOT); r(fx, 14, 3, 1, BOOT); } else { r(lx, 13, 2, 1, PANTS); r(lx, 14, 2, 1, BOOT); r(fx, 15, 3, 1, BOOT); }
+      }
+    } else {
+      const [a, b] = frame === 0 ? [6, 8] : [5, 9]; // jambe arrière, jambe avant
+      for (const [lx, lift, back] of [[a, frame === 2, true], [b, frame === 1, false]]) {
+        if (lift) { r(lx, 13, 2, 1, BOOT); r(lx, 14, 3, 1, BOOT); } else { r(lx, 13, 2, 1, PANTS); r(lx, 14, 2, 1, BOOT); r(lx, 15, 3, 1, BOOT); if (back) r(lx, 13, 3, 3, SH); }
+      }
     }
-    // Tête, cheveux, visage
-    r(4, -2, 8, 7, skin); r(4, 4, 8, 1, SH); r(10, -1, 2, 5, "rgba(0,0,0,.1)");
+
+    // Torse, jupe de la tunique, tablier, ceinture et bras
+    if (!side) {
+      r(3, 12, 10, 1, tunic); r(3, 12, 10, 1, SH);
+      r(4, 8, 8, 4, tunic); r(4, 8, 8, 1, HI); r(10, 9, 2, 3, SH);
+      if (dir === "down") { r(5, 9, 6, 4, apron); r(5, 9, 6, 1, SH); r(10, 10, 1, 3, SH); r(7, 8, 2, 1, skin); }
+      r(4, 11, 8, 1, BELT); if (dir === "down") r(7, 11, 2, 1, GOLD);
+      const [la, ra] = frame === 1 ? [1, 0] : frame === 2 ? [0, 1] : [0, 0]; // le bras qui avance descend d'un rang
+      r(2, 8 + la, 2, 3, tunic); r(2, 8 + la, 2, 1, HI); r(2, 11 + la, 2, 1, skin);
+      r(12, 8 + ra, 2, 3, tunic); r(13, 9 + ra, 1, 2, SH); r(12, 11 + ra, 2, 1, skin);
+      // De dos la cape couvre tout le dos
+      if (cape && dir === "up") { r(3, 8, 10, 7, cape); r(3, 8, 10, 2, HI); r(3, 14, 10, 1, SH); r(7, 10, 2, 4, "rgba(0,0,0,.18)"); r(7, 8, 2, 1, GOLD); }
+    } else {
+      r(4, 12, 8, 1, tunic); r(4, 12, 8, 1, SH);
+      r(5, 8, 6, 4, tunic); r(5, 8, 6, 1, HI); r(5, 9, 1, 3, SH);
+      r(8, 9, 3, 4, apron); r(8, 9, 3, 1, SH);
+      r(5, 11, 6, 1, BELT); r(10, 11, 1, 1, GOLD);
+      // De profil la cape pend dans le dos
+      if (cape) { r(3, 8, 5, 7, cape); r(3, 8, 5, 2, HI); r(3, 14, 5, 1, SH); }
+      const ax = frame === 1 ? 8 : frame === 2 ? 6 : 7; // le bras balance avec les pas
+      r(ax, 8, 2, 3, tunic); r(ax, 8, 2, 1, HI); r(ax, 11, 2, 1, skin);
+    }
+
+    // Tête : un octogone arrondi, des cheveux, un visage à deux yeux
+    r(5, 0, 6, 1, skin); r(4, 1, 8, 1, skin); r(3, 2, 10, 4, skin); r(4, 6, 8, 1, skin); r(5, 7, 6, 1, skin);
+    r(11, 3, 1, 3, "rgba(0,0,0,.1)"); r(5, 7, 6, 1, "rgba(0,0,0,.12)");
+    if (ears) { if (!side) { r(2, 3, 1, 2, skin); r(13, 3, 1, 2, skin); } else r(2, 3, 1, 2, skin); }
     if (!bald) {
-      r(4, -2, 8, dir === "up" ? 7 : 3, hair);
-      if (dir !== "up") { r(3, -1, 1, 4, hair); r(12, -1, 1, 4, hair); }
-      r(5, -2, 3, 1, HI);
+      if (dir === "up") {
+        r(5, 0, 6, 1, hair); r(4, 1, 8, 1, hair); r(3, 2, 10, long ? 7 : 5, hair); r(10, 3, 2, 3, SH);
+      } else if (dir === "down") {
+        r(5, 0, 6, 1, hair); r(4, 1, 8, 1, hair); r(3, 2, 10, 1, hair); r(3, 3, 3, 1, hair); r(10, 3, 3, 1, hair); r(3, 4, 1, long ? 5 : 2, hair); r(12, 4, 1, long ? 5 : 2, hair);
+      } else {
+        r(5, 0, 6, 1, hair); r(4, 1, 8, 1, hair); r(3, 2, 10, 1, hair); r(3, 3, 5, long ? 6 : 4, hair); r(8, 3, 4, 1, hair);
+      }
+      r(5, 0, 3, 1, HI);
+    } else r(5, 0, 3, 1, HI2);
+    if (dir === "down") {
+      r(6, 4, 1, 2, EYE); r(9, 4, 1, 2, EYE); r(5, 6, 1, 1, CHEEK); r(10, 6, 1, 1, CHEEK); if (!beard) r(7, 6, 2, 1, MOUTH);
+    } else if (side) {
+      r(10, 4, 1, 2, EYE); r(13, 4, 1, 1, skin); r(10, 6, 1, 1, CHEEK); if (!beard) r(11, 6, 1, 1, MOUTH); r(7, 4, 1, 2, "rgba(0,0,0,.14)");
     }
-    if (dir === "down") { r(6, 2, 1, 2, "#23252b"); r(9, 2, 1, 2, "#23252b"); r(5, 4, 1, 1, "rgba(220,90,90,.28)"); r(10, 4, 1, 1, "rgba(220,90,90,.28)"); }
-    if (dir === "left") { r(5, 2, 1, 2, "#23252b"); r(5, 4, 1, 1, "rgba(220,90,90,.28)"); }
-    if (dir === "right") { r(10, 2, 1, 2, "#23252b"); r(10, 4, 1, 1, "rgba(220,90,90,.28)"); }
-    if (beard) { r(4, 3, 8, 4, "#e8e4da"); r(6, 4, 4, 1, skin); r(4, 6, 8, 1, "rgba(0,0,0,.14)"); }
-    // Coiffes : contour et reflet sur le dessus
-    if (hat === "cap") { r(3, -4, 10, 3, "#9a3b2e"); r(3, -2, 10, 1, "#7a2a20"); r(4, -4, 4, 1, HI2); }
-    if (hat === "helmet") { r(3, -4, 10, 4, "#9aa0ab"); r(7, -7, 2, 3, "#c0392b"); r(3, -1, 10, 1, "#5d626c"); r(4, -4, 3, 3, HI2); r(10, -4, 3, 3, SH); }
-    if (hat === "copper") { r(3, -4, 10, 4, "#c97c3a"); r(3, -1, 10, 1, "#8a4a1c"); r(7, -5, 2, 2, "#e8a05a"); r(4, -4, 3, 3, HI2); r(10, -4, 3, 3, SH); }
-    if (hat === "turban") { r(3, -5, 10, 5, "#2f9a6a"); r(6, -7, 4, 2, "#2f9a6a"); r(7, -4, 2, 1, "#ffd37a"); r(3, -2, 10, 1, "rgba(0,0,0,.2)"); r(4, -5, 4, 1, HI2); }
-    if (hat === "crown") { r(3, -5, 10, 3, "#f0d078"); r(3, -7, 2, 2, "#f0d078"); r(7, -8, 2, 3, "#f0d078"); r(11, -7, 2, 2, "#f0d078"); r(7, -4, 2, 1, "#c0392b"); r(3, -3, 10, 1, "rgba(120,80,0,.3)"); r(4, -5, 4, 1, HI2); }
-    if (hat === "bandana") { r(4, -3, 8, 2, "#c0392b"); r(11, -2, 2, 3, "#c0392b"); r(5, -3, 2, 1, "#e8685a"); }
-    if (hat === "feather") { r(3, -4, 10, 3, "#2f7a5a"); r(3, -2, 10, 1, "#1f5a40"); r(11, -9, 2, 6, "#f0d078"); r(12, -10, 1, 2, "#fff7d0"); r(4, -4, 4, 1, HI2); }
-    if (hat === "viking") { r(3, -4, 10, 4, "#9aa0ab"); r(3, -1, 10, 1, "#5d626c"); r(1, -8, 2, 5, "#e8e4da"); r(13, -8, 2, 5, "#e8e4da"); r(2, -4, 2, 2, "#e8e4da"); r(12, -4, 2, 2, "#e8e4da"); r(4, -4, 3, 3, HI2); r(10, -4, 3, 3, SH); }
-    if (hat === "knight") { r(3, -5, 10, 6, "#b9bfca"); r(3, 0, 10, 1, "#6a707c"); r(5, -2, 6, 2, "#23252b"); r(7, -9, 2, 4, "#c0392b"); r(4, -5, 3, 3, HI2); r(10, -5, 3, 3, SH); }
-    if (hat === "wizard") { r(2, -4, 12, 2, "#3a2f7a"); r(4, -7, 8, 3, "#4a3f9a"); r(6, -10, 4, 3, "#4a3f9a"); r(7, -12, 2, 2, "#4a3f9a"); r(4, -5, 8, 1, "#f0d078"); r(4, -7, 3, 1, HI2); }
-    if (hat === "scribe") { r(3, -4, 10, 2, "#2d2a4a"); r(5, -7, 6, 3, "#2d2a4a"); r(5, -7, 3, 1, HI); }
+    if (beard && dir !== "up") {
+      if (dir === "down") { r(4, 6, 8, 2, hair); r(5, 8, 6, 1, hair); r(7, 6, 2, 1, MOUTH); r(4, 6, 8, 1, HI); } else { r(7, 6, 6, 2, hair); r(8, 8, 4, 1, hair); r(7, 6, 6, 1, HI); }
+    }
+
+    // Coiffes : contour, reflet en haut à gauche et ombre à droite
+    if (hat === "cap") { r(3, -1, 10, 3, "#9a3b2e"); r(5, -2, 6, 1, "#9a3b2e"); r(3, 1, 10, 1, "#7a2a20"); r(4, -1, 4, 1, HI2); }
+    if (hat === "helmet") { r(3, -2, 10, 4, "#9aa0ab"); r(5, -3, 6, 1, "#9aa0ab"); r(7, -5, 2, 2, "#c0392b"); r(3, 2, 10, 1, "#5d626c"); r(4, -2, 3, 2, HI2); r(10, -2, 3, 3, SH); if (dir !== "up") { r(3, 3, 1, 2, "#7a808c"); r(12, 3, 1, 2, "#7a808c"); } if (dir === "down") r(7, 3, 2, 3, "#7a808c"); }
+    if (hat === "copper") { r(3, -2, 10, 4, "#c97c3a"); r(5, -3, 6, 1, "#c97c3a"); r(7, -4, 2, 1, "#e8a05a"); r(3, 2, 10, 1, "#8a4a1c"); r(4, -2, 3, 2, HI2); r(10, -2, 3, 3, SH); }
+    if (hat === "turban") { r(3, -2, 10, 4, "#2f9a6a"); r(5, -4, 6, 2, "#2f9a6a"); r(7, 0, 2, 1, "#ffd37a"); r(3, 1, 10, 1, "rgba(0,0,0,.2)"); r(4, -2, 4, 1, HI2); r(9, -3, 2, 3, "rgba(0,0,0,.14)"); }
+    if (hat === "crown") { r(3, -1, 10, 3, "#f0d078"); r(3, -3, 2, 2, "#f0d078"); r(7, -4, 2, 3, "#f0d078"); r(11, -3, 2, 2, "#f0d078"); r(7, 0, 2, 1, "#c0392b"); r(3, 1, 10, 1, "rgba(120,80,0,.3)"); r(4, -1, 3, 1, HI2); }
+    if (hat === "bandana") { r(3, 0, 10, 2, "#c0392b"); r(12, 1, 2, 3, "#c0392b"); r(4, 0, 3, 1, "#e8685a"); }
+    if (hat === "feather") { r(3, -2, 10, 3, "#2f7a5a"); r(2, 1, 12, 1, "#1f5a40"); r(11, -6, 2, 5, "#f0d078"); r(12, -7, 1, 2, "#fff7d0"); r(4, -2, 4, 1, HI2); }
+    if (hat === "viking") { r(3, -2, 10, 3, "#9aa0ab"); r(3, 1, 10, 1, "#5d626c"); r(1, -4, 2, 4, "#e8e4da"); r(13, -4, 2, 4, "#e8e4da"); r(0, -5, 1, 2, "#e8e4da"); r(15, -5, 1, 2, "#e8e4da"); r(4, -2, 3, 2, HI2); r(10, -2, 3, 2, SH); }
+    if (hat === "knight") { r(3, -3, 10, 8, "#b9bfca"); r(3, 4, 10, 1, "#6a707c"); if (dir !== "up") r(5, 1, 6, 2, "#23252b"); r(7, -6, 2, 3, "#c0392b"); r(4, -3, 3, 3, HI2); r(10, -3, 3, 4, SH); }
+    if (hat === "wizard") { r(2, 0, 12, 2, "#3a2f7a"); r(4, -2, 8, 2, "#4a3f9a"); r(5, -4, 6, 2, "#4a3f9a"); r(6, -5, 4, 1, "#4a3f9a"); r(8, -6, 2, 1, "#4a3f9a"); r(4, -1, 8, 1, "#f0d078"); r(4, -2, 3, 1, HI2); }
+    if (hat === "scribe") { r(3, -2, 10, 3, "#2d2a4a"); r(4, -3, 8, 1, "#2d2a4a"); r(3, 1, 10, 1, "#1d1a30"); r(4, -2, 3, 1, HI); }
+
     // Objet tenu
-    if (item === "hammer") { const up = frame ? 3 : 0; r(13, 4 - up, 1, 8, WOOD); r(11, 2 - up, 5, 3, "#9aa0ab"); r(11, 2 - up, 5, 1, HI2); r(11, 4 - up, 5, 1, SH2); }
-    if (item === "book") { r(11, 8, 5, 4, "#7a2a20"); r(12, 9, 3, 2, "#f5e9c8"); r(11, 8, 1, 4, "rgba(0,0,0,.25)"); }
-    if (item === "shield") { r(0, 5, 4, 6, "#3a5fa0"); r(1, 6, 2, 4, "#ffd37a"); r(0, 5, 4, 1, HI2); r(3, 6, 1, 5, SH); }
+    if (item === "hammer") { const up = frame ? 3 : 0; rr(13, 4 - up, 1, 8, WOOD); rr(11, 2 - up, 5, 3, "#9aa0ab"); rr(11, 2 - up, 5, 1, HI2); rr(11, 4 - up, 5, 1, SH2); }
+    if (item === "book") { rr(11, 8, 5, 4, "#7a2a20"); rr(12, 9, 3, 2, "#f5e9c8"); rr(11, 8, 1, 4, "rgba(0,0,0,.25)"); }
+    if (item === "shield") { rr(0, 7, 4, 6, "#3a5fa0"); rr(1, 8, 2, 4, "#ffd37a"); rr(0, 7, 4, 1, HI2); rr(3, 8, 1, 5, SH); }
     sprite(c, x, y, L);
     // Arme équipée (butin ou échange) : « weapon:<type>:<rareté> », tenue à la main droite (dessinée par-dessus le personnage)
-    if (typeof item === "string" && item.startsWith("weapon:")) { const [, wt, wg] = item.split(":"); weapon(c, x + 7, y - 1, wt, wg, 1); }
+    if (typeof item === "string" && item.startsWith("weapon:")) { const [, wt, wg] = item.split(":"); weapon(c, x + 9, y + 2, wt, wg, 1); }
   }
 
   const LOOKS = {
@@ -127,7 +167,7 @@
     scribe: { hair: "#8a5a3a", tunic: "#4a3a7a", apron: "#d8cfa8", hat: "scribe", item: "book", skin: "#d9a066" },
     marchand: { hair: "#222", tunic: "#2f7a5a", apron: "#d8b04a", hat: "turban", skin: "#d9a066" },
     king: { hair: "#8a6a3a", tunic: "#7a1f2e", apron: "#f0d078", hat: "crown", skin: "#e0b088", beard: true },
-    queen: { hair: "#3a2a1c", tunic: "#4a2f8a", apron: "#e8e4da", hat: "crown", skin: "#f2c9a0" },
+    queen: { hair: "#3a2a1c", tunic: "#4a2f8a", apron: "#e8e4da", hat: "crown", skin: "#f2c9a0", long: true },
     noble: { hair: "#222", tunic: "#2f6a8a", apron: "#c9c4b0", skin: "#d9a066" },
     armurier: { hair: "#3a2a1c", tunic: "#7a2f2f", apron: "#4a4a52", skin: "#d9a066", hat: "helmet", beard: true, item: "weapon:axe:epic" },
     architecte: { hair: "#7a5a3a", tunic: "#2a7f86", apron: "#d8cfa8", skin: "#e0b088", hat: "copper", beard: true },
