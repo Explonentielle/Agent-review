@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GOLD, computeArmory, gradeOfLevel, gradeOfScore, itemScore, type ArmoryProject, type ArmoryReview, type ArmoryTask } from "./armory.js";
+import { GOLD, computeArmory, defaultWeaponType, gradeOfLevel, gradeOfScore, itemScore, type ArmoryProject, type ArmoryReview, type ArmoryTask } from "./armory.js";
 
 const project = (projectId: number, path = `moi/p${projectId}`): ArmoryProject => ({ source: "github", projectId, path, devEnabled: true });
 const task = (id: number, projectId: number, status: string, extra: Partial<ArmoryTask> = {}): ArmoryTask => ({
@@ -29,7 +29,7 @@ describe("l'armurerie : armes (projets) et pièces forgées", () => {
 
   it("un projet sans activité est une arme brute de niveau 1", () => {
     const { weapons, loot } = computeArmory({ projects: [project(1)], tasks: [], reviews: [] });
-    expect(weapons).toEqual([{ key: "github:1", source: "github", projectId: 1, path: "moi/p1", devEnabled: true, xp: 0, level: 1, grade: "common", forged: 0, reviews: 0, failures: 0, blocked: 0 }]);
+    expect(weapons).toEqual([{ key: "github:1", source: "github", projectId: 1, path: "moi/p1", devEnabled: true, weaponType: defaultWeaponType("github", 1), xp: 0, level: 1, grade: "common", forged: 0, reviews: 0, failures: 0, blocked: 0 }]);
     expect(loot).toEqual([]);
   });
 
