@@ -297,15 +297,20 @@
       },
     },
 
-    /** Un apprenti au travail : ce qu'il fait, et un lien vers sa tâche. */
+    /** Un apprenti au travail : ce qu'il fait, et un lien vers sa tâche. Une fois sa pièce forgée : relance avec une consigne, ou retrait de l'enclume. */
     worker: {
       async render({ worker }) {
         const [kind, id] = worker.id.split("-");
         const labels = { working: "Au travail", waiting: "Attend son tour", done: "A fini sa pièce", blocked: "A une question", failed: "S'est brisé la lame" };
+        const finished = kind === "dev" && worker.state === "done";
+        const relaunch = finished
+          ? `<label class="fg-field-in">Une suite à lui confier ?<textarea data-fg-relaunch-text rows="3" maxlength="4000" placeholder="Nouvelle consigne ou message pour l'apprenti : corriger un point, ajouter un cas..."></textarea></label>
+            <div class="fg-inline"><button type="button" class="fg-btn" data-fg-relaunch="${esc(id)}">Relancer l'apprenti</button><button type="button" class="fg-btn ghost" data-fg-unpin="${esc(worker.id)}" title="L'apprenti n'est plus affiché devant l'enclume : sa tâche et son historique restent dans l'outil">Retirer de l'enclume</button></div>`
+          : "";
         return {
           title: "Un apprenti",
           html: `<p><b>${esc(worker.label)}</b></p><p><span class="fg-tag">${esc(labels[worker.state] ?? worker.state)}</span></p><p class="fg-bubble-copy">« ${esc(worker.line)} »</p>
-            <div class="fg-inline"><button type="button" class="fg-btn" data-fg-go="${kind === "dev" ? "#dev" : "#reviews"}/${esc(id)}">${kind === "dev" ? "Voir la tâche de l'agent" : "Voir la revue"}</button></div>`,
+            <div class="fg-inline"><button type="button" class="fg-btn" data-fg-go="${kind === "dev" ? "#dev" : "#reviews"}/${esc(id)}">${kind === "dev" ? "Voir la tâche de l'agent" : "Voir la revue"}</button></div>${relaunch}`,
         };
       },
     },
@@ -424,6 +429,37 @@
       game.refresh();
       render();
     } catch (err) { game.banner(err.message); A.sfx.error(); render(); }
+  }
+
+  /** Relance l'apprenti dont la pièce est forgée, avec la consigne saisie dans la popup : même MR, nouvelle tâche. Un message vide n'est pas envoyé. */
+  async function relaunchWorker(taskId, button) {
+    const field = current?.el.querySelector("[data-fg-relaunch-text]");
+    const instructions = field?.value.trim() ?? "";
+    if (!instructions) { game.banner("Écris une consigne pour relancer l'apprenti."); A.sfx.error(); field?.focus(); return; }
+    button.disabled = true;
+    try {
+      await api(`/api/tasks/${taskId}/followup`, { instructions });
+      state.issues = null;
+      ticketCache.clear();
+      close(true);
+      game.setPopup(false);
+      A.sfx.fanfare();
+      game.banner("L'apprenti reprend sa pièce à l'enclume.");
+      game.refresh();
+    } catch (err) { button.disabled = false; game.banner(err.message); A.sfx.error(); }
+  }
+
+  /** Retire un apprenti de l'enclume, dans ce navigateur seulement : sa tâche et son historique ne sont pas touchés. */
+  function unpinWorker(workerId) {
+    const hidden = game.save.hiddenWorkers;
+    if (!hidden.includes(workerId)) hidden.push(workerId);
+    if (hidden.length > 60) hidden.splice(0, hidden.length - 60);
+    game.persist();
+    close(true);
+    game.setPopup(false);
+    A.sfx.select();
+    game.banner("L'apprenti a quitté l'enclume.");
+    game.refresh();
   }
 
   /** Supprime un essai de l'agent (échec, annulation, MR déjà faite) : rien n'est touché chez la forge. */
@@ -559,6 +595,8 @@
     if (current?.id === "scribe" && scribe.handleClick(ev)) return;
     if (current?.id === "architect" && architect.handleClick(ev)) return;
     if ((el = by("data-fg-deltask"))) return deleteTask(el.dataset.fgDeltask);
+    if ((el = by("data-fg-relaunch"))) return relaunchWorker(el.dataset.fgRelaunch, el);
+    if ((el = by("data-fg-unpin"))) return unpinWorker(el.dataset.fgUnpin);
     if ((el = by("data-fg-piece-review"))) return reviewPiece(el.dataset.fgPieceReview, el.dataset.again === "1");
     if ((el = by("data-fg-piece-merge"))) return el.disabled ? undefined : mergePiece(el.dataset.fgPieceMerge, el.dataset.target);
     if ((el = by("data-fg-piece"))) { open("piece", { taskId: el.dataset.fgPiece }, game); return; }
