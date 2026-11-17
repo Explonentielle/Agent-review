@@ -7,11 +7,29 @@ import { levelFor } from "./hero.js";
 
 export type Grade = "common" | "rare" | "epic" | "legendary";
 
+/** Types d'armes dessinés par le jeu (même ordre que `TYPES` dans `public/forge/sprites.js`). */
+export const WEAPON_TYPE_IDS = ["sword", "axe", "hammer", "dagger", "spear", "bow", "staff"] as const;
+export type WeaponTypeId = (typeof WEAPON_TYPE_IDS)[number];
+
+/**
+ * Type d'arme d'un projet qui n'en a pas encore reçu un à sa création : un type fixe tiré de sa clé `source:projectId`.
+ * @param source Forge du projet.
+ * @param projectId Identifiant du projet chez la forge.
+ * @returns Un type d'arme, toujours le même pour un projet donné.
+ */
+export function defaultWeaponType(source: string, projectId: number): WeaponTypeId {
+  let h = 0;
+  for (const ch of `${source}:${projectId}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return WEAPON_TYPE_IDS[h % WEAPON_TYPE_IDS.length]!;
+}
+
 export interface ArmoryProject {
   source: string;
   projectId: number;
   path: string;
   devEnabled: boolean;
+  /** Type d'arme choisi à la création du projet (absent pour un projet plus ancien : voir `defaultWeaponType`). */
+  weaponType?: WeaponTypeId;
 }
 
 export interface ArmoryTask {
@@ -40,6 +58,8 @@ export interface Weapon {
   projectId: number;
   path: string;
   devEnabled: boolean;
+  /** Type d'arme du projet, fixé à sa création : il ne change jamais. */
+  weaponType: WeaponTypeId;
   xp: number;
   level: number;
   grade: Grade;
@@ -108,7 +128,7 @@ export function computeArmory(input: { projects: ArmoryProject[]; tasks: ArmoryT
   const keyOf = (source: string, projectId: number) => `${source}:${projectId}`;
   const weapons = new Map<string, Weapon>();
   for (const p of input.projects) {
-    weapons.set(keyOf(p.source, p.projectId), { key: keyOf(p.source, p.projectId), source: p.source, projectId: p.projectId, path: p.path, devEnabled: p.devEnabled, xp: 0, level: 1, grade: "common", forged: 0, reviews: 0, failures: 0, blocked: 0 });
+    weapons.set(keyOf(p.source, p.projectId), { key: keyOf(p.source, p.projectId), source: p.source, projectId: p.projectId, path: p.path, devEnabled: p.devEnabled, weaponType: p.weaponType ?? defaultWeaponType(p.source, p.projectId), xp: 0, level: 1, grade: "common", forged: 0, reviews: 0, failures: 0, blocked: 0 });
   }
 
   const loot: LootItem[] = [];

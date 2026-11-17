@@ -1872,11 +1872,23 @@ function agentImageField(p) {
     <small>Les outils du projet (PHP, composer, node...) doivent être dans l'image. Dans un conteneur il n'y a pas de Docker : les commandes autorisées appellent directement les outils (ex. <code>vendor/bin/phpunit</code>), pas <code>docker run</code>. Images proposées : celles de <code>AGENT_IMAGE</code> et <code>AGENT_IMAGES</code> du .env.</small></label>`;
 }
 
+/** Types d'armes de la forge (même liste que le serveur, `WEAPON_TYPE_IDS`). */
+const WEAPON_TYPE_NAMES = { sword: "Épée", axe: "Hache", hammer: "Marteau", dagger: "Dague", spear: "Lance", bow: "Arc", staff: "Bâton" };
+
+/** Type d'arme du projet : choisi à la création (nouveau projet), puis affiché sans pouvoir être modifié. */
+function weaponTypeField(p) {
+  if (!p.isNew) return `<div class="field"><span>Type d'arme</span><div>${esc(WEAPON_TYPE_NAMES[p.weaponType] || "")}</div><small>Choisi à la création du projet : il ne peut plus être modifié.</small></div>`;
+  return `<label class="field"><span>Type d'arme</span>
+    <select name="weaponType">${Object.entries(WEAPON_TYPE_NAMES).map(([id, name]) => `<option value="${id}">${name}</option>`).join("")}</select>
+    <small>Les armes de ce projet dans la forge (râtelier, butin) seront de ce type. Impossible à modifier une fois le projet créé.</small></label>`;
+}
+
 async function renderProjectForm() {
   const p = editingProject;
   const box = document.getElementById("project-editor");
   box.innerHTML = `<form class="panel" id="project-form" style="margin-top:12px">
     <div class="sub-title">${forgePill(p.source)} ${esc(p.path)}</div>
+    ${weaponTypeField(p)}
     <label class="check"><input type="checkbox" name="devEnabled" ${p.devEnabled ? "checked" : ""}> Autoriser l'agent dev sur ce projet</label>
     <div class="grid2" style="margin-top:14px">
       <label class="field"><span>Branche de départ</span><input name="baseBranch" list="branch-list" value="${esc(p.baseBranch)}" placeholder="ex. develop"><small>La branche du ticket est créée depuis celle-ci.</small></label>
@@ -1910,6 +1922,8 @@ async function saveProject() {
     allowedCommands: lines(f.allowedCommands.value),
     instructions: f.instructions.value,
     agentImage: f.agentImage.value,
+    // Choisi seulement à la création : un projet existant renvoie son type tel quel (le serveur refuse tout changement)
+    weaponType: editingProject.isNew ? f.weaponType.value : editingProject.weaponType,
   };
   try {
     await api("/api/projects", data);
@@ -1964,7 +1978,7 @@ document.addEventListener("click", async (e) => {
   if ((t = el("[data-pickproject]"))) {
     const picked = JSON.parse(t.dataset.pickproject);
     const existing = projectsData.find((p) => p.source === picked.source && p.projectId === picked.id);
-    editingProject = existing ? { ...existing } : { source: picked.source, projectId: picked.id, path: picked.path, devEnabled: true, baseBranch: "", targetBranch: "", allowedCommands: [], instructions: "" };
+    editingProject = existing ? { ...existing } : { source: picked.source, projectId: picked.id, path: picked.path, devEnabled: true, baseBranch: "", targetBranch: "", allowedCommands: [], instructions: "", isNew: true };
     return renderProjectForm();
   }
 

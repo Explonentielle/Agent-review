@@ -182,6 +182,23 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     expect((await settings.getProject("gitlab", 5))?.instructions).toBe("mis à jour");
     expect(await settings.getProject("gitlab", 99)).toBeNull();
     await expect(settings.saveProject({ ...project, baseBranch: "" })).rejects.toThrow(/Branche de départ/);
+
+    // Le type d'arme est fixé à la création : sans choix il est tiré du projet, puis il ne change plus
+    const firstType = (await settings.getProject("gitlab", 5))?.weaponType;
+    expect(firstType).toBeTruthy();
+    await settings.saveProject({ ...project, projectId: 8, path: "g/c", weaponType: "bow" });
+    expect((await settings.getProject("gitlab", 8))?.weaponType).toBe("bow");
+    await settings.saveProject({ ...project, projectId: 8, path: "g/c", weaponType: "bow", instructions: "ok" }); // même type : accepté
+    await settings.saveProject({ ...project, projectId: 8, path: "g/c", instructions: "sans type" }); // type omis : l'existant est gardé
+    expect((await settings.getProject("gitlab", 8))?.weaponType).toBe("bow");
+    await expect(settings.saveProject({ ...project, projectId: 8, path: "g/c", weaponType: "axe" })).rejects.toThrow(/type d'arme/);
+    await expect(settings.saveProject({ ...project, projectId: 9, path: "g/d", weaponType: "canon" })).rejects.toThrow();
+    expect((await settings.getProject("gitlab", 8))?.weaponType).toBe("bow");
+    expect(await settings.getProject("gitlab", 9)).toBeNull();
+    await db.run("UPDATE projects SET config = ? WHERE project_id = 5", [JSON.stringify(project)]); // projet d'avant le type d'arme
+    expect((await settings.getProject("gitlab", 5))?.weaponType).toBe(firstType);
+    expect((await settings.listProjects()).find((p) => p.projectId === 5)?.weaponType).toBe(firstType);
+
     await settings.deleteProject("gitlab", 5);
     expect(await settings.getProject("gitlab", 5)).toBeNull();
   });
