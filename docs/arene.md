@@ -22,7 +22,7 @@ Commandes : flèches ou ZQSD pour bouger, **Espace** pour frapper (le coup part 
 
 **Points** : un par niveau du forgeron (le niveau vient du serveur : il se gagne en travaillant). Les points répartis ne dépassent jamais le niveau ; « Réinitialiser » les rend, sans frais.
 
-**Équipement** : la cape donne de l'Agilité (commun +1, rare +2, épique +4, légendaire +7 points), le tablier de la Vitalité, le couvre-chef de la Chance. **L'arme est unique** : voir « Armes uniques » plus bas. Sans arme équipée, on se bat avec une épée d'entraînement.
+**Équipement** : la cape donne de l'Agilité (commun +1, rare +2, épique +4, légendaire +7 points), le tablier de la Vitalité, le couvre-chef de la Chance. Une tenue peut aussi porter ses propres statistiques et bonus d'attaque (champs `stats` et `affixes` du catalogue, `src/game/loot.ts`) : ils s'ajoutent au point de son emplacement et aux effets de l'arme, comme ceux d'une arme (valeurs nettoyées et plafonnées par `gearExtras`, `combat.js`). **L'arme est unique** : voir « Armes uniques » plus bas. Sans arme équipée, on se bat avec une épée d'entraînement.
 
 ## Les armes
 

@@ -231,7 +231,7 @@
         current = quit;
 
         const statName = (id) => C.STATS.find((x) => x.id === id).name.toLowerCase();
-        const lineText = (s) => (s.lines ?? [{ stat: s.stat, points: s.points }]).map((l) => `+${l.points} ${statName(l.stat)}`).join(", ");
+        const lineText = (s) => (s.lines ?? [{ stat: s.stat, points: s.points }]).map((l) => `+${l.points} ${statName(l.stat)}`).concat((s.affixes ?? []).map((a) => a.text)).join(", ");
         /** Les armes du sac en pastilles : on choisit ici, avant le combat (flèches gauche et droite, ou un clic). */
         function weaponPicker() {
           const all = ctx.weapons ? ctx.weapons() : [];

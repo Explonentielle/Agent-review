@@ -223,10 +223,42 @@
     return out;
   }
 
+  /** Points maximum qu'un équipement (hors arme) peut donner à une caractéristique : celui d'une arme légendaire. */
+  const GEAR_MAX_POINTS = ROLL_RANGES.legendary.force[1];
+  /**
+   * Bonus propres à un équipement hors arme, en plus du point de son emplacement : des points de caractéristique (`stats`) et des bonus d'attaque
+   * (`affixes`, les mêmes effets que ceux d'une arme). Les valeurs viennent du navigateur : tout est nettoyé (entiers bornés, effets connus, valeur plafonnée
+   * à la plus forte d'une arme). Un équipement sans bonus donne des listes vides.
+   * @param item { stats: { force: 2 ... }, affixes: [{ id: "burn", value: 0.15 }] }
+   * @returns { bonus (points par caractéristique), lines ({ stat, points }), affixes ({ id, name, value, text }) }
+   */
+  function gearExtras(item) {
+    const bonus = zeroStats(), lines = [], affixes = [];
+    const raw = item?.stats;
+    if (raw && typeof raw === "object") {
+      for (const id of STAT_IDS) {
+        const points = Object.hasOwn(raw, id) ? clampInt(raw[id], 0, GEAR_MAX_POINTS) : 0;
+        if (points > 0) { bonus[id] = points; lines.push({ stat: id, points }); }
+      }
+    }
+    if (Array.isArray(item?.affixes)) {
+      const seen = new Set();
+      for (const a of item.affixes) {
+        if (!a || typeof a !== "object" || typeof a.id !== "string" || !Object.hasOwn(AFFIXES, a.id) || seen.has(a.id)) continue;
+        const def = AFFIXES[a.id], v = Number(a.value);
+        if (!Number.isFinite(v) || v <= 0) continue;
+        const value = Math.round(Math.min(v, def.range[1] * AFFIX_TIER.legendary) * 1000) / 1000;
+        seen.add(a.id);
+        affixes.push({ id: a.id, name: def.name, value, text: def.text(value) });
+      }
+    }
+    return { bonus, lines, affixes };
+  }
+
   /**
    * Tout ce que le combat lit du forgeron.
-   * @param opts { level, stats (points répartis), equipment: { weapon: { type, rarity }, cape|apron|hat: { rarity } } }
-   * @returns { level, base, bonus, total, weapon, derived }
+   * @param opts { level, stats (points répartis), equipment: { weapon: { type, rarity, seed }, cape|apron|hat: { rarity, stats?, affixes? } } }
+   * @returns { level, base, bonus, total, slots, weapon, affixes (effets de l'arme et des équipements), derived }
    */
   function build(opts = {}) {
     const level = clampInt(opts.level ?? 1, 1, 99);
@@ -234,6 +266,7 @@
     const eq = opts.equipment || {};
     const bonus = zeroStats();
     const slots = {};
+    const gearAffixes = [];
     let roll = null;
     for (const slot of Object.keys(SLOT_STAT)) {
       const item = eq[slot];
@@ -246,15 +279,30 @@
         slots.weapon = { rarity: item.rarity, stat: "force", points: roll.bonus.force, lines: roll.lines, quality: roll.quality, label: roll.label, standard: roll.standard };
         continue;
       }
+      // Une tenue donne le point de son emplacement, plus ses propres statistiques et bonus d'attaque si elle en a (comme une arme)
+      const extras = gearExtras(item);
       bonus[SLOT_STAT[slot]] += RARITY_STAT[item.rarity];
+      for (const id of STAT_IDS) bonus[id] += extras.bonus[id];
+      gearAffixes.push(...extras.affixes);
       slots[slot] = { rarity: item.rarity, stat: SLOT_STAT[slot], points: RARITY_STAT[item.rarity] };
+      if (extras.lines.length || extras.affixes.length) {
+        slots[slot].lines = [{ stat: SLOT_STAT[slot], points: RARITY_STAT[item.rarity] }, ...extras.lines];
+        slots[slot].affixes = extras.affixes;
+      }
     }
     const total = Object.fromEntries(STAT_IDS.map((id) => [id, base[id] + bonus[id]]));
     const w = roll ? eq.weapon : TRAINING_WEAPON;
     const wroll = roll ?? TRAINING_ROLL;
     const spec = WEAPONS[w.type];
     const agi = total.agilite;
-    const critBase = (spec.critBonus || 0) + ((wroll.affixes || []).find((a) => a.id === "precision")?.value || 0);
+    // Les effets de l'arme et ceux des équipements s'ajoutent, effet par effet
+    const affixValues = {};
+    for (const a of [...(wroll.affixes || []), ...gearAffixes]) affixValues[a.id] = (affixValues[a.id] || 0) + a.value;
+    // Le cumul d'un même effet ne dépasse jamais la valeur d'une arme légendaire (sinon le givre pourrait inverser la vitesse des ennemis)
+    for (const id of Object.keys(affixValues)) {
+      if (Object.hasOwn(AFFIXES, id)) affixValues[id] = Math.round(Math.min(affixValues[id], AFFIXES[id].range[1] * AFFIX_TIER.legendary) * 1000) / 1000;
+    }
+    const critBase = (spec.critBonus || 0) + (affixValues.precision || 0);
     const derived = {
       maxHp: Math.round(50 + 2 * level + 8 * total.vitalite),
       speed: round1(62 * (1 + 0.012 * Math.min(agi, 50))),
@@ -266,7 +314,7 @@
       dashCd: round1(Math.max(0.7, 1.6 - 0.02 * agi)),
       goldMult: Math.round((1 + Math.min(0.5, 0.01 * total.chance)) * 100) / 100,
     };
-    return { level, base, bonus, total, slots, weapon: { type: w.type, rarity: w.rarity, training: w === TRAINING_WEAPON, spec, roll: wroll }, derived };
+    return { level, base, bonus, total, slots, weapon: { type: w.type, rarity: w.rarity, training: w === TRAINING_WEAPON, spec, roll: wroll }, affixValues, derived };
   }
 
   /**
@@ -292,9 +340,8 @@
     const level = built.level;
     /** Sans fin : les vagues continuent après le seigneur, un boss toutes les 5 vagues, jusqu'à la défaite. Sinon : la campagne de 5 vagues. */
     const endless = Boolean(opts.endless);
-    /** Les effets spéciaux de l'arme portée, par identifiant : { burn: 0.2, lifesteal: 0.05 ... } */
-    const aff = {};
-    for (const a of built.weapon.roll.affixes || []) aff[a.id] = a.value;
+    /** Les effets spéciaux de l'arme portée et des équipements, par identifiant : { burn: 0.2, lifesteal: 0.05 ... } */
+    const aff = built.affixValues;
     const hero = {
       x: HERO_START.x, y: HERO_START.y, r: HERO_R, hp: d.maxHp, maxHp: d.maxHp, face: [0, -1], moving: false,
       cd: 0, windup: 0, dashT: 0, dashCd: 0, dash: [0, -1], inv: 0, hurt: 0, swing: 0, stun: 0, kb: null,
@@ -649,6 +696,6 @@
 
   globalThis.ForgeCombat = {
     T, W, H, STEP, STATS, STAT_IDS, RARITIES, RARITY_STAT, SLOT_STAT, SLOT_NAME, RARITY_DMG, WEAPONS, TRAINING_WEAPON, BOTS, WAVES, BOUNDS, OBSTACLES, HERO_START, SPAWNS,
-    BOSS_ORDER, waveFor, ROLL_RANGES, AFFIXES, rollWeapon, weaponCard, pointsFor, spent, normalizeStats, build, reward, create,
+    BOSS_ORDER, waveFor, ROLL_RANGES, AFFIXES, rollWeapon, weaponCard, gearExtras, GEAR_MAX_POINTS, pointsFor, spent, normalizeStats, build, reward, create,
   };
 })();

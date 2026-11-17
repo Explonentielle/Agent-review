@@ -197,6 +197,14 @@
     /** Les effets spéciaux d'une arme, un par ligne. */
     const affixesHtml = (card) => (card.affixes || []).map((a) => `<small class="fg-aff"><i></i>${esc(a.text)}</small>`).join("");
 
+    /** Statistiques et bonus d'attaque d'une tenue (hors arme), s'il y en a : « +2 Force, +1 Chance », puis un effet par ligne. Rien sinon. */
+    function gearHtml(item) {
+      if (item.kind === "weapon") return "";
+      const extras = window.ForgeCombat.gearExtras(item);
+      const stats = extras.lines.map((l) => `+${l.points} ${STAT_NAME[l.stat]}`).join(", ");
+      return `${stats ? `<small>${esc(stats)}</small>` : ""}${affixesHtml(extras)}`;
+    }
+
     /** Les armes du sac, de la meilleure rareté à la moins bonne, pour les choisir depuis l'arène. */
     function weapons() {
       const cat = catalog();
@@ -222,7 +230,7 @@
       const worn0 = cat.get(s.equip.weapon), ref = worn0 && owns(worn0.id) ? cardOf(worn0) : null;
       const cards = shown.map((item) => {
         const worn = isEquipped(item.id), isNew = s.fresh.includes(item.id), isWeapon = item.kind === "weapon";
-        let detail = `<small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small>`;
+        let detail = `<small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small>${gearHtml(item)}`;
         if (isWeapon) {
           // Une arme : son effet, ses valeurs, son jet, et la différence de dégâts par seconde avec l'arme portée
           const card = cardOf(item), diff = ref && !worn ? card.dps - ref.dps : 0;

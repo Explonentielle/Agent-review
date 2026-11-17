@@ -7,14 +7,16 @@ import { PROJECT_ROOT } from "../paths.js";
 import { validateRoom } from "./schema.js";
 
 /* L'arène : `public/forge/combat.js` est de la logique pure. On le charge comme le serveur charge le moteur de jeu (contexte isolé). */
-interface Item { type?: string; rarity: string }
+interface Item { type?: string; rarity: string; seed?: string; stats?: unknown; affixes?: unknown }
+interface GearExtras { bonus: Record<string, number>; lines: Array<{ stat: string; points: number }>; affixes: Array<{ id: string; value: number }> }
 interface Equipment { weapon?: Item; cape?: Item; apron?: Item; hat?: Item }
 interface Built {
   level: number;
   base: Record<string, number>;
   bonus: Record<string, number>;
   total: Record<string, number>;
-  slots: Record<string, { rarity: string; stat: string; points: number }>;
+  slots: Record<string, { rarity: string; stat: string; points: number; lines?: Array<{ stat: string; points: number }>; affixes?: Array<{ id: string }> }>;
+  affixValues: Record<string, number>;
   weapon: { type: string; rarity: string; training: boolean; spec: { reach?: number; ranged?: boolean; projSpeed?: number; dmg: number; cd: number } };
   derived: { maxHp: number; speed: number; damage: number; cooldown: number; crit: number; critMult: number; dashCd: number; goldMult: number };
 }
@@ -42,6 +44,9 @@ interface Combat {
   STAT_IDS: string[];
   RARITIES: string[];
   RARITY_STAT: Record<string, number>;
+  GEAR_MAX_POINTS: number;
+  gearExtras(item: unknown): GearExtras;
+  rollWeapon(type: string, rarity: string, seed?: string): { bonus: Record<string, number>; affixes: Array<{ id: string; value: number }> };
   SLOT_STAT: Record<string, string>;
   WEAPONS: Record<string, WeaponSpec>;
   BOTS: Record<string, { weapon: string; rarity: string; hp: number; dmg: number }>;
@@ -153,6 +158,86 @@ describe("arène : caractéristiques", () => {
   });
 });
 
+describe("arène : statistiques et bonus d'attaque d'une tenue", () => {
+  const none = { force: 0, agilite: 0, vitalite: 0, chance: 0 };
+
+  it("une tenue sans statistique se comporte comme avant", () => {
+    const plain = C.build({ level: 1, equipment: { cape: { rarity: "rare" } } });
+    const empty = C.build({ level: 1, equipment: { cape: { rarity: "rare", stats: {}, affixes: [] } } });
+    expect(plain.bonus).toEqual({ ...none, agilite: 2 });
+    expect(plain.slots["cape"]).toEqual({ rarity: "rare", stat: "agilite", points: 2 });
+    expect(empty.bonus).toEqual(plain.bonus);
+    expect(empty.slots).toEqual(plain.slots);
+    expect(empty.derived).toEqual(plain.derived);
+  });
+
+  it("les statistiques d'une tenue s'ajoutent au point de son emplacement, comme celles d'une arme", () => {
+    const b = C.build({ level: 1, equipment: { hat: { rarity: "epic", stats: { force: 3, vitalite: 2 } } } });
+    expect(b.bonus).toEqual({ force: 3, agilite: 0, vitalite: 2, chance: 4 });
+    expect(b.total).toEqual(b.bonus);
+    expect(b.slots["hat"]?.lines).toEqual([{ stat: "chance", points: 4 }, { stat: "force", points: 3 }, { stat: "vitalite", points: 2 }]);
+    const plain = C.build({ level: 1, equipment: { hat: { rarity: "epic" } } });
+    expect(b.derived.damage).toBeGreaterThan(plain.derived.damage);
+    expect(b.derived.maxHp).toBeGreaterThan(plain.derived.maxHp);
+  });
+
+  it("les statistiques de la tenue et celles de l'arme se cumulent", () => {
+    const weapon = { type: "sword", rarity: "rare" };
+    const roll = C.rollWeapon("sword", "rare", "graine").bonus;
+    const b = C.build({ level: 1, equipment: { weapon: { ...weapon, seed: "graine" }, apron: { rarity: "common", stats: { force: 2 } } } });
+    expect(b.bonus["force"]).toBe((roll["force"] ?? 0) + 2);
+  });
+
+  it("un bonus d'attaque de tenue agit comme celui d'une arme", () => {
+    const b = C.build({ level: 1, equipment: { cape: { rarity: "rare", affixes: [{ id: "precision", value: 0.06 }, { id: "lifesteal", value: 0.05 }] } } });
+    expect(b.affixValues).toEqual({ precision: 0.06, lifesteal: 0.05 });
+    expect(b.slots["cape"]?.affixes?.map((a) => a.id)).toEqual(["precision", "lifesteal"]);
+    const plain = C.build({ level: 1, equipment: { cape: { rarity: "rare" } } });
+    expect(b.derived.crit).toBeCloseTo(plain.derived.crit + 0.06, 3);
+    // Le même effet sur l'arme et sur la tenue : les valeurs s'additionnent
+    const seed = Array.from({ length: 400 }, (_, i) => `s${i}`).find((s) => C.rollWeapon("sword", "legendary", s).affixes.some((a) => a.id === "lifesteal"))!;
+    const own = C.rollWeapon("sword", "legendary", seed).affixes.find((a) => a.id === "lifesteal")!.value;
+    const both = C.build({ level: 1, equipment: { weapon: { type: "sword", rarity: "legendary", seed }, cape: { rarity: "rare", affixes: [{ id: "lifesteal", value: 0.05 }] } } });
+    // Le cumul est plafonné à la valeur d'une arme légendaire (0,08 × 1,2)
+    expect(both.affixValues["lifesteal"]).toBeCloseTo(Math.min(own + 0.05, 0.08 * 1.2), 5);
+  });
+
+  it("le cumul d'un même effet est plafonné : le givre ne peut pas inverser la vitesse des ennemis", () => {
+    const seed = Array.from({ length: 400 }, (_, i) => `s${i}`).find((s) => C.rollWeapon("sword", "legendary", s).affixes.some((a) => a.id === "freeze"))!;
+    const gear = { rarity: "rare", affixes: [{ id: "freeze", value: 0.54 }] };
+    const b = C.build({ level: 1, equipment: { weapon: { type: "sword", rarity: "legendary", seed }, cape: gear, apron: gear, hat: gear } });
+    expect(b.affixValues["freeze"]).toBeCloseTo(0.45 * 1.2, 5);
+    expect(1 - (b.affixValues["freeze"] ?? 0)).toBeGreaterThan(0);
+    // Sans arme à givre, trois tenues portant le givre sont aussi plafonnées
+    const worn = C.build({ level: 1, equipment: { cape: gear, apron: gear, hat: gear } });
+    expect(worn.affixValues["freeze"]).toBeCloseTo(0.45 * 1.2, 5);
+  });
+
+  it("une tenue sans bonus ne change pas les effets de l'arme", () => {
+    const seed = "graine-effets";
+    const weapon = { type: "sword", rarity: "legendary", seed };
+    const alone = C.build({ level: 1, equipment: { weapon } });
+    const dressed = C.build({ level: 1, equipment: { weapon, cape: { rarity: "common" } } });
+    expect(dressed.affixValues).toEqual(alone.affixValues);
+    expect(Object.fromEntries(C.rollWeapon("sword", "legendary", seed).affixes.map((a) => [a.id, a.value]))).toEqual(alone.affixValues);
+  });
+
+  it("des valeurs douteuses sont nettoyées ou plafonnées", () => {
+    const e = C.gearExtras({ rarity: "rare", stats: { force: 999, agilite: -4, chance: 2.9, vitalite: "x", __proto__: { force: 5 } }, affixes: [{ id: "burn", value: 50 }, { id: "burn", value: 0.1 }, { id: "inconnu", value: 0.1 }, { id: "stun", value: -1 }, { id: "freeze", value: "a" }, null] });
+    expect(e.bonus).toEqual({ force: C.GEAR_MAX_POINTS, agilite: 0, vitalite: 0, chance: 2 });
+    expect(e.affixes.map((a) => a.id)).toEqual(["burn"]);
+    expect(e.affixes[0]!.value).toBeLessThanOrEqual(0.26 * 1.2);
+    expect(C.gearExtras(undefined)).toEqual({ bonus: none, lines: [], affixes: [] });
+    expect(C.gearExtras({ rarity: "rare", stats: 5, affixes: "burn" })).toEqual({ bonus: none, lines: [], affixes: [] });
+  });
+
+  it("une arme ne reçoit jamais de statistiques d'équipement : son comportement ne change pas", () => {
+    const weapon = { type: "axe", rarity: "epic", seed: "x", stats: { force: 9 }, affixes: [{ id: "burn", value: 0.2 }] };
+    const clean = { type: "axe", rarity: "epic", seed: "x" };
+    expect(C.build({ level: 1, equipment: { weapon } })).toEqual(C.build({ level: 1, equipment: { weapon: clean } }));
+  });
+});
+
 describe("arène : cohérence avec le reste de la forge", () => {
   it("toute arme et toute tenue du butin a une place dans l'arène", () => {
     for (const item of LOOT_CATALOG) {
@@ -160,6 +245,13 @@ describe("arène : cohérence avec le reste de la forge", () => {
       expect(C.RARITY_STAT[item.rarity], item.id).toBeGreaterThan(0);
       if (item.kind === "weapon") expect(C.WEAPONS[item.weapon ?? ""], item.id).toBeDefined();
       else expect(C.SLOT_STAT[item.part ?? ""], item.id).toBeDefined();
+      // Les statistiques et bonus d'attaque d'une tenue du catalogue sont acceptés tels quels par le combat (rien n'est écarté ni plafonné)
+      if (item.stats || item.affixes) {
+        expect(item.kind, item.id).toBe("cosmetic");
+        const extras = C.gearExtras(item);
+        expect(extras.lines.length, item.id).toBe(Object.keys(item.stats ?? {}).length);
+        expect(extras.affixes.map((a) => [a.id, a.value]), item.id).toEqual((item.affixes ?? []).map((a) => [a.id, a.value]));
+      }
     }
     expect(Object.keys(C.WEAPONS).sort()).toEqual(LOOT_CATALOG.filter((i) => i.kind === "weapon" && i.rarity === "common").map((i) => i.weapon).sort());
   });
