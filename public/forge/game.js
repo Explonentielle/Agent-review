@@ -3,7 +3,7 @@
    (nom, apparence, or, tenues, type d'arme par projet) est gardée dans ce navigateur. */
 (() => {
   "use strict";
-  const S = window.ForgeSprites, A = window.ForgeAudio;
+  const S = window.ForgeSprites, A = window.ForgeAudio, C = window.ForgeCombat;
   const T = S.T, W = 24, H = 15, SAVE_KEY = "ra.game.v1";
   const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
   const KEY_DIR = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", z: "up", w: "up", s: "down", q: "left", a: "left", d: "right" };
@@ -27,7 +27,7 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* ---------- progression de jeu, dans ce navigateur ---------- */
-  const freshSave = () => ({ v: 1, name: "", look: { skin: SKINS[0], hair: HAIRS[1], tunic: TUNICS[0] }, gold: 0, sold: [], owned: [], worn: {}, weapons: {}, seen: [], lastLevel: 0, created: false, intro: false, claimed: {}, lastRank: "" });
+  const freshSave = () => ({ v: 1, name: "", look: { skin: SKINS[0], hair: HAIRS[1], tunic: TUNICS[0] }, gold: 0, sold: [], owned: [], worn: {}, weapons: {}, seen: [], lastLevel: 0, created: false, intro: false, claimed: {}, lastRank: "", stats: { force: 0, agilite: 0, vitalite: 0, chance: 0 }, arena: { met: false, bestWave: 0, wins: 0, fights: 0, day: "", goldToday: 0 } });
   function loadSave() {
     const save = freshSave();
     try {
@@ -37,6 +37,12 @@
     for (const k of ["sold", "owned", "seen"]) if (!Array.isArray(save[k])) save[k] = [];
     for (const k of ["worn", "weapons", "claimed"]) if (!save[k] || typeof save[k] !== "object" || Array.isArray(save[k])) save[k] = {};
     if (typeof save.lastRank !== "string") save.lastRank = "";
+    // Caractéristiques et arène : remises en forme (le plafond de points suit le niveau, il est appliqué à chaque lecture)
+    save.stats = C.normalizeStats(save.stats, 99);
+    const plain = (v) => v && typeof v === "object" && !Array.isArray(v);
+    save.arena = { ...freshSave().arena, ...(plain(save.arena) ? save.arena : {}) };
+    for (const k of ["bestWave", "wins", "fights", "goldToday"]) if (!Number.isFinite(save.arena[k]) || save.arena[k] < 0) save.arena[k] = 0;
+    if (typeof save.arena.day !== "string") save.arena.day = "";
     // Les réclamations anciennes ne servent plus (une mission est liée à son jour) : on ne garde que les plus récentes
     const keys = Object.keys(save.claimed);
     if (keys.length > 80) for (const key of keys.slice(0, keys.length - 60)) delete save.claimed[key];
@@ -100,6 +106,33 @@
   const rackWeapons = () => g.data.armory.weapons.slice(0, 6).map((w) => [weaponType(w), w.grade]);
   const playerLook = () => ({ ...g.save.look, ...items.look() });
 
+  /* ---------- caractéristiques et arène (la logique du combat est dans public/forge/combat.js) ---------- */
+  const ARENA_ROOM = "arene", ARENA_MASTER = "maitre-armes", ARENA_GATE_X = 18, ARENA_DAILY_GOLD = 150;
+  const heroLevel = () => g.data.hero?.level ?? 1;
+  /** L'équipement porté, tel que le combat le lit : l'arme (type et rareté) et la rareté de chaque tenue. */
+  function arenaEquipment() {
+    const cat = items.catalog(), out = {};
+    for (const slot of Object.keys(C.SLOT_STAT)) {
+      const id = g.save.equip?.[slot], item = id && items.owns(id) ? cat.get(id) : null;
+      if (item) out[slot] = slot === "weapon" ? { type: item.weapon, rarity: item.rarity } : { rarity: item.rarity };
+    }
+    return out;
+  }
+  const combatBuild = () => C.build({ level: heroLevel(), stats: g.save.stats, equipment: arenaEquipment() });
+  const pointsLeft = () => C.pointsFor(heroLevel()) - C.spent(C.normalizeStats(g.save.stats, heroLevel()));
+  /** Ajoute (+1) ou retire (-1) un point de caractéristique. Les points ne dépassent jamais le niveau. */
+  function setStat(id, delta) {
+    if (!C.STAT_IDS.includes(id)) return false;
+    const cur = C.normalizeStats(g.save.stats, heroLevel());
+    if (delta > 0 && pointsLeft() <= 0) return false;
+    if (delta < 0 && cur[id] <= 0) return false;
+    cur[id] += delta;
+    g.save.stats = cur;
+    persist();
+    return true;
+  }
+  const resetStats = () => { g.save.stats = C.normalizeStats({}, 1); persist(); };
+
   /* ---------- le monde ---------- */
   function buildEntities() {
     const E = [];
@@ -118,6 +151,7 @@
     add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[15, 10]], z: 11 * T, lx: 15.5, ly: 9.35, when: () => flag("forge"), draw: (c) => S.person(c, 15 * T, 10 * T, { ...S.LOOKS.scribe, dir: "left" }), interact: scribeTalk });
     add({ id: "architect", name: "Architecte", verb: "Parler", tiles: [[3, 11]], z: 12 * T, lx: 3.5, ly: 10.35, when: () => flag("forge"), draw: (c) => S.person(c, 3 * T, 11 * T, { ...S.LOOKS.architecte, dir: "right" }), interact: architectTalk });
     add({ id: "door", name: "Porte", verb: "Sortir", tiles: [[11, 14], [12, 14]], z: 0, lx: 12, ly: 13.7, always: true, decor: true, draw: () => undefined, interact: doorTalk });
+    add({ id: "arena-gate", portal: true, name: "Arène", verb: "Entrer", tiles: [[ARENA_GATE_X, 14], [ARENA_GATE_X + 1, 14]], z: 0, lx: ARENA_GATE_X + 1, ly: 13.7, when: () => flag("project") && g.rooms.byId.has(ARENA_ROOM), draw: (c, t) => S.ironGate(c, ARENA_GATE_X, H, t), interact: arenaGateTalk });
     hubRooms().forEach((room, i) => {
       const x = HUB_SLOTS[i];
       add({ id: "portal-" + room.id, portal: true, name: room.name, verb: "Entrer", tiles: [[x, 2], [x + 1, 2]], z: 3 * T, lx: x + 1, ly: 3.4, when: () => flag("forge"), draw: (c, t) => S.hubDoor(c, x, 1, t), interact: () => portalTalk(room) });
@@ -298,6 +332,7 @@
     if (lines) return say("Maître Brann", lines);
     const atelier = (h?.extraQuests ?? []).find((q) => !q.done);
     if (atelier) return say("Maître Brann", ["Ma forge est allumée, bravo. Maintenant, laisse parler ton imagination : va voir l'Architecte, en bas à gauche.", "Dis-lui la salle que tu rêves, et même un jeu : il la dessine, tu la visites, tu y joues. Elle reste à toi tant que tu ne la partages pas."]);
+    if (flag("project") && g.rooms.byId.has(ARENA_ROOM) && !g.save.arena.met) return say("Maître Brann", ["Tu as une arme au râtelier : tu peux la mettre à l'épreuve. Vois la herse de fer, en bas à droite : c'est l'arène.", "Le Maître d'armes t'y apprendra à répartir tes points de caractéristique et à te battre contre des bots."]);
     const forged = g.data.armory.loot.length, pg = progress(), pr = prestige();
     const out = [`Niveau ${h?.level ?? 1}, rang ${pr?.rank.name ?? "Fer"}, ${forged} pièce${forged > 1 ? "s" : ""} forgée${forged > 1 ? "s" : ""}. Ma forge n'a jamais tourné aussi bien.`];
     const waiting = claimable().length;
@@ -378,7 +413,7 @@
 
   /* ---------- salles décrites par des données (public/rooms/*.json, validées par le serveur) ---------- */
   /** Colonnes (gauche) des portes magiques du mur du fond de la forge : une par salle qui demande à y figurer, trois au plus. */
-  const HUB_SLOTS = [14, 16, 9];
+  const HUB_SLOTS = [14, 9, 16]; // les deux premières portes sont séparées de cinq cases : leurs étiquettes ne se chevauchent pas
   const hubRooms = () => g.rooms.list.filter((r) => r.hub).slice(0, HUB_SLOTS.length);
   const currentRoom = () => g.rooms.byId.get(g.roomId) ?? null;
   const fillName = (text) => String(text).replaceAll("{name}", g.save.name || "forgeron");
@@ -412,6 +447,7 @@
         id: "npc-" + n.id, always: true, solid: true, name: n.name, verb: "Parler", tiles: [[n.x, n.y]], z: (n.y + 1) * T, lx: n.x + 0.5, ly: n.y - 0.65,
         draw: (c) => S.person(c, n.x * T, n.y * T, { ...(S.LOOKS[n.look] ?? S.LOOKS.brann), dir: n.dir }),
         interact: async () => {
+          if (room.id === ARENA_ROOM && n.id === ARENA_MASTER) return arenaTalk(n);
           await say(n.name, n.lines.map(fillName));
           if (n.plays && room.game) {
             const answer = await choose(n.name, "Jouer à « " + room.game.title + " » ?", ["Jouer", "Plus tard"]);
@@ -421,7 +457,7 @@
       });
     }
     room.doors.forEach((d, i) => {
-      E.push({ id: "door-" + i, always: true, solid: true, decor: true, name: d.label, verb: "Sortir", tiles: [[d.x, 14], [d.x + 1, 14]], z: 0, lx: d.x + 1, ly: 13.7, draw: (c) => S.doorBottom(c, d.x, H), interact: () => doorTo(d) });
+      E.push({ id: "door-" + i, always: true, solid: true, decor: true, name: d.label, verb: "Sortir", tiles: [[d.x, 14], [d.x + 1, 14]], z: 0, lx: d.x + 1, ly: 13.7, draw: (c, t) => S.doorBottom(c, d.x, H, d.style, t), interact: () => doorTo(d) });
     });
     return E;
   }
@@ -437,6 +473,53 @@
     const result = await gameplay.start(room.game, { theme: room.theme, best });
     if (result.best > best) { g.save.bests = { ...(g.save.bests || {}), [room.id]: result.best }; persist(); }
     if (result.state === "won") { A.sfx.fanfare(); banner("Gagné ! Score : " + result.score + "."); }
+  }
+
+  /* ---------- l'arène : le Maître d'armes explique, puis on combat des bots avec son équipement ---------- */
+  const ARENA_HELP = [
+    "Chaque niveau te donne un point à répartir entre quatre caractéristiques : Force pour les dégâts, Agilité pour la vitesse, Vitalité pour les points de vie, Chance pour les critiques et l'or.",
+    "Ton équipement compte aussi : l'arme donne de la Force, la cape de l'Agilité, le tablier de la Vitalité, le couvre-chef de la Chance. Plus l'objet est rare, plus il donne. Chaque arme se joue à sa façon.",
+    "Cinq vagues de bots, puis le Seigneur des braises. Tu gagnes un peu d'or, jamais d'objet rare : ceux-là viennent de ton vrai travail. Les points se règlent dans ton profil, onglet Combat.",
+  ];
+  async function arenaTalk(npc) {
+    await say(npc.name, npc.lines.map(fillName));
+    if (!g.save.arena.met) { g.save.arena.met = true; persist(); await say(npc.name, ARENA_HELP); }
+    for (;;) {
+      const left = pointsLeft();
+      const answer = await choose(npc.name, left > 0 ? `Tu as ${left} point${left > 1 ? "s" : ""} de caractéristique à répartir.` : "Que veux-tu faire ?", ["Combattre", "Mes caractéristiques", "Comment ça marche ?", "Plus tard"]);
+      if (answer === 0) return playArena();
+      if (answer === 1) return openCustomizer(false, "combat");
+      if (answer !== 2) return;
+      await say(npc.name, ARENA_HELP);
+    }
+  }
+  async function arenaGateTalk() {
+    const answer = await choose("", "Une herse de fer s'ouvre sur l'arène.", ["Entrer", "Rester"]);
+    if (answer === 0) enterRoom(ARENA_ROOM, null);
+  }
+  let arena = null;
+  async function playArena() {
+    arena ??= window.ForgeArena.create({
+      stage: g.el.stage, sfx: A.sfx, look: playerLook, onFightEnd: arenaFightEnd,
+      onKeysCaptured: (on) => { g.play = on; if (on) { g.keys = []; g.player.path = []; } },
+    });
+    const a = g.save.arena;
+    await arena.start({ built: combatBuild(), equipment: arenaEquipment(), best: a.bestWave ? { wave: a.bestWave, wins: a.wins } : null });
+    renderHud();
+  }
+  /** Un combat est fini : l'or est crédité (plafonné par jour, la progression est dans ce navigateur) et le record gardé. */
+  function arenaFightEnd(result) {
+    const a = g.save.arena, now = new Date(), day = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+    if (a.day !== day) { a.day = day; a.goldToday = 0; }
+    a.fights++;
+    if (result.state === "won") a.wins++;
+    const record = result.cleared > a.bestWave;
+    if (record) a.bestWave = result.cleared;
+    const wanted = C.reward(result, combatBuild()), gold = Math.max(0, Math.min(wanted, ARENA_DAILY_GOLD - a.goldToday));
+    a.goldToday += gold; g.save.gold += gold;
+    persist(); renderHud();
+    if (gold > 0) A.sfx.coin();
+    return { gold, note: gold < wanted ? `plafond de ${ARENA_DAILY_GOLD} or par jour` : record ? "nouveau record !" : "" };
   }
 
   /** Visite une salle (un brouillon de l'Architecte ou une salle d'utilisateur) : elle est connue du monde le temps de la visite. */
@@ -475,7 +558,7 @@
     let tx, ty, dir;
     if (id === "forge") {
       const slot = hubRooms().findIndex((r) => r.id === from);
-      [tx, ty, dir] = slot >= 0 ? [HUB_SLOTS[slot], 3, "down"] : [12, 11, "up"];
+      [tx, ty, dir] = from === ARENA_ROOM ? [ARENA_GATE_X, 13, "up"] : slot >= 0 ? [HUB_SLOTS[slot], 3, "down"] : [12, 11, "up"];
     } else {
       [tx, ty] = spawn ?? room.spawn;
       dir = "up";
@@ -644,6 +727,37 @@
     </div>`;
   }
 
+  /** Page « Combat » : points à répartir, valeurs de combat, bonus de l'équipement, record de l'arène. */
+  function combatHtml() {
+    const h = g.data.hero;
+    if (!h) return `<p class="fg-empty">Les données du forgeron arrivent…</p>`;
+    const b = combatBuild(), left = pointsLeft(), a = g.save.arena, d = b.derived;
+    const rows = C.STATS.map((st) => `<div class="fg-stat">
+        <div class="fg-stat-name"><b>${st.name}</b><small>${esc(st.hint)}</small></div>
+        <div class="fg-stat-val">
+          <button type="button" class="fg-mini" data-stat-sub="${st.id}" ${b.base[st.id] ? "" : "disabled"} aria-label="Retirer un point de ${st.name}">−</button>
+          <span class="fg-stat-n" title="Points répartis + bonus de l'équipement"><b>${b.total[st.id]}</b><small>${b.base[st.id]} + ${b.bonus[st.id]}</small></span>
+          <button type="button" class="fg-mini" data-stat-add="${st.id}" ${left > 0 ? "" : "disabled"} aria-label="Ajouter un point de ${st.name}">+</button>
+        </div></div>`).join("");
+    const tile = (label, value, note) => `<div class="fg-tile"><small>${label}</small><b>${value}</b><small>${note}</small></div>`;
+    const tiles = [
+      tile("Points de vie", d.maxHp, "Vitalité"), tile("Dégâts", d.damage, esc(b.weapon.spec.name) + (b.weapon.training ? " d'entraînement" : "")), tile("Vitesse", d.speed, "Agilité"),
+      tile("Critique", `${Math.round(d.crit * 100)} %`, "Chance"), tile("Roulade", `${d.dashCd} s`, "Agilité"), tile("Or gagné", `+${Math.round((d.goldMult - 1) * 100)} %`, "Chance"),
+    ].join("");
+    const worn = Object.entries(b.slots).map(([slot, sl]) => `${C.SLOT_NAME[slot]} ${items.rarityName(sl.rarity).toLowerCase()} : +${sl.points} ${C.STATS.find((x) => x.id === sl.stat).name.toLowerCase()}`);
+    return `<div class="fg-pf">
+      <div class="fg-box fg-pf-head"><div class="fg-pf-level"><span><b>${left}</b> point${left > 1 ? "s" : ""} à répartir</span><span>1 point par niveau (niveau ${h.level})</span></div>
+        <small class="fg-note">${left > 0 ? "Plus tu montes de niveau en travaillant, plus tu en gagnes." : "Tous tes points sont répartis."}</small></div>
+      <div class="fg-box fg-stats">${rows}</div>
+      <div class="fg-tiles">${tiles}</div>
+      <h4>Équipement</h4>
+      <p class="fg-note">${worn.length ? esc(worn.join(" · ")) : "Aucun équipement porté : équipe des objets du sac pour gagner des points."}</p>
+      <h4>Arène</h4>
+      <p class="fg-note">${a.fights ? `${a.fights} combat${a.fights > 1 ? "s" : ""}, ${a.wins} victoire${a.wins > 1 ? "s" : ""}, record : ${a.bestWave} vague${a.bestWave > 1 ? "s" : ""} sur ${C.WAVES.length}.` : "Pas encore de combat : la herse de fer, en bas à droite de la forge, mène à l'arène."}</p>
+      <p><button type="button" class="fg-mini" data-stat-reset>Réinitialiser mes points</button></p>
+    </div>`;
+  }
+
   /** Popup du profil : un seul endroit pour le forgeron (profil, sac, apparence, échange, quêtes). Le jeu garde l'aperçu et l'équipement visibles à gauche. */
   function openCustomizer(first, tab = "profile") {
     if (g.custom) return;
@@ -653,7 +767,7 @@
     const el = document.createElement("div");
     el.className = "fg-custom";
     const swatches = (key, list) => `<div class="fg-swatches" data-key="${key}">${list.map((c) => `<button type="button" class="fg-sw ${look[key] === c ? "on" : ""}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>`;
-    const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Sac"], ["look", "Apparence"], ["trade", "Échange"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
+    const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Sac"], ["look", "Apparence"], ["trade", "Échange"], ["combat", "Combat"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
     // Hors création du personnage, le popup a toujours la même taille : aperçu et équipement à gauche, l'onglet choisi à droite
     el.innerHTML = `<div class="fg-card ${first ? "" : "wide"}">
       ${first ? "" : `<button type="button" class="fg-x" data-cancel aria-label="Fermer" title="Fermer sans enregistrer l'apparence (Échap)"></button>`}
@@ -689,7 +803,7 @@
       // Un changement d'équipement redessine l'onglet : on garde la position dans la liste, sauf quand on change d'onglet
       const scroller = current === "look" ? pane : panel;
       const keep = shown === current ? scroller.scrollTop : 0;
-      if (current !== "look") panel.innerHTML = current === "profile" ? profileHtml() : current === "quests" ? window.ForgePopups.questsHtml(api2) : items.panelHtml(current);
+      if (current !== "look") panel.innerHTML = current === "profile" ? profileHtml() : current === "combat" ? combatHtml() : current === "quests" ? window.ForgePopups.questsHtml(api2) : items.panelHtml(current);
       scroller.scrollTop = keep;
       shown = current;
       if (current === "inv") seenBag = true;
@@ -712,6 +826,12 @@
       if (t) { current = t.dataset.ctab ?? t.dataset.pfTab; A.sfx.select(); show(); return; }
       if (ev.target.closest("[data-cancel]")) { close(); return; }
       if (ev.target.closest("[data-pf-board]")) { close(); openPopup("board"); return; }
+      const st = ev.target.closest("[data-stat-add], [data-stat-sub], [data-stat-reset]");
+      if (st) {
+        if (st.hasAttribute("data-stat-reset")) { resetStats(); A.sfx.select(); } else if (setStat(st.dataset.statAdd ?? st.dataset.statSub, st.hasAttribute("data-stat-add") ? 1 : -1)) A.sfx.select();
+        show();
+        return;
+      }
       if (items.onClick(ev)) return;
       const sw = ev.target.closest(".fg-sw");
       if (sw) { look[sw.parentElement.dataset.key] = sw.dataset.c; sw.parentElement.querySelectorAll(".fg-sw").forEach((b) => b.classList.toggle("on", b === sw)); A.sfx.select(); draw(); return; }
@@ -951,6 +1071,9 @@
     document.removeEventListener("visibilitychange", onVisibility);
     if (g.popup) window.ForgePopups.close();
     if (g.dlg) endDialog(-1);
+    // Un jeu ou l'arène ouverts capturent le clavier de toute la page : on les ferme en quittant la forge
+    gameplay?.close();
+    arena?.close();
     g.keys = [];
     A.stop();
   }

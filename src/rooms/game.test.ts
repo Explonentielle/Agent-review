@@ -67,7 +67,9 @@ describe("jeu décrit en données : forme refusée", () => {
   it("refuse une carte qui n'a pas la bonne taille ou un caractère inconnu", () => {
     expect(problems(platform({ map: level().slice(0, 14) })).join(" ")).toMatch(/15 rangées/);
     expect(problems(platform({ map: level({ 5: "....X" }) })).join(" ")).toMatch(/n'accepte que/);
-    expect(problems(platform({ map: level({ 5: "...." }) })).join(" ")).toMatch(/24 caractères/);
+    const shortRow = level(); // `level` complète les rangées : on raccourcit la rangée à la main
+    shortRow[5] = "....";
+    expect(problems(platform({ map: shortRow })).join(" ")).toMatch(/24 caractères/);
   });
 
   it("refuse un champ inconnu, un type d'objet inconnu, un mode inconnu et du code déguisé", () => {

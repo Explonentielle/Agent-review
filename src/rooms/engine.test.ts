@@ -61,18 +61,19 @@ describe("moteur de jeu : plateforme", () => {
   });
 
   it("une plateforme se traverse par en dessous et on s'y pose par au-dessus", () => {
-    // plateforme sur la rangée 10, le joueur saute depuis le sol en dessous
-    const g = E.create(def({ map: level({ 10: "..====......" }), player: { x: 3, y: 13 } }));
+    // plateforme sur la rangée 12 (32 px au-dessus du sol : à portée d'un saut d'environ 40 px), le joueur saute depuis le sol en dessous
+    const g = E.create(def({ map: level({ 12: "..====......" }), player: { x: 3, y: 13 } }));
     run(g, 0.3);
     for (let i = 0; i < 60 * 2; i++) g.tick(STEP, { jump: i < 40 });
     run(g, 1);
     expect(g.player.onGround).toBe(true);
-    expect(g.player.y + g.player.h).toBeLessThan(tileTop(14) - 2); // pas retombé sur le sol : il est sur la plateforme ?
+    expect(g.player.y + g.player.h).toBeCloseTo(tileTop(12), 0); // il a traversé la plateforme par en dessous et s'est posé dessus, pas sur le sol
   });
 
   it("tomber dans le vide coûte une vie et ramène au départ", () => {
     const g = E.create(def({ map: level({ 14: "#####.....################" }), player: { x: 3, y: 13 } }));
-    run(g, 3, { right: true });
+    // on s'arrête à la première chute : en gardant la touche appuyée, le joueur retomberait dans le trou après sa réapparition
+    for (let i = 0; i < 60 * 3 && g.lives === 3; i++) g.tick(STEP, { right: true });
     expect(g.lives).toBe(2);
     expect(g.player.x).toBeLessThan(3 * E.T + 8); // revenu près du départ (x = 3 * 16 + 3)
   });
@@ -87,9 +88,10 @@ describe("moteur de jeu : plateforme", () => {
 
 describe("moteur de jeu : objets, ennemis et règles", () => {
   it("une pièce rapporte sa valeur et disparaît ; ramasser toutes les pièces fait gagner", () => {
-    const g = E.create(def({ things: [{ kind: "coin", x: 4, y: 13 }, { kind: "gem", x: 6, y: 13 }], win: [{ collect_all: "coin" }, { score: 6 }] }));
+    // `win` est une liste dont la première condition vraie gagne : il faut donc deux pièces, sinon la première suffirait à gagner
+    const g = E.create(def({ things: [{ kind: "coin", x: 4, y: 13 }, { kind: "gem", x: 6, y: 13 }, { kind: "coin", x: 8, y: 13 }], win: [{ collect_all: "coin" }] }));
     run(g, 3, { right: true });
-    expect(g.score).toBe(6); // 1 + 5
+    expect(g.score).toBe(7); // 1 + 5 + 1
     expect(g.things.filter((t) => t.alive && t.group === "item")).toHaveLength(0);
     expect(g.state).toBe("won");
   });
@@ -195,7 +197,7 @@ describe("moteur de jeu : vue de dessus", () => {
     run(g, 0.5, { right: true });
     for (let i = 0; i < 30; i++) g.tick(STEP, { right: true, act: i === 0 });
     expect(g.things[0]!.alive).toBe(false);
-    const chaser = E.create(def({ mode: "topdown", things: [{ kind: "skull", x: 10, y: 7 }], player: { x: 4, y: 7 } }));
+    const chaser = E.create(def({ mode: "topdown", things: [{ kind: "skull", x: 8, y: 7 }], player: { x: 4, y: 7 } })); // dans sa portée de poursuite (6 cases)
     run(chaser, 6);
     expect(chaser.lives).toBeLessThan(3);
   });

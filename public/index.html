@@ -1264,7 +1264,7 @@ function loadForgeAssets() {
     css.rel = "stylesheet";
     css.href = "/forge/forge.css";
     document.head.append(css);
-    for (const file of ["sprites", "audio", "scribe", "architect", "items", "popups", "engine", "gameplay", "game"]) {
+    for (const file of ["sprites", "audio", "scribe", "architect", "items", "popups", "engine", "gameplay", "combat", "arena", "game"]) {
       await new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = `/forge/${file}.js`;

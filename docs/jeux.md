@@ -12,7 +12,7 @@ Le moteur est un seul fichier, `public/forge/engine.js` : le navigateur le joue,
 
 ## Le format
 
-Un jeu est le champ `game` d'une salle ; un personnage de la salle a `"plays": true` : c'est lui qui propose « Jouer ? ». Voir `public/rooms/arcade.json` pour un exemple complet (La montée au drapeau).
+Un jeu est le champ `game` d'une salle ; un personnage de la salle a `"plays": true` : c'est lui qui propose « Jouer ? ». Voir `prompts/rooms-example.json` pour un exemple complet (La montée au drapeau) : c'est l'exemple donné au générateur de salles, pas une salle livrée.
 
 | Champ | Rôle |
 |---|---|

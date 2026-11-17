@@ -77,6 +77,7 @@
    * @returns { start(def, options) } : lance une partie, résolue quand la personne quitte ({ state, score, best }).
    */
   function create(ctx) {
+    let current = null; // le jeu ouvert, pour le fermer quand on quitte la forge
     function start(def, options = {}) {
       return new Promise((resolve) => {
         const th = THEMES[options.theme] ?? THEMES.tavern;
@@ -99,6 +100,7 @@
         let game = ENG.create(def), phase = "intro", raf = 0, last = 0, t = 0, endAt = 0;
         const keys = new Set();
         ctx.onKeysCaptured(true);
+        current = quit;
 
         const input = () => {
           const k = (...names) => names.some((n) => keys.has(n));
@@ -121,6 +123,7 @@
           game = ENG.create(def); t = 0; msgEl.hidden = true; phase = "play"; sayEl.hidden = true;
         }
         function quit() {
+          current = null;
           cancelAnimationFrame(raf);
           document.removeEventListener("keydown", onKey, true);
           document.removeEventListener("keyup", onKeyUp, true);
@@ -197,7 +200,7 @@
         raf = requestAnimationFrame(frame);
       });
     }
-    return { start };
+    return { start, close: () => current?.() };
   }
 
   window.ForgeGameplay = { create };

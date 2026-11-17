@@ -129,6 +129,7 @@
     king: { hair: "#8a6a3a", tunic: "#7a1f2e", apron: "#f0d078", hat: "crown", skin: "#e0b088", beard: true },
     queen: { hair: "#3a2a1c", tunic: "#4a2f8a", apron: "#e8e4da", hat: "crown", skin: "#f2c9a0" },
     noble: { hair: "#222", tunic: "#2f6a8a", apron: "#c9c4b0", skin: "#d9a066" },
+    armurier: { hair: "#3a2a1c", tunic: "#7a2f2f", apron: "#4a4a52", skin: "#d9a066", hat: "helmet", beard: true, item: "weapon:axe:epic" },
     architecte: { hair: "#7a5a3a", tunic: "#2a7f86", apron: "#d8cfa8", skin: "#e0b088", hat: "copper", beard: true },
   };
 
@@ -295,7 +296,8 @@
     for (let x = 0; x < w; x++) { px(c, x * T, (h - 1) * T, T, T, p.w1); px(c, x * T, (h - 1) * T, T, 1, "rgba(255,255,255,.07)"); px(c, x * T + (x % 2 ? 8 : 0), (h - 1) * T + 1, 1, T - 1, p.w2); }
   }
   /** Porte de deux tuiles dans le mur du bas : encadrement de pierre, planches, ferrures. */
-  function doorBottom(c, tx, h = 15) {
+  function doorBottom(c, tx, h = 15, style = "wood", t = 0) {
+    if (style === "iron") return ironGate(c, tx, h, t);
     const y = (h - 1) * T;
     sprite(c, tx * T, y, [
       [-4, -4, 2 * T + 8, T + 4, "#3a2a1c"], [-4, -4, 2 * T + 8, 1, HI], [-4, -4, 3, T + 4, HI], [2 * T + 1, -4, 3, T + 4, SH],
@@ -305,6 +307,23 @@
       [4, 8, 3, 3, "#ffd37a"], [4, 8, 3, 1, "#fff0b0"],
       [0, -2, 2 * T, 2, "#ffe9a0"],
     ]);
+  }
+  /** Herse de fer de l'arène (deux tuiles dans le mur du bas) : arche de pierre sombre, barreaux, lueur rouge, écu aux épées croisées, torches. Un autre dessin que les portes de bois et les portes magiques. */
+  function ironGate(c, tx, h = 15, t = 0) {
+    const x = tx * T, y = (h - 1) * T;
+    sprite(c, x, y, [[-5, -6, 2 * T + 10, T + 6, "#3d3a48"], [-5, -6, 2 * T + 10, 2, HI2], [-5, -6, 3, T + 6, HI], [2 * T + 2, -6, 3, T + 6, SH], [-1, -3, 2 * T + 2, T + 3, "#1a0d10"]]);
+    c.globalAlpha = 0.3 + 0.12 * Math.sin(t * 3); px(c, x - 1, y - 3, 2 * T + 2, T + 3, "#c0392b"); c.globalAlpha = 1;
+    for (let i = 0; i < 8; i++) { px(c, x + i * 4, y - 3, 2, T + 3, "#7d838f"); px(c, x + i * 4, y - 3, 1, T + 3, "#c8ced8"); px(c, x + i * 4, y + T - 3, 2, 3, "#e8ecf2"); }
+    px(c, x - 1, y + 2, 2 * T + 2, 2, "#4a4f5a"); px(c, x - 1, y + 10, 2 * T + 2, 2, "#4a4f5a");
+    // Écu rouge au centre, deux épées croisées
+    px(c, x + 11, y - 2, 10, 13, "#7a2a2a"); px(c, x + 11, y - 2, 10, 1, "#c8aa4a"); px(c, x + 11, y + 10, 10, 1, "#c8aa4a");
+    for (let i = 0; i < 7; i++) { px(c, x + 12 + i, y - 1 + i, 2, 2, "#e8ecf2"); px(c, x + 18 - i, y - 1 + i, 2, 2, "#e8ecf2"); }
+    px(c, x + 14, y + 3, 4, 3, "#f0d078");
+    // Torches de part et d'autre de l'arche
+    for (const tx2 of [x - 9, x + 2 * T + 5]) {
+      const f = Math.floor(t * 8 + tx2) % 2;
+      px(c, tx2 + 1, y + 2, 3, 8, "#3b2616"); px(c, tx2, y - 3 + f, 5, 5, "#ff9a2a"); px(c, tx2 + 1, y - 2 + f, 3, 3, "#ffd37a");
+    }
   }
   /** Porte magique dans le mur du fond de la forge, qui mène à une salle (2 x 2 tuiles à partir de (tx, ty)). */
   function hubDoor(c, tx, ty, t = 0) {
@@ -421,5 +440,5 @@
     }
   }
 
-  window.ForgeSprites = { T, px, GRADE, TYPES, weapon, icon, person, LOOKS, room, roomShell, doorBottom, hubDoor, drawObject, OBJECT_NAME, torch, furnace, anvil, board, stone, rack, stall, barrel, crate, sparks, sparkle, pointer };
+  window.ForgeSprites = { T, px, GRADE, TYPES, weapon, icon, person, LOOKS, room, roomShell, doorBottom, ironGate, hubDoor, drawObject, OBJECT_NAME, torch, furnace, anvil, board, stone, rack, stall, barrel, crate, sparks, sparkle, pointer };
 })();

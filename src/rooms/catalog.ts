@@ -11,13 +11,16 @@ export const THEMES = ["forge", "castle", "tavern"] as const;
 export type Theme = (typeof THEMES)[number];
 
 /** Apparences de personnages disponibles (voir `LOOKS` dans `sprites.js`). */
-export const NPC_LOOKS = ["brann", "apprenti", "apprenti2", "apprenti3", "gardien", "scribe", "marchand", "king", "queen", "noble"] as const;
+export const NPC_LOOKS = ["brann", "apprenti", "apprenti2", "apprenti3", "gardien", "scribe", "marchand", "king", "queen", "noble", "armurier"] as const;
 export type NpcLook = (typeof NPC_LOOKS)[number];
 
 export const COLORS = ["red", "blue", "green", "purple", "gold"] as const;
 export type Color = (typeof COLORS)[number];
 
 export const DIRECTIONS = ["up", "down", "left", "right"] as const;
+
+/** Dessin d'une porte du mur du bas : le bois par défaut, ou la herse de fer (voir `ironGate` dans `sprites.js`). */
+export const DOOR_STYLES = ["wood", "iron"] as const;
 
 export interface ObjectSpec {
   /** Taille en tuiles (la taille d'un tapis se règle dans la salle). */

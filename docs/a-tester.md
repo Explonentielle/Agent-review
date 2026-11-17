@@ -172,6 +172,18 @@ La forge (onglet « La forge », monde 2D, voir roadmap Annexe B) :
 - [ ] **Vraie CLI** : `npx tsx scripts/smoke-scribe.ts` (là où `claude` est installé) : options acceptées, brouillon lu, consigne piégée dans un titre non suivie.
 - [ ] Recharger la page ou changer d'onglet puis revenir : la progression (nom, or, tenues) est conservée ; vider le stockage du navigateur la remet à zéro.
 
+## 11 ter. Arène et caractéristiques (forge)
+
+Après `git pull && docker compose up -d --build`, dans la forge (aucune migration, tout est dans le navigateur) :
+
+- [ ] Une **herse de fer** apparaît dans le mur du bas, à droite (pas une porte violette), une fois la première arme posée au râtelier. Maître Brann t'y envoie.
+- [ ] La herse mène à la salle de l'arène ; le **Maître d'armes** explique les règles, puis propose Combattre, Mes caractéristiques, Comment ça marche, Plus tard.
+- [ ] **Profil > Combat** : un point par niveau à répartir (+ et −), plafonné au niveau, « Réinitialiser » ; l'arme et les tenues équipées ajoutent des points (arme : Force, cape : Agilité, tablier : Vitalité, couvre-chef : Chance).
+- [ ] Un combat : Espace frappe, Maj roule, les bots arment leur coup (« ! » rouge). Essaie deux types d'armes. À la fin : or (plafond de 150 par jour) et record.
+- [ ] Changer d'onglet en plein combat ferme l'arène et rend le clavier.
+- [ ] La porte de fer de la salle te ramène devant la herse.
+- [ ] **Équilibrage** : trop facile ? trop dur ? dis-le, c'est quelques nombres dans `public/forge/combat.js`.
+
 ## 12. Pas testé du tout
 
 - Un vrai serveur PostgreSQL (pilote `pg`) : seuls SQLite et PostgreSQL embarqué (PGlite) sont testés. Lancer avec `TEST_DATABASE_URL` pour la suite complète.

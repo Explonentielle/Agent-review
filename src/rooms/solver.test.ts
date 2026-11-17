@@ -15,8 +15,10 @@ const game = (over: Record<string, unknown> = {}) => ({ title: "t", mode: "platf
 
 describe("solveur de niveaux : prouve qu'un niveau est gagnable avec les vraies règles", () => {
   it("toutes les salles livrées qui ont un jeu sont gagnables", () => {
+    // les salles de public/rooms, plus l'exemple donné au générateur (prompts/rooms-example.json, qui n'est plus une salle livrée)
     const dir = path.join(PROJECT_ROOT, "public", "rooms");
-    const withGame = readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8")) as { id: string; game?: unknown }).filter((r) => r.game);
+    const files = [...readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => path.join(dir, f)), path.join(PROJECT_ROOT, "prompts", "rooms-example.json")];
+    const withGame = files.map((f) => JSON.parse(readFileSync(f, "utf8")) as { id: string; game?: unknown }).filter((r) => r.game);
     expect(withGame.length).toBeGreaterThan(0);
     for (const room of withGame) {
       const r = E.solve(room.game, { maxNodes: 12000, maxMs: 20000 });

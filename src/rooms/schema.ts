@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COLORS, DIRECTIONS, FORGE_ROOM_ID, GRID, LIMITS, NPC_LOOKS, OBJECTS, OBJECT_TYPES, THEMES, type ObjectType } from "./catalog.js";
+import { COLORS, DIRECTIONS, DOOR_STYLES, FORGE_ROOM_ID, GRID, LIMITS, NPC_LOOKS, OBJECTS, OBJECT_TYPES, THEMES, type ObjectType } from "./catalog.js";
 import { GameSchema, checkGame } from "./game.js";
 import { text } from "./text.js";
 
@@ -42,6 +42,8 @@ const DoorSchema = z
     /** Salle d'arrivée : `forge` ou une autre salle. */
     to: z.string().regex(ID),
     label: text(LIMITS.labelLength),
+    /** Dessin de la porte : `wood` (par défaut) ou `iron`. */
+    style: z.enum(DOOR_STYLES).optional(),
     /** Où apparaît la personne dans la salle d'arrivée ; absent : le point d'arrivée de cette salle. */
     spawn: z.tuple([tile, row]).optional(),
   })

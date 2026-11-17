@@ -71,11 +71,11 @@ La salle fait **24 colonnes sur 15 rangées**, numérotées à partir de 0.
 
 ## Les personnages
 
-`id` (unique dans la salle), `name` (30 caractères), `look` (`brann`, `apprenti`, `apprenti2`, `apprenti3`, `gardien`, `scribe`, `marchand`, `king`, `queen`, `noble`), `x`, `y` (au sol), `dir` (`up`, `down`, `left`, `right`), `lines` (1 à 8 répliques de 220 caractères au plus). `{name}` est remplacé par le nom du joueur.
+`id` (unique dans la salle), `name` (30 caractères), `look` (`brann`, `apprenti`, `apprenti2`, `apprenti3`, `gardien`, `scribe`, `marchand`, `king`, `queen`, `noble`, `armurier`), `x`, `y` (au sol), `dir` (`up`, `down`, `left`, `right`), `lines` (1 à 8 répliques de 220 caractères au plus). `{name}` est remplacé par le nom du joueur.
 
 ## Les portes
 
-`x` (colonne de gauche des deux tuiles), `to` (`forge` ou l'identifiant d'une autre salle qui existe), `label`, et `spawn` facultatif (où l'on arrive dans la salle d'arrivée). Revenir dans la forge ramène sous la porte magique d'où l'on est venu.
+`x` (colonne de gauche des deux tuiles), `to` (`forge` ou l'identifiant d'une autre salle qui existe), `label`, `style` facultatif (`wood`, par défaut, ou `iron` : la herse de fer de l'arène) et `spawn` facultatif (où l'on arrive dans la salle d'arrivée). Revenir dans la forge ramène sous la porte magique d'où l'on est venu.
 
 ## Ce qui est vérifié
 
@@ -90,6 +90,10 @@ La salle fait **24 colonnes sur 15 rangées**, numérotées à partir de 0.
 Une salle peut avoir un champ `game` (une carte, des objets, une physique, des règles, une victoire) et un personnage `"plays": true` qui le propose : voir **`docs/jeux.md`**. L'Architecte (en bas à gauche de la forge) crée une salle à partir d'une description : un agent sans outil l'écrit, le code la valide, la personne la visite puis la garde.
 
 Les salles créées par les personnes ne sont **pas** dans `public/rooms/` : elles sont rangées en fichiers sous `DATA_DIR/rooms/<espace>/<auteur>/`, **privées par défaut**, partageables à l'équipe (les membres du même espace). Le code impose : l'identifiant (`u<auteur>-nom`), pas de porte magique dans la forge, des portes qui ne mènent qu'à la forge. Un espace ne voit jamais les salles d'un autre.
+
+## L'arène
+
+`public/rooms/arene.json` est une salle livrée comme les autres, mais sans `hub` : on y entre par la herse de fer du mur du bas de la forge, pas par une porte magique. Son Maître d'armes (`maitre-armes`) lance les combats : voir `docs/arene.md`.
 
 ## Pour la suite
 

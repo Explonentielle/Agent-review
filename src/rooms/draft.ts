@@ -50,10 +50,10 @@ export function roomCatalogPrompt(): string {
   ].join("\n");
 }
 
-/** Salle d'exemple donnée à l'agent : une salle LIVRÉE (donc contrôlée à chaque test), jamais un exemple écrit à part qui pourrait dériver. */
+/** Salle d'exemple donnée à l'agent : `prompts/rooms-example.json`, qui n'est PAS une salle livrée (aucune porte n'y mène). Les tests la valident et prouvent son jeu gagnable, pour qu'elle ne dérive pas. */
 export async function roomExamplePrompt(): Promise<string> {
   try {
-    const raw = JSON.parse(await readFile(path.join(PROJECT_ROOT, "public", "rooms", "arcade.json"), "utf8")) as Record<string, unknown>;
+    const raw = JSON.parse(await readFile(path.join(PROJECT_ROOT, "prompts", "rooms-example.json"), "utf8")) as Record<string, unknown>;
     return `# Exemple complet et valide (une salle avec un platformer)\n\n\`\`\`json\n${JSON.stringify(raw)}\n\`\`\``;
   } catch {
     return "";

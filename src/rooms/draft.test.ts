@@ -11,7 +11,7 @@ import { loadEngine } from "./engine.js";
 import { ROOM_TEMPLATE } from "./template.js";
 
 const E = loadEngine();
-const arcade = JSON.parse(readFileSync(path.join(PROJECT_ROOT, "public", "rooms", "arcade.json"), "utf8")) as Record<string, unknown> & { game: Record<string, unknown> };
+const arcade = JSON.parse(readFileSync(path.join(PROJECT_ROOT, "prompts", "rooms-example.json"), "utf8")) as Record<string, unknown> & { game: Record<string, unknown> };
 const plain = () => JSON.parse(JSON.stringify(ROOM_TEMPLATE)) as Record<string, unknown>;
 /** Une salle avec un jeu dont le drapeau est hors de portée d'un saut : valide, mais injouable. */
 function impossible(): Record<string, unknown> {

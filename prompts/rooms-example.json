@@ -3,7 +3,7 @@
   "id": "arcade",
   "name": "La salle d'arcade",
   "theme": "tavern",
-  "hub": true,
+  "hub": false,
   "spawn": [12, 12],
   "objects": [
     { "type": "carpet", "x": 8, "y": 6, "w": 8, "h": 5, "color": "purple" },

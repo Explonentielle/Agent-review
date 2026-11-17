@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "id": "arene",
+  "name": "L'arène",
+  "theme": "castle",
+  "hub": false,
+  "spawn": [12, 12],
+  "objects": [
+    { "type": "carpet", "x": 9, "y": 5, "w": 6, "h": 6, "color": "red" },
+    { "type": "banner", "x": 3, "y": 0, "color": "red" },
+    { "type": "banner", "x": 20, "y": 0, "color": "red" },
+    { "type": "torch", "x": 7, "y": 2 },
+    { "type": "torch", "x": 16, "y": 2 },
+    { "type": "pillar", "x": 5, "y": 5 },
+    { "type": "pillar", "x": 18, "y": 5 },
+    { "type": "statue", "x": 2, "y": 4, "text": "La statue d'un champion, une épée à la main. Sur le socle : « On ne naît pas fort, on le devient. »" },
+    { "type": "chest", "x": 21, "y": 9, "text": "Le coffre des prix : de l'or, des records, de la gloire. Les objets rares, eux, ne se gagnent qu'en forgeant pour de vrai." },
+    { "type": "barrel", "x": 21, "y": 4 },
+    { "type": "crate", "x": 21, "y": 5 }
+  ],
+  "npcs": [
+    {
+      "id": "maitre-armes",
+      "name": "Maître d'armes",
+      "look": "armurier",
+      "x": 12,
+      "y": 6,
+      "dir": "down",
+      "lines": [
+        "Bienvenue dans l'arène, {name} !",
+        "Ici, on se bat pour de faux, mais on frappe pour de vrai. Mes bots ne se fatiguent jamais."
+      ]
+    }
+  ],
+  "doors": [{ "x": 11, "to": "forge", "label": "Sortir de l'arène", "style": "iron" }]
+}

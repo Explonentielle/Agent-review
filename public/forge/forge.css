@@ -337,3 +337,18 @@
 .fg-ar-how summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
 .fg-ar-keep { align-items: flex-end; gap: 10px; margin-top: 10px; }
 .fg-ar-keep .fg-field-in { margin: 0; min-width: 190px; }
+
+/* Onglet Combat : caractéristiques à répartir */
+.fg-stats { display: grid; gap: 4px; margin-top: 8px; }
+.fg-stat { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+.fg-stat:last-child { border-bottom: 0; }
+.fg-stat-name { display: grid; min-width: 0; }
+.fg-stat-name small { color: var(--text-2); font-size: 11px; }
+.fg-stat-val { display: flex; align-items: center; gap: 8px; flex: none; }
+.fg-stat-val .fg-mini { width: 26px; height: 26px; padding: 0; justify-self: auto; font-size: 14px; }
+.fg-mini:disabled { opacity: .35; cursor: default; }
+.fg-mini:disabled:hover { border-color: var(--border-strong); }
+.fg-stat-n { display: grid; min-width: 44px; text-align: center; }
+.fg-stat-n b { font: 800 16px "Courier New", monospace; }
+.fg-stat-n small { color: var(--text-2); font-size: 10.5px; }
+.fg-pf > .fg-stats { margin-bottom: 8px; }
