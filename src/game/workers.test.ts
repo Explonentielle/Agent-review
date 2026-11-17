@@ -44,6 +44,15 @@ describe("les forgerons de l'atelier", () => {
     expect(RECENT_MS).toBe(15 * 60_000);
   });
 
+  it("un agent relancé sur sa MR n'apparaît qu'une fois : la tâche reprise cède la place à la nouvelle", () => {
+    const base = { reviews: [], steps: {}, now: NOW };
+    const resumed = { ...task(2, "running"), parent_id: 1 };
+    const workers = pickWorkers({ ...base, tasks: [resumed, task(1, "mr_created", 2)] });
+    expect(workers.map((w) => `${w.id}:${w.state}`)).toEqual(["dev-2:working"]);
+    // Sans reprise, ou avec un lien vide, la tâche terminée reste affichée
+    expect(pickWorkers({ ...base, tasks: [{ ...task(3, "running"), parent_id: null }, task(1, "mr_created", 2)] }).map((w) => w.id)).toEqual(["dev-3", "dev-1"]);
+  });
+
   it("au plus quatre forgerons, et le libellé est court", () => {
     const tasks = [1, 2, 3, 4, 5, 6].map((id) => task(id, "running", 0, "Un titre de ticket vraiment très long pour tester la troncature du libellé"));
     const workers = pickWorkers({ tasks, reviews: [], steps: {}, now: NOW });

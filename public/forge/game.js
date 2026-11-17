@@ -27,14 +27,15 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* ---------- progression de jeu, dans ce navigateur ---------- */
-  const freshSave = () => ({ v: 1, name: "", look: { skin: SKINS[0], hair: HAIRS[1], tunic: TUNICS[0] }, gold: 0, sold: [], owned: [], worn: {}, weapons: {}, seen: [], lastLevel: 0, created: false, intro: false, claimed: {}, lastRank: "", stats: { force: 0, agilite: 0, vitalite: 0, chance: 0 }, arena: { met: false, bestWave: 0, wins: 0, fights: 0, day: "", goldToday: 0 } });
+  const freshSave = () => ({ v: 1, name: "", look: { skin: SKINS[0], hair: HAIRS[1], tunic: TUNICS[0] }, gold: 0, sold: [], owned: [], worn: {}, weapons: {}, seen: [], hiddenWorkers: [], lastLevel: 0, created: false, intro: false, claimed: {}, lastRank: "", stats: { force: 0, agilite: 0, vitalite: 0, chance: 0 }, arena: { met: false, bestWave: 0, wins: 0, fights: 0, day: "", goldToday: 0 } });
   function loadSave() {
     const save = freshSave();
     try {
       const raw = JSON.parse(localStorage.getItem(SAVE_KEY) || "{}");
       Object.assign(save, raw, { look: { ...save.look, ...(raw.look || {}) } });
     } catch { /* stockage indisponible ou illisible : on repart de zéro */ }
-    for (const k of ["sold", "owned", "seen"]) if (!Array.isArray(save[k])) save[k] = [];
+    for (const k of ["sold", "owned", "seen", "hiddenWorkers"]) if (!Array.isArray(save[k])) save[k] = [];
+    save.hiddenWorkers = save.hiddenWorkers.filter((id) => typeof id === "string").slice(-60);
     for (const k of ["worn", "weapons", "claimed"]) if (!save[k] || typeof save[k] !== "object" || Array.isArray(save[k])) save[k] = {};
     if (typeof save.lastRank !== "string") save.lastRank = "";
     // Caractéristiques et arène : remises en forme (le plafond de points suit le niveau, il est appliqué à chaque lecture)
@@ -177,7 +178,7 @@
   /** Les apprentis au travail : un par agent actif (tâche ou review), à son enclume. */
   function workerEntities() {
     const looks = [S.LOOKS.apprenti, S.LOOKS.apprenti2, S.LOOKS.apprenti3, S.LOOKS.apprenti];
-    return (g.data.hero?.workers ?? []).slice(0, ANVIL_X.length).map((w, i) => {
+    return (g.data.hero?.workers ?? []).filter((w) => !g.save.hiddenWorkers.includes(w.id)).slice(0, ANVIL_X.length).map((w, i) => {
       const ax = ANVIL_X[i];
       return {
         id: `worker-${w.id}`, name: w.label, verb: "Voir", worker: w, slot: i, tiles: [[ax, 6]], z: 7 * T, lx: ax + 0.5, ly: 5.55, always: true, solid: true, bubble: w.line,

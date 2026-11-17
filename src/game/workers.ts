@@ -22,6 +22,8 @@ export interface TaskLike {
   issue_iid: number;
   issue_title: string;
   updated_at: string;
+  /** Tâche reprise par celle-ci (relance de l'agent sur la même MR). */
+  parent_id?: number | null;
 }
 
 export interface ReviewLike {
@@ -79,8 +81,11 @@ export function pickWorkers(input: { tasks: TaskLike[]; reviews: ReviewLike[]; s
   const working: Worker[] = [];
   const waiting: Worker[] = [];
   const recent: Worker[] = [];
+  // Un agent relancé sur sa MR est représenté par sa tâche la plus récente : la tâche reprise ne reste pas à l'enclume comme « terminée »
+  const resumed = new Set(input.tasks.flatMap((t) => (t.parent_id ? [t.parent_id] : [])));
 
   for (const task of input.tasks) {
+    if (resumed.has(task.id)) continue;
     const label = tidy(`#${task.issue_iid} ${task.issue_title}`, MAX_LABEL);
     const active = ACTIVE_TASK[task.status];
     if (active) {
