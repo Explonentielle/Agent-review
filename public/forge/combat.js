@@ -24,13 +24,14 @@
 
   /* ---------- armes : chacune a sa façon de se battre ---------- */
   const WEAPONS = {
-    sword: { name: "Épée", blurb: "Équilibrée : portée moyenne, bonne cadence.", dmg: 12, cd: 0.45, windup: 0.08, reach: 22, arc: 110, knock: 50 },
-    axe: { name: "Hache", blurb: "Lente mais large : touche tout ce qui t'entoure devant toi.", dmg: 18, cd: 0.8, windup: 0.15, reach: 20, arc: 170, knock: 60 },
-    hammer: { name: "Marteau", blurb: "Très lent, énorme : assomme ce qu'il touche.", dmg: 28, cd: 1.15, windup: 0.25, reach: 20, arc: 120, knock: 110, stun: 0.6 },
-    dagger: { name: "Dague", blurb: "Très rapide, très courte : il faut coller l'ennemi.", dmg: 8, cd: 0.26, windup: 0.04, reach: 15, arc: 100, knock: 20 },
-    spear: { name: "Lance", blurb: "Longue portée, étroite : on frappe avant d'être touché.", dmg: 13, cd: 0.55, windup: 0.12, reach: 36, arc: 36, knock: 60 },
-    bow: { name: "Arc", blurb: "Tire de loin : garde tes distances.", dmg: 11, cd: 0.65, windup: 0.08, ranged: true, range: 210, projSpeed: 210, knock: 25 },
-    staff: { name: "Bâton", blurb: "Un trait magique lent qui traverse tout ce qu'il croise.", dmg: 13, cd: 0.85, windup: 0.12, ranged: true, range: 170, projSpeed: 130, pierce: true, knock: 15 },
+    // `perk` : l'effet qui la distingue, tel qu'on l'affiche. Les champs `critBonus`, `critMult`, `maxHits`, `shock` et `slow` le font réellement.
+    sword: { name: "Épée", blurb: "Équilibrée : portée moyenne, bonne cadence, aucun point faible.", perk: "Équilibrée : la référence.", dmg: 12, cd: 0.45, windup: 0.08, reach: 22, arc: 110, knock: 50 },
+    axe: { name: "Hache", blurb: "Lente mais large : touche tout ce qui est devant toi.", perk: "Balayage : touche tous les ennemis devant toi.", dmg: 18, cd: 0.8, windup: 0.15, reach: 20, arc: 170, knock: 60 },
+    hammer: { name: "Marteau", blurb: "Très lent et énorme : assomme, et l'impact secoue le sol autour.", perk: "Assomme 0,6 s et onde de choc : 40 % des dégâts autour de l'impact.", dmg: 28, cd: 1.15, windup: 0.25, reach: 20, arc: 120, knock: 110, stun: 0.6, shock: { radius: 30, mult: 0.4 } },
+    dagger: { name: "Dague", blurb: "Très rapide, très courte : il faut coller l'ennemi, mais elle frappe souvent en critique.", perk: "Critique : +20 points de chance, dégâts critiques x2,2.", dmg: 6, cd: 0.26, windup: 0.04, reach: 15, arc: 100, knock: 20, critBonus: 0.2, critMult: 2.2 },
+    spear: { name: "Lance", blurb: "Portée et dégâts moyens, pointe étroite : la poussée transperce les ennemis alignés.", perk: "Transperce : touche les 2 premiers ennemis alignés.", dmg: 13, cd: 0.55, windup: 0.12, reach: 32, arc: 36, knock: 60, maxHits: 2 },
+    bow: { name: "Arc", blurb: "Flèches rapides à longue portée, mais peu de dégâts : garde tes distances.", perk: "Longue portée : tire sur le plus proche, même loin.", dmg: 7, cd: 0.38, windup: 0.06, ranged: true, range: 260, projSpeed: 300, knock: 15 },
+    staff: { name: "Bâton", blurb: "Un trait magique lent qui traverse tout et ralentit ceux qu'il touche.", perk: "Traverse tout et ralentit de 40 % pendant 1,5 s.", dmg: 13, cd: 0.85, windup: 0.12, ranged: true, range: 200, projSpeed: 130, pierce: true, knock: 10, slow: { mult: 0.6, time: 1.5 } },
   };
   const TRAINING_WEAPON = { type: "sword", rarity: "common" };
 
@@ -118,8 +119,9 @@
       speed: round1(62 * (1 + 0.012 * Math.min(agi, 50))),
       damage: round1(spec.dmg * RARITY_DMG[w.rarity] * (1 + 0.06 * total.force)),
       cooldown: Math.round((spec.cd / (1 + 0.01 * Math.min(agi, 60))) * 1000) / 1000,
-      crit: Math.round(Math.min(0.5, 0.05 + 0.012 * total.chance) * 1000) / 1000,
-      critMult: 1.6,
+      // Le critique de base de l'arme (dague) s'ajoute à celui de la Chance et relève le plafond d'autant
+      crit: Math.round(Math.min(0.5 + (spec.critBonus || 0), 0.05 + 0.012 * total.chance + (spec.critBonus || 0)) * 1000) / 1000,
+      critMult: spec.critMult || 1.6,
       dashCd: round1(Math.max(0.7, 1.6 - 0.02 * agi)),
       goldMult: Math.round((1 + Math.min(0.5, 0.01 * total.chance)) * 100) / 100,
     };
@@ -181,7 +183,7 @@
       const hp = Math.round(spec.hp * hpScale);
       const bot = {
         type, spec, x: at[0], y: at[1], r: spec.r, hp, maxHp: hp, dmg: round1(spec.dmg * dmgScale), alive: true, dying: 0, face: [0, 1],
-        cd: 0.6 + rng() * 0.8, windup: 0, spawnT: SPAWN_TIME, stun: 0, flash: 0, kb: null, side: rng() < 0.5 ? -1 : 1, rush: null, chargeCd: 3.5, summoned: false, tell: null,
+        cd: 0.6 + rng() * 0.8, windup: 0, spawnT: SPAWN_TIME, stun: 0, slowT: 0, slowMult: 1, flash: 0, kb: null, side: rng() < 0.5 ? -1 : 1, rush: null, chargeCd: 3.5, summoned: false, tell: null,
       };
       fight.bots.push(bot);
       return bot;
@@ -206,12 +208,14 @@
       return true;
     }
 
-    function hitBot(b, dmg, crit, ux, uy, stun, knock) {
+    function hitBot(b, dmg, crit, ux, uy, stun, knock, slow) {
       if (!b.alive) return;
       b.hp -= dmg; b.flash = 0.12;
       fight.damageDealt += dmg;
       if (knock) b.kb = [ux * knock * (b.spec.boss ? 0.3 : 1) * 3, uy * knock * (b.spec.boss ? 0.3 : 1) * 3];
       if (stun) b.stun = Math.max(b.stun, b.spec.boss ? Math.min(stun, 0.15) : stun);
+      // Le ralentissement s'use contre le seigneur : moitié moins long et au plus 15 %
+      if (slow) { b.slowT = Math.max(b.slowT, b.spec.boss ? slow.time / 2 : slow.time); b.slowMult = b.spec.boss ? Math.max(slow.mult, 0.85) : slow.mult; }
       fight.fx.push({ kind: "num", x: b.x, y: b.y - 8, text: String(Math.round(dmg)), crit, t: 0, life: 0.6 });
       emit(crit ? "crit" : "hit");
       if (b.hp <= 0) {
@@ -230,25 +234,42 @@
         if (near && near.dist <= wp.range) dir = norm(near.bot.x - hero.x, near.bot.y - hero.y);
         hero.face = dir;
         const roll = rollDamage();
-        fight.shots.push({ x: hero.x + dir[0] * 8, y: hero.y + dir[1] * 8, vx: dir[0] * wp.projSpeed, vy: dir[1] * wp.projSpeed, dmg: roll.dmg, crit: roll.crit, mine: true, pierce: Boolean(wp.pierce), hit: new Set(), life: wp.range / wp.projSpeed, kind: built.weapon.type === "bow" ? "arrow" : "bolt", stun: 0, knock: wp.knock });
+        fight.shots.push({ x: hero.x + dir[0] * 8, y: hero.y + dir[1] * 8, vx: dir[0] * wp.projSpeed, vy: dir[1] * wp.projSpeed, dmg: roll.dmg, crit: roll.crit, mine: true, pierce: Boolean(wp.pierce), hit: new Set(), life: wp.range / wp.projSpeed, kind: built.weapon.type === "bow" ? "arrow" : "bolt", stun: 0, knock: wp.knock, slow: wp.slow });
         emit("shoot");
         return;
       }
       const cosHalf = Math.cos((wp.arc / 2) * Math.PI / 180);
       fight.fx.push({ kind: "slash", x: hero.x, y: hero.y, dir: hero.face.slice(), reach: wp.reach, arc: wp.arc, t: 0, life: 0.14 });
       hero.swing = 0.14;
-      let hits = 0;
+      let targets = [];
       for (const b of fight.bots) {
         if (!b.alive) continue;
         const dd = dist(hero.x, hero.y, b.x, b.y);
         if (dd - b.r - hero.r > wp.reach) continue;
         const [ux, uy] = norm(b.x - hero.x, b.y - hero.y);
         if (dd > hero.r + b.r + 2 && ux * hero.face[0] + uy * hero.face[1] < cosHalf) continue;
-        const roll = rollDamage();
-        hitBot(b, roll.dmg, roll.crit, ux, uy, wp.stun, wp.knock);
-        hits++;
+        targets.push({ b, dd, ux, uy });
       }
-      emit(hits ? "swing-hit" : "swing");
+      // La lance transperce un nombre limité d'ennemis : les plus proches d'abord
+      if (wp.maxHits && targets.length > wp.maxHits) targets = targets.sort((a, c) => a.dd - c.dd).slice(0, wp.maxHits);
+      const touched = new Set();
+      for (const { b, ux, uy } of targets) {
+        const roll = rollDamage();
+        hitBot(b, roll.dmg, roll.crit, ux, uy, wp.stun, wp.knock, wp.slow);
+        touched.add(b);
+      }
+      // L'onde de choc du marteau : le sol encaisse au point d'impact et secoue ce qui est autour, sans critique
+      if (wp.shock) {
+        const ix = hero.x + hero.face[0] * wp.reach, iy = hero.y + hero.face[1] * wp.reach;
+        fight.fx.push({ kind: "shock", x: ix, y: iy, r: wp.shock.radius, t: 0, life: 0.3 });
+        for (const b of fight.bots) {
+          if (!b.alive || touched.has(b) || dist(ix, iy, b.x, b.y) - b.r > wp.shock.radius) continue;
+          const [ux, uy] = norm(b.x - ix, b.y - iy);
+          hitBot(b, round1(d.damage * wp.shock.mult), false, ux, uy, 0, 40);
+          touched.add(b);
+        }
+      }
+      emit(touched.size ? "swing-hit" : "swing");
     }
 
     function updateHero(input) {
@@ -310,7 +331,7 @@
       const h = hero;
       for (const b of fight.bots) {
         if (!b.alive) { b.dying -= STEP; continue; }
-        b.flash = Math.max(0, b.flash - STEP); b.cd -= STEP; b.chargeCd -= STEP;
+        b.flash = Math.max(0, b.flash - STEP); b.cd -= STEP; b.chargeCd -= STEP; b.slowT = Math.max(0, b.slowT - STEP);
         if (b.spawnT > 0) { b.spawnT -= STEP; continue; }
         if (b.kb) { move(b, b.kb[0] * STEP, b.kb[1] * STEP); b.kb = Math.hypot(b.kb[0], b.kb[1]) < 6 ? null : [b.kb[0] * (1 - 9 * STEP), b.kb[1] * (1 - 9 * STEP)]; }
         if (b.stun > 0) { b.stun -= STEP; continue; }
@@ -345,7 +366,7 @@
             continue;
           }
         }
-        const speed = b.spec.speed * (b.spec.boss && b.hp < b.maxHp / 2 ? 1.25 : 1);
+        const speed = b.spec.speed * (b.spec.boss && b.hp < b.maxHp / 2 ? 1.25 : 1) * (b.slowT > 0 ? b.slowMult : 1);
         if (b.spec.ranged) {
           const pref = b.spec.pref;
           if (dd < pref - 18) chase(b, -ux, -uy, speed);
@@ -376,7 +397,7 @@
             if (!b.alive || s.hit.has(b) || dist(s.x, s.y, b.x, b.y) > b.r + 3) continue;
             s.hit.add(b);
             const [ux, uy] = norm(s.vx, s.vy);
-            hitBot(b, s.dmg, s.crit, ux, uy, s.stun, s.knock);
+            hitBot(b, s.dmg, s.crit, ux, uy, s.stun, s.knock, s.slow);
             if (!s.pierce) { s.dead = true; break; }
           }
         } else if (dist(s.x, s.y, hero.x, hero.y) <= hero.r + 3) {

@@ -179,7 +179,8 @@ Après `git pull && docker compose up -d --build`, dans la forge (aucune migrati
 - [ ] Une **herse de fer** apparaît dans le mur du bas, à droite (pas une porte violette), une fois la première arme posée au râtelier. Maître Brann t'y envoie.
 - [ ] La herse mène à la salle de l'arène ; le **Maître d'armes** explique les règles, puis propose Combattre, Mes caractéristiques, Comment ça marche, Plus tard.
 - [ ] **Profil > Combat** : un point par niveau à répartir (+ et −), plafonné au niveau, « Réinitialiser » ; l'arme et les tenues équipées ajoutent des points (arme : Force, cape : Agilité, tablier : Vitalité, couvre-chef : Chance).
-- [ ] Un combat : Espace frappe, Maj roule, les bots arment leur coup (« ! » rouge). Essaie deux types d'armes. À la fin : or (plafond de 150 par jour) et record.
+- [ ] Un combat : Espace frappe, Maj roule, les bots arment leur coup (« ! » rouge). À la fin : or (plafond de 150 par jour) et record.
+- [ ] **Chaque arme a son effet** (l'effet s'affiche en haut de Profil > Combat) : **dague** très rapide et très courte, chiffres dorés des critiques fréquents ; **lance** touche deux ennemis alignés ; **arc** tire vite et loin pour peu de dégâts ; **marteau** assomme et un anneau de sable secoue les ennemis autour de l'impact ; **bâton** teinte en bleu et ralentit ce qu'il touche ; **hache** balaie devant toi ; **épée** équilibrée. Dis-moi lesquelles sont trop faibles ou trop fortes.
 - [ ] Changer d'onglet en plein combat ferme l'arène et rend le clavier.
 - [ ] La porte de fer de la salle te ramène devant la herse.
 - [ ] **Équilibrage** : trop facile ? trop dur ? dis-le, c'est quelques nombres dans `public/forge/combat.js`.

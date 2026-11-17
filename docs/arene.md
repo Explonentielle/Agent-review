@@ -18,7 +18,7 @@ Commandes : flèches ou ZQSD pour bouger, **Espace** pour frapper (le coup part 
 | Force | Dégâts : +6 % par point |
 | Agilité | Vitesse de déplacement (+1,2 % par point, 50 points au plus comptés), vitesse d'attaque (+1 % par point, 60 au plus), roulade plus fréquente (jusqu'à 0,7 s) |
 | Vitalité | Points de vie : +8 par point (base : 50 + 2 par niveau) |
-| Chance | Critique (5 % de base, +1,2 % par point, 50 % au plus, dégâts x 1,6) et or gagné (+1 % par point, +50 % au plus) |
+| Chance | Critique (5 % de base, +1,2 % par point, 50 % au plus, dégâts x 1,6 ; la dague relève la base, le plafond et le multiplicateur, voir plus bas) et or gagné (+1 % par point, +50 % au plus) |
 
 **Points** : un par niveau du forgeron (le niveau vient du serveur : il se gagne en travaillant). Les points répartis ne dépassent jamais le niveau ; « Réinitialiser » les rend, sans frais.
 
@@ -28,15 +28,17 @@ Commandes : flèches ou ZQSD pour bouger, **Espace** pour frapper (le coup part 
 
 Les sept types de la forge ont chacun leur façon de se battre.
 
-| Arme | Dégâts | Cadence | Particularité |
-|---|---|---|---|
-| Épée | 12 | 0,45 s | Équilibrée, portée moyenne |
-| Hache | 18 | 0,8 s | Large : touche tout ce qui est devant (170°) |
-| Marteau | 28 | 1,15 s | Très lent, assomme 0,6 s |
-| Dague | 8 | 0,26 s | Très rapide, très courte |
-| Lance | 13 | 0,55 s | Longue portée, étroite |
-| Arc | 11 | 0,65 s | Flèche à distance, vise le plus proche |
-| Bâton | 13 | 0,85 s | Trait magique lent, traverse les ennemis |
+| Arme | Dégâts | Cadence | Portée | Effet qui la distingue |
+|---|---|---|---|---|
+| Épée | 12 | 0,45 s | moyenne (22) | Équilibrée : la référence, aucun point faible |
+| Hache | 18 | 0,8 s | courte (20), très large | **Balayage** : touche tous les ennemis devant toi (170°) |
+| Marteau | 28 | 1,15 s | courte (20) | Assomme 0,6 s, plus une **onde de choc** : 40 % des dégâts, sans critique, à tout ennemi près du point d'impact (rayon 30), même hors de l'arc du coup |
+| Dague | 6 | 0,26 s (très rapide) | très courte (15) | **Critique** : +20 points de chance de base et dégâts critiques x 2,2 (au lieu de x 1,6) ; le plafond de critique monte d'autant (70 % au lieu de 50 %) |
+| Lance | 13 | 0,55 s | moyenne+ (32), pointe étroite | **Transperce** : la poussée touche les 2 premiers ennemis alignés (les plus proches) |
+| Arc | 7 | 0,38 s (rapide) | longue (260) | Flèches rapides (300 px/s), faibles dégâts ; tire sur le plus proche, où qu'il soit |
+| Bâton | 13 | 0,85 s | longue (200) | Trait lent qui traverse tout et **ralentit** de 40 % pendant 1,5 s ; contre le seigneur : 15 % pendant 0,75 s |
+
+Le profil de l'arme équipée (et son effet) s'affiche en haut de **Profil > Combat**, dans l'introduction de l'arène et dans les explications du Maître d'armes. La rareté multiplie toujours les dégâts, et la Force s'y ajoute.
 
 ## Les bots et les vagues
 
@@ -70,13 +72,13 @@ La porte de fer est aussi un **style de porte** (`"style": "iron"`) utilisable d
 
 ## Ajouter une brique
 
-- **Une arme** (nouveau type dans le butin, `src/game/loot.ts`) : ajouter son profil dans `WEAPONS` de `combat.js`. Le test de cohérence (`src/rooms/combat.test.ts`) échoue tant qu'une arme ou une rareté du butin n'a pas sa place dans l'arène.
+- **Une arme** (nouveau type dans le butin, `src/game/loot.ts`) : ajouter son profil dans `WEAPONS` de `combat.js`, avec un `perk` (l'effet affiché) différent de celui des autres. Un effet est un champ du profil : `critBonus` et `critMult` (critique), `maxHits` (transperce), `shock` (onde de choc), `slow` (ralentit), `stun`, `pierce`, ou `ranged` avec `range` et `projSpeed`. Le test de cohérence (`src/rooms/combat.test.ts`) échoue tant qu'une arme ou une rareté du butin n'a pas sa place dans l'arène, et un autre exige qu'aucune arme n'annonce le même effet qu'une autre.
 - **Un bot** : `BOTS` (statistiques), son apparence dans `BOT_LOOKS` (`arena.js`) et sa vague dans `WAVES`.
 - **Une caractéristique** : `STATS`, `SLOT_STAT` et la formule dans `build`, puis l'onglet Combat.
 
 ## Limites connues
 
-- **Équilibrage réglé contre un joueur automatique simple** (il approche, frappe, roule quand un coup s'arme). Une vraie personne joue mieux ; les valeurs sont dans `combat.js` et se règlent en quelques lignes, après tes essais.
+- **Équilibrage réglé contre un joueur automatique simple** (il approche, frappe, roule quand un coup s'arme). Une vraie personne joue mieux ; les valeurs sont dans `combat.js` et se règlent en quelques lignes, après tes essais. Ce joueur automatique ne sait pas garder ses distances : l'arc et le bâton, qui s'y prêtent, y paraissent plus faibles qu'ils ne le sont (ils ne battent pas le seigneur dans la simulation), à vérifier à la main.
 - **Progression dans le navigateur** : points, or, équipement et record ne suivent pas d'un navigateur à l'autre. C'est la règle de toute la forge (voir `docs/architecture.md`).
 - **Clavier uniquement** : pas de commandes tactiles.
 - **Solo** : le duel entre personnes demande des statistiques validées par le serveur (donc une migration) : roadmap, item 40.

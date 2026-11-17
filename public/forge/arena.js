@@ -16,7 +16,7 @@
     mage: { skin: "#e0b088", hair: "#e8e4da", tunic: "#4a3f9a", apron: "#f0d078", hat: "wizard", beard: true },
     seigneur: { skin: "#c88a60", hair: "#3a2a1c", tunic: "#7a1f2e", apron: "#f0d078", hat: "crown", beard: true, scale: 2 },
   };
-  const SFX = { swing: "blip", "swing-hit": "hammer", hit: "hammer", crit: "coin", shoot: "blip", "bot-shoot": "blip", hurt: "error", kill: "bump", dash: "step", wave: "spawn", clear: "coin", win: "fanfare", lose: "error", summon: "spawn", charge: "bump" };
+  const SFX = { swing: "blip", "swing-hit": "hammer", hit: "hammer", crit: "coin", shoot: "blip", "bot-shoot": "blip", hurt: "error", kill: "bump", dash: "step", wave: "spawn", clear: "coin", win: "fanfare", lose: "error", summon: "spawn", charge: "bump", shock: "bump" };
 
   const dirOf = (f) => (Math.abs(f[0]) > Math.abs(f[1]) ? (f[0] < 0 ? "left" : "right") : f[1] < 0 ? "up" : "down");
 
@@ -86,6 +86,11 @@
     if (scale === 1) S.person(c, Math.round(b.x - 8), Math.round(feetY - T), opts);
     else { c.save(); c.translate(Math.round(b.x), Math.round(feetY)); c.scale(scale, scale); S.person(c, -8, -T, opts); c.restore(); }
     if (b.flash > 0) { c.globalAlpha = 0.55; px(c, b.x - 5 * scale, feetY - 15 * scale, 10 * scale, 15 * scale, "#ffffff"); }
+    // Ralenti par le bâton : teinte glacée et éclats bleus au sol
+    if (b.alive && b.slowT > 0) {
+      c.globalAlpha = 0.42; px(c, b.x - 5 * scale, feetY - 15 * scale, 10 * scale, 15 * scale, "#6ab8ff");
+      c.globalAlpha = 0.85; px(c, b.x - 6 * scale, feetY - 1, 3, 2, "#bfe4ff"); px(c, b.x + 3 * scale, feetY - 2, 3, 2, "#6ab8ff");
+    }
     c.globalAlpha = 1;
     if (!b.alive) return;
     if (b.windup > 0 && b.tell) { px(c, b.x - 1, b.y - 22 * scale, 2, 6, "#ff4a3a"); px(c, b.x - 1, b.y - 14 * scale, 2, 2, "#ff4a3a"); }
@@ -207,6 +212,7 @@
           for (const s of fight.shots) drawShot(c, s);
           for (const f of fight.fx) {
             if (f.kind === "puff") { const k = f.t / f.life; c.globalAlpha = 1 - k; for (let i = 0; i < 6; i++) { const a = i * 1.05; px(c, f.x + Math.cos(a) * (3 + k * 10), f.y + Math.sin(a) * (3 + k * 10) - k * 4, 3, 3, "#f5e9c8"); } c.globalAlpha = 1; }
+            else if (f.kind === "shock") { const k = f.t / f.life, rr = f.r * (0.4 + 0.6 * k); c.globalAlpha = 0.85 * (1 - k); for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI * 2; px(c, Math.round(f.x + Math.cos(a) * rr) - 1, Math.round(f.y + Math.sin(a) * rr * 0.8) - 1, 3, 3, i % 2 ? "#f5e9c8" : "#c9a36a"); } c.globalAlpha = 1; }
             else if (f.kind === "num") { const k = f.t / f.life; c.globalAlpha = 1 - k * k; c.font = f.crit ? "bold 10px monospace" : "bold 8px monospace"; c.textAlign = "center"; c.fillStyle = "#1d1814"; c.fillText(f.text, f.x + 1, f.y - k * 14 + 1); c.fillStyle = f.hero ? "#ff6a5a" : f.crit ? "#ffd37a" : "#ffffff"; c.fillText(f.text, f.x, f.y - k * 14); c.globalAlpha = 1; }
           }
           // Jauges : points de vie et roulade, en haut à gauche, sur la palissade

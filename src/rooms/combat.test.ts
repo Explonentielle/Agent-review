@@ -16,9 +16,10 @@ interface Built {
   total: Record<string, number>;
   slots: Record<string, { rarity: string; stat: string; points: number }>;
   weapon: { type: string; rarity: string; training: boolean; spec: { reach?: number; ranged?: boolean; projSpeed?: number; dmg: number; cd: number } };
-  derived: { maxHp: number; speed: number; damage: number; cooldown: number; crit: number; dashCd: number; goldMult: number };
+  derived: { maxHp: number; speed: number; damage: number; cooldown: number; crit: number; critMult: number; dashCd: number; goldMult: number };
 }
-interface Bot { type: string; x: number; y: number; hp: number; maxHp: number; dmg: number; alive: boolean; windup: number; cd: number; spawnT: number; r: number; tell: unknown; spec: { reach?: number } }
+interface Bot { type: string; x: number; y: number; hp: number; maxHp: number; dmg: number; alive: boolean; windup: number; cd: number; spawnT: number; r: number; tell: unknown; stun: number; kb: unknown; slowT: number; slowMult: number; spec: { reach?: number; boss?: boolean } }
+interface WeaponSpec { name: string; blurb: string; perk: string; dmg: number; cd: number; windup: number; reach?: number; arc?: number; ranged?: boolean; range?: number; projSpeed?: number; critBonus?: number; critMult?: number; maxHits?: number; shock?: { radius: number; mult: number }; slow?: { mult: number; time: number }; stun?: number }
 interface Input { left?: boolean; right?: boolean; up?: boolean; down?: boolean; attack?: boolean; dash?: boolean }
 interface Fight {
   built: Built;
@@ -42,7 +43,7 @@ interface Combat {
   RARITIES: string[];
   RARITY_STAT: Record<string, number>;
   SLOT_STAT: Record<string, string>;
-  WEAPONS: Record<string, { reach?: number; ranged?: boolean; projSpeed?: number; dmg: number; cd: number; windup: number; name: string; blurb: string }>;
+  WEAPONS: Record<string, WeaponSpec>;
   BOTS: Record<string, { weapon: string; rarity: string; hp: number; dmg: number }>;
   WAVES: Array<{ name: string; bots: string[] }>;
   BOUNDS: { x0: number; x1: number; y0: number; y1: number };
@@ -363,5 +364,139 @@ describe("arène : le combat", () => {
     for (let i = 0; i < 100; i++) b.step({ right: true }, C.STEP * 3);
     expect(b.hero.x).toBeCloseTo(a.hero.x, 3);
     expect(b.t).toBeCloseTo(a.t, 3);
+  });
+});
+
+describe("arène : chaque arme a son effet", () => {
+  const W = C.WEAPONS as Record<string, WeaponSpec>;
+  const weapon = (type: string, rarity = "common") => ({ weapon: { type, rarity } });
+  /** Un combat à la vague donnée (la précédente est déclarée finie) : tous les bots sont assommés loin du héros, à nous de poser ceux qui servent. */
+  function setup(type: string, wave = 1): Fight {
+    const f = C.create({ level: 1, seed: 1, equipment: weapon(type) });
+    f.wave = wave - 1; f.state = "between";
+    toFirstWave(f);
+    for (const b of f.bots) { b.x = 40; b.y = 40; b.cd = 99; b.stun = 999; b.hp = b.maxHp = 500; }
+    f.hero.face = [0, -1];
+    return f;
+  }
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  it("les profils suivent l'intention : dague rapide et courte, arc de loin et vite mais faible, lance au milieu", () => {
+    const others = (id: string) => Object.entries(W).filter(([k]) => k !== id).map(([, w]) => w);
+    expect(W["dagger"]!.cd).toBeLessThan(Math.min(...others("dagger").map((w) => w.cd)));
+    expect(W["dagger"]!.reach!).toBeLessThan(Math.min(...others("dagger").filter((w) => !w.ranged).map((w) => w.reach!)));
+    expect(W["bow"]!.range!).toBeGreaterThan(Math.max(...others("bow").map((w) => w.range ?? w.reach!)));
+    expect(W["bow"]!.cd).toBeLessThan(W["sword"]!.cd);
+    expect(W["bow"]!.dmg).toBeLessThan(W["sword"]!.dmg);
+    expect(W["bow"]!.projSpeed!).toBeGreaterThan(W["staff"]!.projSpeed!);
+    // lance : ni la plus faible ni la plus forte, ni la plus rapide ni la plus lente, mais plus longue que l'épée
+    expect(W["spear"]!.dmg).toBeGreaterThan(W["dagger"]!.dmg);
+    expect(W["spear"]!.dmg).toBeLessThan(W["hammer"]!.dmg);
+    expect(W["spear"]!.cd).toBeGreaterThan(W["dagger"]!.cd);
+    expect(W["spear"]!.cd).toBeLessThan(W["hammer"]!.cd);
+    expect(W["spear"]!.reach!).toBeGreaterThan(W["sword"]!.reach!);
+  });
+
+  it("chaque arme annonce un effet à elle, et les quatre effets codés existent", () => {
+    const perks = Object.values(W).map((w) => w.perk);
+    for (const p of perks) expect(p.length).toBeGreaterThan(10);
+    expect(new Set(perks).size).toBe(perks.length);
+    expect(W["dagger"]!.critBonus).toBeGreaterThan(0);
+    expect(W["spear"]!.maxHits).toBeGreaterThanOrEqual(2);
+    expect(W["hammer"]!.shock!.mult).toBeGreaterThan(0);
+    expect(W["staff"]!.slow!.mult).toBeLessThan(1);
+  });
+
+  it("dague : critique de base relevé et plus violent, plafond relevé d'autant ; l'épée reste à 50 %", () => {
+    const dagger = C.build({ level: 1, equipment: weapon("dagger") }).derived, sword = C.build({ level: 1, equipment: weapon("sword") }).derived;
+    expect(dagger.crit).toBeCloseTo(sword.crit + W["dagger"]!.critBonus!, 3);
+    expect(dagger.critMult).toBe(2.2);
+    expect(sword.critMult).toBe(1.6);
+    const maxed = (type: string) => C.build({ level: 99, stats: { chance: 99 }, equipment: weapon(type, "legendary") }).derived.crit;
+    expect(maxed("sword")).toBe(0.5);
+    expect(maxed("dagger")).toBeCloseTo(0.5 + W["dagger"]!.critBonus!, 3);
+  });
+
+  it("dague : sur une cible qui reste là, elle critique bien plus souvent que l'épée", () => {
+    const critRate = (type: string): number => {
+      const f = setup(type), b = f.bots[0]!;
+      let hits = 0, crits = 0;
+      for (let i = 0; i < 60 * 25; i++) {
+        b.x = f.hero.x; b.y = f.hero.y - 12; b.kb = null; b.stun = 999; // la cible ne bouge pas, quoi qu'il arrive
+        f.step({ attack: true });
+        for (const e of f.drain()) { if (e === "crit") { crits++; hits++; } else if (e === "hit") hits++; }
+      }
+      expect(hits, type).toBeGreaterThan(30);
+      return crits / hits;
+    };
+    expect(critRate("dagger")).toBeGreaterThan(0.15);
+    expect(critRate("sword")).toBeLessThan(0.15);
+  });
+
+  it("lance : la poussée transperce les deux premiers ennemis alignés, pas le troisième", () => {
+    const f = setup("spear", 4); // quatre bots : on en aligne trois devant le héros
+    const line = f.bots.slice(0, 3);
+    [16, 28, 40].forEach((gap, i) => { line[i]!.x = f.hero.x; line[i]!.y = f.hero.y - gap; });
+    for (const b of line) expect(dist(b, f.hero) - b.r - f.hero.r, "dans la portée").toBeLessThanOrEqual(W["spear"]!.reach!);
+    for (let i = 0; i < 30; i++) f.step({ attack: true }); // un seul coup
+    expect(line[0]!.hp).toBeLessThan(500);
+    expect(line[1]!.hp).toBeLessThan(500);
+    expect(line[2]!.hp).toBe(500);
+  });
+
+  it("marteau : l'onde de choc touche ce qui est autour de l'impact, à 40 % des dégâts, sans toucher les lointains", () => {
+    const f = setup("hammer", 4);
+    const [front, side, far] = f.bots as [Bot, Bot, Bot];
+    front.x = f.hero.x; front.y = f.hero.y - 16;           // dans l'arc : coup normal
+    side.x = f.hero.x + 28; side.y = f.hero.y - 6;          // hors de l'arc, mais près du point d'impact
+    far.x = f.hero.x + 90; far.y = f.hero.y - 20;           // loin de tout
+    const dx = side.x - f.hero.x, dy = side.y - f.hero.y;
+    expect((dx * 0 + dy * -1) / Math.hypot(dx, dy), "hors de l'arc").toBeLessThan(Math.cos((W["hammer"]!.arc! / 2) * Math.PI / 180));
+    const damage = C.build({ level: 1, equipment: weapon("hammer") }).derived.damage;
+    for (let i = 0; i < 30; i++) f.step({ attack: true });
+    const taken = 500 - front.hp; // le coup direct peut être critique (graine fixe), l'onde de choc jamais
+    expect(Math.min(Math.abs(taken - damage), Math.abs(taken - damage * 1.6))).toBeLessThan(0.6);
+    expect(500 - side.hp).toBeCloseTo(damage * W["hammer"]!.shock!.mult, 0);
+    expect(far.hp).toBe(500);
+    expect(f.drain()).toContain("swing-hit");
+  });
+
+  it("bâton : le trait ralentit le bot touché, mais le seigneur beaucoup moins", () => {
+    const hitBy = (wave: number): Bot => {
+      const f = setup("staff", wave);
+      const b = f.bots.find((x) => (wave === 5 ? x.spec.boss : true))!;
+      b.x = f.hero.x; b.y = f.hero.y - 90; b.stun = 0; // un tir droit devant, la cible peut bouger
+      for (let i = 0; i < 180 && b.slowT === 0; i++) f.step({ attack: true });
+      return b;
+    };
+    const bot = hitBy(1), boss = hitBy(5);
+    expect(bot.slowT).toBeCloseTo(W["staff"]!.slow!.time, 0);
+    expect(bot.slowMult).toBe(W["staff"]!.slow!.mult);
+    expect(boss.slowT).toBeLessThan(bot.slowT);
+    expect(boss.slowMult).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it("un bot ralenti avance vraiment moins vite", () => {
+    const travel = (slowed: boolean): number => {
+      const f = C.create({ level: 1, seed: 1 });
+      toFirstWave(f);
+      const b = f.bots[0]!;
+      for (const o of f.bots.slice(1)) { o.x = 340; o.y = 200; o.stun = 999; o.cd = 99; }
+      b.x = 40; b.y = 40; b.cd = 99;
+      if (slowed) { b.slowT = 5; b.slowMult = 0.6; }
+      const [x0, y0] = [b.x, b.y];
+      for (let i = 0; i < 30; i++) f.step({});
+      return Math.hypot(b.x - x0, b.y - y0);
+    };
+    expect(travel(true)).toBeGreaterThan(0);
+    expect(travel(true)).toBeLessThan(travel(false) * 0.75);
+  });
+
+  it("l'arc touche de très loin et vite, avec des flèches plus rapides que le trait du bâton", () => {
+    const f = setup("bow");
+    const b = f.bots[0]!;
+    b.x = f.hero.x; b.y = f.hero.y - 150; b.stun = 0; b.cd = 99;
+    for (let i = 0; i < 120 && b.hp === 500; i++) f.step({ attack: true });
+    expect(b.hp).toBeLessThan(500);
   });
 });

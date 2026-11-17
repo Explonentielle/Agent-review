@@ -478,7 +478,8 @@
   /* ---------- l'arène : le Maître d'armes explique, puis on combat des bots avec son équipement ---------- */
   const ARENA_HELP = [
     "Chaque niveau te donne un point à répartir entre quatre caractéristiques : Force pour les dégâts, Agilité pour la vitesse, Vitalité pour les points de vie, Chance pour les critiques et l'or.",
-    "Ton équipement compte aussi : l'arme donne de la Force, la cape de l'Agilité, le tablier de la Vitalité, le couvre-chef de la Chance. Plus l'objet est rare, plus il donne. Chaque arme se joue à sa façon.",
+    "Ton équipement compte aussi : l'arme donne de la Force, la cape de l'Agilité, le tablier de la Vitalité, le couvre-chef de la Chance. Plus l'objet est rare, plus il donne.",
+    "Chaque arme a son effet. La dague est rapide, très courte, et frappe souvent en critique. La lance transperce deux ennemis alignés. L'arc tire vite et loin, mais faiblement. Le marteau assomme et secoue le sol autour de l'impact. Le bâton ralentit ceux qu'il touche. La hache balaie tout devant toi, et l'épée reste équilibrée.",
     "Cinq vagues de bots, puis le Seigneur des braises. Tu gagnes un peu d'or, jamais d'objet rare : ceux-là viennent de ton vrai travail. Les points se règlent dans ton profil, onglet Combat.",
   ];
   async function arenaTalk(npc) {
@@ -747,7 +748,8 @@
     const worn = Object.entries(b.slots).map(([slot, sl]) => `${C.SLOT_NAME[slot]} ${items.rarityName(sl.rarity).toLowerCase()} : +${sl.points} ${C.STATS.find((x) => x.id === sl.stat).name.toLowerCase()}`);
     return `<div class="fg-pf">
       <div class="fg-box fg-pf-head"><div class="fg-pf-level"><span><b>${left}</b> point${left > 1 ? "s" : ""} à répartir</span><span>1 point par niveau (niveau ${h.level})</span></div>
-        <small class="fg-note">${left > 0 ? "Plus tu montes de niveau en travaillant, plus tu en gagnes." : "Tous tes points sont répartis."}</small></div>
+        <small class="fg-note">${left > 0 ? "Plus tu montes de niveau en travaillant, plus tu en gagnes." : "Tous tes points sont répartis."}</small>
+        <small class="fg-note"><b>${esc(b.weapon.spec.name)}</b>${b.weapon.training ? " d'entraînement" : ""} : ${esc(b.weapon.spec.perk)}</small></div>
       <div class="fg-box fg-stats">${rows}</div>
       <div class="fg-tiles">${tiles}</div>
       <h4>Équipement</h4>
