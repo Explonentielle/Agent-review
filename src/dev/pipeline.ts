@@ -15,6 +15,7 @@ import { loadSystemPrompt } from "../prompts.js";
 import type { ProjectSettings, Settings } from "../settings/schema.js";
 import type { SettingsStore } from "../settings/store.js";
 import { buildAttachmentsBlock, buildDevPrompt, buildFollowupPrompt } from "./context.js";
+import { splitInstructions } from "./reviewFeedback.js";
 import { Journal } from "./journal.js";
 import { DevResultSchema, runDevAgent, type DevEngineOutput, type DevResult } from "./engine.js";
 import { FileGuardError, checkChangedFiles } from "./fileGuard.js";
@@ -383,11 +384,14 @@ export function formatDevReport(result: DevResult, changedFiles: string[]): stri
 
 /** Commentaire posté sur la MR après une reprise. */
 export function formatFollowupNote(instructions: string, result: DevResult, changedFiles: string[]): string {
+  // La relecture de l'outil n'est jamais recopiée sur la MR : seule la note de la personne l'est
+  const { note, review } = splitInstructions(instructions);
   return [
     "🤖 **Reprise par un agent IA** : nouveau commit sur cette MR, à relire.",
     "",
     "**Consignes :**",
-    ...instructions.split("\n").map((l) => `> ${l}`),
+    ...note.split("\n").map((l) => `> ${l}`),
+    ...(review ? ["> (Les points de la relecture avant fusion de l'outil ont aussi été pris en compte.)"] : []),
     "",
     `**Ce qui a changé :** ${result.summary}`,
     "",

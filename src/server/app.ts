@@ -30,6 +30,9 @@ import { computeHero, REVIEW_DONE, roomQuests, roomXp, TASK_FORGED } from "../ga
 import { computePrestige, computeProgress } from "../game/progress.js";
 import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
 import { registerPiece, summarizePieces } from "../dev/pieceRoutes.js";
+import type { DevTaskRow } from "../db/devTasks.js";
+import { followupInstructions } from "../dev/reviewFeedback.js";
+import { ReviewResultSchema } from "../review/schema.js";
 import { registerRooms } from "../rooms/routes.js";
 import { registerUserRooms } from "../rooms/userRoutes.js";
 import { createRoomStore } from "../rooms/userRooms.js";
@@ -64,6 +67,8 @@ export interface ServerDeps extends TenantDeps {
 const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal", "scribeRunner"]);
 
 type IdParams = { Params: { id: string } };
+/** Une tâche terminée qui a ouvert une MR : ce qu'il faut pour la reprendre. */
+type FollowupOrigin = DevTaskRow & { branch: string; mr_iid: number; mr_url: string };
 
 /** Colonne de l'onglet Tickets d'après les labels du workflow réglés dans le dashboard. */
 export function classifyIssue(labels: string[], workflow: Settings["workflow"]): "techValidation" | "inProgress" | "todo" | "other" {
@@ -532,37 +537,71 @@ export function buildServer(base: ServerDeps) {
         return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
       }
 
-      // La reprise garde les pièces jointes de la tâche reprise (captures, maquettes) et peut en recevoir de nouvelles
-      const ids = attachmentIds(req.body?.attachments);
-      const copyFrom: AttachmentOwner[] = [{ task: origin.id }];
-      await planAttachments(deps, copyFrom, ids);
-
-      const id = await deps.tasks.insert({
-        source: origin.source,
-        projectId: origin.project_id,
-        projectPath: origin.project_path,
-        issueIid: origin.issue_iid,
-        issueTitle: origin.issue_title,
-        issueUrl: origin.issue_url,
-        extraInstructions: instructions,
-        followup: {
-          parentId: origin.id,
-          branch: origin.branch,
-          baseBranch: origin.base_branch,
-          targetBranch: origin.target_branch,
-          mrIid: origin.mr_iid,
-          mrUrl: origin.mr_url,
-        },
-      });
-      const files = await giveAttachments(deps, id, { copyFrom, ids });
-      await deps.tasks.addEvent(id, "step", `Reprise de la MR !${origin.mr_iid} (tâche #${origin.id}), en attente de l'agent`);
-      if (files.length > 0) await deps.tasks.addEvent(id, "step", `Pièces jointes : ${files.join(", ")}`);
-      deps.enqueueDev(id);
+      const id = await startFollowup(origin as FollowupOrigin, instructions, req.body?.attachments);
       return { id };
     } catch (err) {
       return failAttachment(reply, err, fail);
     }
   });
+
+  /**
+   * Corriger avec la relecture : relance l'agent sur la branche de la MR avec les points de la relecture du commit ACTUEL. Les points viennent de la base,
+   * jamais du navigateur, et sont remis à l'agent comme contenu non fiable (voir `reviewFeedback.ts`). La personne peut ajouter une note.
+   */
+  app.post<IdParams & { Body: { note?: string; attachments?: string[] } | null }>("/api/tasks/:id/fix-review", async (req, reply) => {
+    try {
+      const origin = await deps.tasks.get(Number(req.params.id));
+      if (!origin) return reply.code(404).send({ error: "Tâche introuvable" });
+      if (!origin.branch || !origin.mr_iid || !origin.mr_url || origin.status === "running" || origin.status === "queued") {
+        return reply.code(400).send({ error: "Seule une tâche terminée liée à une MR peut être reprise" });
+      }
+      const project = await deps.settings.getProject(origin.source, origin.project_id);
+      if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
+      if (await deps.tasks.findActive(origin.source, origin.project_id, origin.issue_iid)) return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
+      const mr = await deps.forges.get(origin.source).connector.getChangeRequest(origin.project_id, origin.mr_iid);
+      if (mr.state !== "opened") return reply.code(409).send({ error: mr.state === "merged" ? "La MR est déjà fusionnée." : "La MR est fermée." });
+      const latest = (await deps.reviews.listForMergeRequest(origin.source, origin.project_id, origin.mr_iid))[0];
+      if (!latest || !latest.result_json) return reply.code(409).send({ error: "Aucune relecture terminée : fais d'abord relire la pièce." });
+      if (latest.head_sha !== mr.headSha) return reply.code(409).send({ error: "La MR a reçu un nouveau commit depuis la relecture : fais relire la version actuelle." });
+      const parsed = ReviewResultSchema.safeParse(JSON.parse(latest.result_json));
+      if (!parsed.success) return reply.code(409).send({ error: "Le résultat de la relecture est illisible : relance-la." });
+      if (parsed.data.findings.length === 0 && parsed.data.questions_for_author.length === 0) return reply.code(400).send({ error: "La relecture n'a relevé aucun point à corriger." });
+      const note = typeof req.body?.note === "string" ? req.body.note.slice(0, 4000) : "";
+      const id = await startFollowup(origin as FollowupOrigin, followupInstructions(note, parsed.data), req.body?.attachments);
+      return { id };
+    } catch (err) {
+      return failAttachment(reply, err, fail);
+    }
+  });
+
+  /** Crée et met en file la tâche de reprise d'une tâche terminée (même branche, même MR). Les pièces jointes de la tâche reprise sont gardées. */
+  async function startFollowup(origin: FollowupOrigin, instructions: string, attachments: unknown): Promise<number> {
+    const ids = attachmentIds(attachments);
+    const copyFrom: AttachmentOwner[] = [{ task: origin.id }];
+    await planAttachments(deps, copyFrom, ids);
+    const id = await deps.tasks.insert({
+      source: origin.source,
+      projectId: origin.project_id,
+      projectPath: origin.project_path,
+      issueIid: origin.issue_iid,
+      issueTitle: origin.issue_title,
+      issueUrl: origin.issue_url,
+      extraInstructions: instructions,
+      followup: {
+        parentId: origin.id,
+        branch: origin.branch,
+        baseBranch: origin.base_branch,
+        targetBranch: origin.target_branch,
+        mrIid: origin.mr_iid,
+        mrUrl: origin.mr_url,
+      },
+    });
+    const files = await giveAttachments(deps, id, { copyFrom, ids });
+    await deps.tasks.addEvent(id, "step", `Reprise de la MR !${origin.mr_iid} (tâche #${origin.id}), en attente de l'agent`);
+    if (files.length > 0) await deps.tasks.addEvent(id, "step", `Pièces jointes : ${files.join(", ")}`);
+    deps.enqueueDev(id);
+    return id;
+  }
 
   app.post<IdParams>("/api/tasks/:id/cancel", async (req) => {
     const id = Number(req.params.id);

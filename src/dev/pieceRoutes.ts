@@ -91,13 +91,20 @@ export function explainMergeError(kind: ForgeKind, err: unknown): unknown {
   return err;
 }
 
-/** Compte les points de la review par sévérité (null si la review n'a pas de résultat). */
-function summarize(review: ReviewRow): { verdict: string; summary: string; blocking: number; important: number; suggestion: number } | null {
+/** Un point de la relecture, tel que l'affiche la forge (texte non fiable : il est échappé à l'affichage et jamais exécuté). */
+export interface FindingView { severity: "blocking" | "important" | "suggestion"; confirmed: boolean; title: string; location: string; explanation: string; suggestion: string | null }
+
+/** Compte les points de la review par sévérité et les donne un par un, bornés (null si la review n'a pas de résultat). */
+function summarize(review: ReviewRow): { verdict: string; summary: string; blocking: number; important: number; suggestion: number; findings: FindingView[]; questions: string[] } | null {
   if (!review.result_json) return null;
   try {
     const r = JSON.parse(review.result_json) as ReviewResult;
     const n = (s: "blocking" | "important" | "suggestion") => r.findings.filter((f) => f.severity === s).length;
-    return { verdict: r.verdict, summary: r.summary.slice(0, 400), blocking: n("blocking"), important: n("important"), suggestion: n("suggestion") };
+    const order = { blocking: 0, important: 1, suggestion: 2 } as const;
+    const findings = [...r.findings].sort((a, b) => order[a.severity] - order[b.severity]).slice(0, 30).map((f) => ({
+      severity: f.severity, confirmed: f.confirmed, title: f.title.slice(0, 200), location: f.location.slice(0, 200), explanation: f.explanation.slice(0, 1200), suggestion: f.suggestion?.slice(0, 800) ?? null,
+    }));
+    return { verdict: r.verdict, summary: r.summary.slice(0, 1200), blocking: n("blocking"), important: n("important"), suggestion: n("suggestion"), findings, questions: r.questions_for_author.slice(0, 10).map((q) => q.slice(0, 400)) };
   } catch {
     return null;
   }
@@ -150,7 +157,7 @@ export function registerPiece(app: FastifyInstance, ctx: PieceContext): void {
           ...(checksError ? { checksError } : {}),
         })
       : { state: "blocked", ok: false, reasons: ["Le projet n'est plus configuré dans l'outil (Paramètres > Projets)."] };
-    return { connector, mr, latest, checks, readiness };
+    return { connector, mr, latest, checks, readiness, project };
   }
 
   /**
@@ -209,12 +216,19 @@ export function registerPiece(app: FastifyInstance, ctx: PieceContext): void {
   app.get<{ Params: { id: string } }>("/api/tasks/:id/piece", async (req, reply) => {
     try {
       const task = await pieceTask(Number(req.params.id));
-      const { mr, latest, checks, readiness } = await readPiece(task);
+      const { mr, latest, checks, readiness, project } = await readPiece(task);
+      const review = latest ? { id: latest.id, status: latest.status, current: latest.head_sha === mr.headSha, error: latest.error, ...(summarize(latest) ?? {}) } : null;
+      // Un agent est-il déjà en train de reprendre cette pièce ? Alors on ne propose pas de nouvelle reprise.
+      const active = await deps.tasks.findActive(task.source, task.project_id, task.issue_iid);
+      const points = (review?.findings?.length ?? 0) + (review?.questions?.length ?? 0);
+      const canFix = mr.state === "opened" && Boolean(project?.devEnabled) && !active && review !== null && review.current === true && points > 0 && !["queued", "running", "detected", "error"].includes(review.status);
       return {
         taskId: task.id,
         source: task.source,
         mr: { iid: mr.iid, url: mr.url, title: mr.title, state: mr.state, draft: mr.draft, headSha: mr.headSha, sourceBranch: mr.sourceBranch, targetBranch: mr.targetBranch },
-        review: latest ? { id: latest.id, status: latest.status, current: latest.head_sha === mr.headSha, error: latest.error, ...(summarize(latest) ?? {}) } : null,
+        review,
+        followup: active ? { id: active.id, status: active.status } : null,
+        canFix,
         checks: {
           total: checks.length,
           failed: checks.filter((c) => ["failed", "canceled", "cancelled"].includes(c.status.toLowerCase())).length,

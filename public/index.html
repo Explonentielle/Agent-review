@@ -1061,9 +1061,16 @@ function pieceHtml(p, taskId) {
         : rv.status === "error" ? pill("red", "La relecture a échoué")
           : rv.status === "dismissed" ? pill("orange", "Relecture ignorée") : pill("green", "Relecture OK");
   const counts = rv && rv.verdict ? ` · ${rv.blocking} bloquant${rv.blocking > 1 ? "s" : ""}, ${rv.important} important${rv.important > 1 ? "s" : ""}, ${rv.suggestion} suggestion${rv.suggestion > 1 ? "s" : ""}` : "";
-  const reviewBtn = p.mr.state !== "opened" || running ? ""
+  const reviewBtn = p.mr.state !== "opened" || running || p.followup ? ""
     : !rv || stale ? `<button class="btn primary" data-act="piece-review">Faire relire par le Maître juré</button>`
       : `<button class="btn ghost" data-act="piece-review" data-again="1">Relire à nouveau</button>`;
+  const sev = { blocking: ["red", "Bloquant"], important: ["orange", "Important"], suggestion: ["gray", "Suggestion"] };
+  const findings = rv && rv.findings && rv.findings.length && !running
+    ? `<div style="display:grid;gap:8px;margin:8px 0">${rv.findings.map((f) => `<div class="note" style="border-left:4px solid var(--border-strong);padding:6px 10px"><p>${pill(sev[f.severity]?.[0] ?? "gray", (sev[f.severity]?.[1] ?? f.severity) + (f.confirmed ? "" : " · à vérifier"))} <b>${esc(f.title)}</b> <code>${esc(f.location)}</code></p><p>${esc(f.explanation)}</p>${f.suggestion ? `<p>Suggestion : ${esc(f.suggestion)}</p>` : ""}</div>`).join("")}</div>`
+    : "";
+  const questions = rv && rv.questions && rv.questions.length && !running ? `<p class="note"><b>Questions de la relecture</b></p><ul class="note" style="margin:0 0 8px 18px">${rv.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul>` : "";
+  const fixBtn = p.followup ? `<p class="note">Un agent reprend la pièce avec la relecture (tâche <a href="#dev/${esc(p.followup.id)}">#${esc(p.followup.id)}</a>).</p>`
+    : p.canFix ? `<button class="btn primary" data-act="piece-fix">Corriger avec la relecture</button>` : "";
   const ci = p.checks.total === 0 ? "aucune intégration continue" : p.checks.failed ? `${p.checks.failed} en échec` : p.checks.pending ? `${p.checks.pending} en cours` : "verte";
   const merge = p.mr.state === "merged" ? `<div class="callout ok">${ICON.ok}<h3>Fusionnée dans <code>${esc(p.mr.targetBranch)}</code></h3><p>Le code est sur la branche principale du projet. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p></div>`
     : p.mr.state === "closed" ? `<p class="note">La MR est fermée : elle ne peut plus être fusionnée.</p>`
@@ -1071,8 +1078,8 @@ function pieceHtml(p, taskId) {
          ${p.readiness.ok ? "" : `<ul class="note" style="margin:8px 0 0 18px">${p.readiness.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`}`;
   return `<p>${stateTag} <code>${esc(p.mr.sourceBranch)}</code> vers <code>${esc(p.mr.targetBranch)}</code></p>
     <p><b>1. Relecture</b> ${reviewTag}${esc(counts)} ${stale ? '<span class="note">La MR a changé depuis la dernière relecture.</span>' : ""}</p>
-    ${rv && rv.summary && !running ? `<p class="note">${esc(rv.summary)}</p>` : ""}
-    <div class="actions-inline">${reviewBtn}${rv ? `<a class="btn ghost" href="#reviews/${rv.id}">Lire la revue complète</a>` : ""}</div>
+    ${rv && rv.summary && !running ? `<p class="note">${esc(rv.summary)}</p>` : ""}${findings}${questions}
+    <div class="actions-inline">${fixBtn}${reviewBtn}${rv ? `<a class="btn ghost" href="#reviews/${rv.id}">Lire la revue complète</a>` : ""}</div>
     <p class="note">La relecture ne publie rien sur la MR : c'est un contrôle avant fusion.</p>
     <p><b>2. Intégration continue</b> : ${ci}</p>
     <p><b>3. Fusion</b></p>${merge}`;
@@ -2029,6 +2036,14 @@ document.addEventListener("click", async (e) => {
     toast("Reprise lancée.");
     refreshHeader();
     return go(`#dev/${res.id}`);
+  }
+  if (act === "piece-fix") {
+    try {
+      await api(`/api/tasks/${state.taskId}/fix-review`, {});
+      toast("Un agent reprend la pièce avec la relecture…");
+      loadPiece(state.taskId);
+    } catch (err) { toast(err.message, true); }
+    return;
   }
   if (act === "piece-review") {
     try {

@@ -376,3 +376,14 @@ span.fg-type { cursor: default; }
 .fg-aff { display: flex !important; align-items: baseline; gap: 6px; color: #ffd37a !important; white-space: normal !important; }
 .fg-aff i { flex: none; width: 6px; height: 6px; background: #ffb02e; transform: rotate(45deg) translateY(-1px); }
 .fg-play-aff { color: #ffd37a; font-size: .85em; }
+
+/* Relecture de la pièce : les points, et la reprise de l'agent avec la relecture */
+.fg-findings { display: grid; gap: 8px; margin: 8px 0; }
+.fg-finding { border: 2px solid var(--border); border-left-width: 5px; border-radius: 8px; background: var(--surface-2); padding: 8px 10px; }
+.fg-finding.sev-blocking { border-left-color: #e0453a; }
+.fg-finding.sev-important { border-left-color: #e8a05a; }
+.fg-finding.sev-suggestion { border-left-color: #7a808c; }
+.fg-finding p { margin: 4px 0 0; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fg-finding code { font-size: 11px; overflow-wrap: anywhere; }
+.fg-fixbox { display: grid; gap: 8px; margin: 10px 0; padding: 10px; border: 2px dashed var(--border-strong); border-radius: 10px; }
+.fg-fixbox textarea { width: 100%; margin-top: 4px; font: inherit; background: var(--surface-2); color: inherit; border: 2px solid var(--border); border-radius: 8px; padding: 6px 8px; resize: vertical; }

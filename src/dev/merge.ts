@@ -58,7 +58,7 @@ export function mergeReadiness(f: PieceFacts): Readiness {
   if (!f.review) reasons.push("Aucune review : lance d'abord la relecture par le Maître juré.");
   else if (f.review.headSha !== f.mr.headSha) reasons.push("La MR a changé depuis la dernière review : relance la relecture sur la version actuelle.");
   else if (REVIEW_PENDING.includes(f.review.status)) reasons.push("La review est en cours : attends son résultat.");
-  else if (f.review.status === "needs_human") reasons.push("La review a relevé des points qui demandent ton analyse : lis-la, corrige avec « Reprendre la MR », ou fusionne chez la forge si tu les acceptes.");
+  else if (f.review.status === "needs_human") reasons.push("La review a relevé des points qui demandent ton analyse : lis-la, corrige avec « Corriger avec la relecture » (ou « Reprendre la MR » avec tes consignes), ou fusionne chez la forge si tu les acceptes.");
   else if (f.review.status === "error") reasons.push("La review a échoué : relance-la.");
   else if (f.review.status === "dismissed") reasons.push("La review a été ignorée : relance-la.");
 

@@ -4,6 +4,7 @@
   const S = window.ForgeSprites, A = window.ForgeAudio;
   let game = null;
   let current = null; // { id, params, def, el, sel }
+  let fixNote = ""; // la consigne en plus de « Corriger avec la relecture », gardée quand la fenêtre se redessine
 
   const xpFloor = (level) => 25 * level * (level - 1);
   const pct = (n) => `<div class="fg-pbar"><i style="width:${Math.max(0, Math.min(100, n))}%"></i></div>`;
@@ -266,10 +267,21 @@
         const running = rv && ["queued", "running", "detected"].includes(rv.status);
         const stale = rv && !rv.current && !running;
         const counts = rv && rv.verdict ? `${rv.blocking ? `<b>${rv.blocking}</b> bloquant${rv.blocking > 1 ? "s" : ""} · ` : ""}${rv.important ? `<b>${rv.important}</b> important${rv.important > 1 ? "s" : ""} · ` : ""}<b>${rv.suggestion}</b> suggestion${rv.suggestion > 1 ? "s" : ""}` : "";
-        const reviewBtn = p.mr.state !== "opened" ? ""
+        const reviewBtn = p.mr.state !== "opened" || p.followup ? ""
           : running ? ""
             : !rv || stale ? `<button type="button" class="fg-btn" data-fg-piece-review="${taskId}">Faire relire par le Maître juré</button>`
               : `<button type="button" class="fg-btn ghost" data-fg-piece-review="${taskId}" data-again="1">Relire à nouveau</button>`;
+        // Les points de la relecture (texte non fiable, échappé) : sévérité, titre, emplacement, explication, suggestion
+        const sev = { blocking: ["Bloquant", "warn"], important: ["Important", "warn"], suggestion: ["Suggestion", ""] };
+        const findingsHtml = rv && rv.findings && rv.findings.length && !running
+          ? `<div class="fg-findings">${rv.findings.map((f) => `<div class="fg-finding sev-${esc(f.severity)}"><div class="fg-finding-head"><span class="fg-tag ${sev[f.severity]?.[1] ?? ""}">${esc(sev[f.severity]?.[0] ?? f.severity)}${f.confirmed ? "" : " · à vérifier"}</span> <b>${esc(f.title)}</b> <code>${esc(f.location)}</code></div><p>${esc(f.explanation)}</p>${f.suggestion ? `<p class="fg-note">Suggestion : ${esc(f.suggestion)}</p>` : ""}</div>`).join("")}</div>`
+          : "";
+        const questionsHtml = rv && rv.questions && rv.questions.length && !running ? `<p class="fg-note"><b>Questions de la relecture</b></p><ul class="fg-reasons">${rv.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul>` : "";
+        const fixBox = p.followup
+          ? `<div class="fg-done"><b>Un apprenti reprend la pièce.</b> Il corrige selon la relecture (tâche #${esc(p.followup.id)}) ; cette fenêtre se met à jour toute seule. Ensuite, fais relire la nouvelle version.</div>`
+          : p.canFix
+            ? `<div class="fg-fixbox"><label class="fg-note">Une consigne en plus (facultatif)<textarea data-fg-fixnote rows="2" maxlength="4000" placeholder="Par exemple : corrige surtout le premier point">${esc(fixNote)}</textarea></label><div class="fg-inline"><button type="button" class="fg-btn" data-fg-piece-fix="${taskId}">Corriger avec la relecture</button></div><p class="fg-note">Un apprenti reprend la même branche avec les points ci-dessus (il vérifie chacun avant de corriger), pousse un nouveau commit sur la MR, puis tu fais relire la nouvelle version.</p></div>`
+            : "";
         const ci = p.checks.total === 0 ? "Aucune intégration continue" : p.checks.failed ? `<span class="fg-fail">${p.checks.failed} en échec</span>` : p.checks.pending ? `${p.checks.pending} en cours` : "Verte";
         const reasons = !p.readiness.ok && p.mr.state === "opened" ? `<ul class="fg-reasons">${p.readiness.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : "";
         const mergeBox = p.mr.state === "merged" ? `<div class="fg-done"><b>Fusionnée dans ${esc(p.mr.targetBranch)}.</b> Le code est sur la branche principale du projet. La mise en ligne se fait ensuite comme d'habitude pour ce projet.</div>`
@@ -282,7 +294,7 @@
               <p><span class="fg-tag ${stateTag[1]}">${stateTag[0]}</span> <code>${esc(p.mr.sourceBranch)}</code> vers <code>${esc(p.mr.targetBranch)}</code> · <a href="${esc(p.mr.url)}" target="_blank" rel="noopener noreferrer">ouvrir la MR</a></p></div>
             <h4>1. Relecture par le Maître juré</h4>
             <p><span class="fg-tag ${reviewLabel[1]}">${reviewLabel[0]}</span> ${stale ? `<span class="fg-note">La MR a changé depuis la dernière relecture.</span>` : ""}</p>
-            ${rv && rv.summary && !running ? `<p class="fg-note">${esc(rv.summary)}</p>` : ""}${counts ? `<p class="fg-note">${counts}</p>` : ""}
+            ${rv && rv.summary && !running ? `<p class="fg-note">${esc(rv.summary)}</p>` : ""}${counts ? `<p class="fg-note">${counts}</p>` : ""}${findingsHtml}${questionsHtml}${fixBox}
             <div class="fg-inline">${reviewBtn}${rv ? `<button type="button" class="fg-btn ghost" data-fg-review="${rv.id}">Lire la revue complète</button>` : ""}</div>
             <p class="fg-note">La relecture ne publie rien sur la MR : c'est un contrôle avant fusion.</p>
             <h4>2. Intégration continue</h4><p>${ci}</p>
@@ -290,7 +302,7 @@
           after: () => {
             clearTimeout(current?.pollTimer);
             // Statut en direct : toutes les 3 s pendant une relecture, toutes les 6 s sinon, tant que la MR est ouverte
-            if (p.mr.state === "opened" && current) current.pollTimer = setTimeout(() => { if (current?.id === "piece") render(); }, running ? 3000 : 6000);
+            if (p.mr.state === "opened" && current) current.pollTimer = setTimeout(function tick() { if (current?.id !== "piece") return; if (document.activeElement?.matches?.("[data-fg-fixnote]")) { current.pollTimer = setTimeout(tick, 3000); return; } render(); }, running || p.followup ? 3000 : 6000);
           },
           before: () => clearTimeout(current?.pollTimer),
         };
@@ -411,6 +423,19 @@
     } catch (err) { game.banner(err.message); A.sfx.error(); }
   }
 
+  /** Relance l'agent sur la MR avec les points de la relecture (lus par le serveur) et, si la personne en a écrit une, sa consigne. */
+  async function fixPiece(taskId) {
+    const note = (current?.el?.querySelector("[data-fg-fixnote]")?.value ?? fixNote).trim();
+    try {
+      await api(`/api/tasks/${taskId}/fix-review`, { note });
+      fixNote = "";
+      A.sfx.select();
+      game.banner("Un apprenti reprend la pièce avec la relecture…");
+      game.refresh();
+      render();
+    } catch (err) { game.banner(err.message); A.sfx.error(); render(); }
+  }
+
   /** Fusionne la pièce dans la branche cible du projet, après confirmation. Le serveur revérifie toutes les règles. */
   async function mergePiece(taskId, target) {
     const ok = await ask({
@@ -528,6 +553,7 @@
     back.className = "fg-popup-back";
     back.innerHTML = `<div class="fg-popup ${def.wide ? "wide" : ""}" role="dialog" aria-modal="true"><button type="button" class="fg-x" aria-label="Fermer"></button><h3>…</h3><div class="fg-pbody"><p class="fg-note">Un instant…</p></div></div>`;
     back.addEventListener("click", onClick);
+    back.addEventListener("input", (ev) => { if (ev.target.matches?.("[data-fg-fixnote]")) fixNote = ev.target.value; });
     back.addEventListener("input", (ev) => { if (current?.id === "scribe") scribe.handleInput(ev); else if (current?.id === "architect") architect.handleInput(ev); });
     document.querySelector(".fg-popups").append(back);
     current = { id, params, def, el: back, sel: undefined };
@@ -598,6 +624,7 @@
     if ((el = by("data-fg-relaunch"))) return relaunchWorker(el.dataset.fgRelaunch, el);
     if ((el = by("data-fg-unpin"))) return unpinWorker(el.dataset.fgUnpin);
     if ((el = by("data-fg-piece-review"))) return reviewPiece(el.dataset.fgPieceReview, el.dataset.again === "1");
+    if ((el = by("data-fg-piece-fix"))) return fixPiece(el.dataset.fgPieceFix);
     if ((el = by("data-fg-piece-merge"))) return el.disabled ? undefined : mergePiece(el.dataset.fgPieceMerge, el.dataset.target);
     if ((el = by("data-fg-piece"))) { open("piece", { taskId: el.dataset.fgPiece }, game); return; }
     if ((el = by("data-fg-scribe"))) { if (el.dataset.fgScribe) scribe.focus(el.dataset.fgScribe); open("scribe", {}, game); return; }
