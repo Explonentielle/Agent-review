@@ -55,7 +55,7 @@ export function mergeReadiness(f: PieceFacts): Readiness {
     reasons.push(`La MR vise « ${f.mr.targetBranch} » mais le projet est réglé sur « ${f.projectTargetBranch} » : l'outil ne fusionne que vers la branche cible du projet.`);
   }
 
-  if (!f.review) reasons.push("Aucune review : lance d'abord la relecture par le Maître de fusion.");
+  if (!f.review) reasons.push("Aucune review : lance d'abord la relecture par le Maître juré.");
   else if (f.review.headSha !== f.mr.headSha) reasons.push("La MR a changé depuis la dernière review : relance la relecture sur la version actuelle.");
   else if (REVIEW_PENDING.includes(f.review.status)) reasons.push("La review est en cours : attends son résultat.");
   else if (f.review.status === "needs_human") reasons.push("La review a relevé des points qui demandent ton analyse : lis-la, corrige avec « Reprendre la MR », ou fusionne chez la forge si tu les acceptes.");

@@ -141,7 +141,7 @@
       },
     },
 
-    /** Le Maître de fusion : les pièces forgées par les agents (à relire, puis fusionner) et les revues de demandes de fusion. */
+    /** Le Maître juré : les pièces forgées par les agents (à relire, puis fusionner) et les revues de demandes de fusion. */
     reviews: {
       wide: true,
       live: true,
@@ -163,12 +163,12 @@
             <div class="fg-inline">${buttons}</div></div>`;
         };
         const piecesHtml = pieces.length
-          ? `<h4>Pièces forgées par tes apprentis (${pieces.length})</h4><p class="fg-note">Les demandes de fusion que tes agents ont ouvertes. Fais-les relire par le Maître de fusion, puis fusionne-les dans la branche du projet.</p>${pieces.map(pieceRow).join("")}`
+          ? `<h4>Pièces forgées par tes apprentis (${pieces.length})</h4><p class="fg-note">Les demandes de fusion que tes agents ont ouvertes. Fais-les relire par le Maître juré, puis fusionne-les dans la branche du projet.</p>${pieces.map(pieceRow).join("")}`
           : `<h4>Pièces forgées par tes apprentis</h4><p class="fg-note">Aucune pièce n'attend. Quand un apprenti ouvre une demande de fusion, elle apparaît ici.</p>`;
         const revuesHtml = sorted.length
           ? `<h4>Revues des demandes de fusion</h4><p class="fg-note">Les demandes de fusion que tes agents ont contrôlées. Clique pour lire la revue dans le tableau de bord.</p>${sorted.slice(0, 14).map((r) => { const [t, c] = label[r.status] ?? [r.status, ""]; return `<button type="button" class="fg-ticket link" data-fg-review="${r.id}"><div><b>${esc(r.mr_title)}</b><small>${esc(r.project_path)} · ${esc(r.author)}</small></div><span class="fg-tag ${c}">${esc(t)}</span></button>`; }).join("")}`
           : `<h4>Revues des demandes de fusion</h4><p class="fg-note">Aucune revue pour l'instant. Elles arrivent quand une demande de fusion te désigne comme relecteur.</p>`;
-        return { title: "Le Maître de fusion", html: piecesHtml + revuesHtml };
+        return { title: "Le Maître juré", html: piecesHtml + revuesHtml };
       },
     },
 
@@ -251,7 +251,7 @@
       },
     },
 
-    /** La pièce : la MR de l'agent. Relecture par le Maître de fusion, état de la CI, puis fusion dans la branche cible du projet. */
+    /** La pièce : la MR de l'agent. Relecture par le Maître juré, état de la CI, puis fusion dans la branche cible du projet. */
     piece: {
       wide: true,
       async render({ taskId }) {
@@ -259,7 +259,7 @@
         const stateTag = p.mr.state === "merged" ? ["Fusionnée", "ok"] : p.mr.state === "closed" ? ["Fermée", "warn"] : p.mr.draft ? ["Brouillon", ""] : ["Prête", "ok"];
         const rv = p.review;
         const reviewLabel = !rv ? ["Pas encore relue", ""]
-          : ["queued", "running", "detected"].includes(rv.status) ? ["Le Maître de fusion relit…", ""]
+          : ["queued", "running", "detected"].includes(rv.status) ? ["Le Maître juré relit…", ""]
             : rv.status === "needs_human" ? ["Des points à analyser", "warn"]
               : rv.status === "error" ? ["La relecture a échoué", "warn"]
                 : rv.status === "dismissed" ? ["Relecture ignorée", "warn"] : ["Relecture OK", "ok"];
@@ -268,7 +268,7 @@
         const counts = rv && rv.verdict ? `${rv.blocking ? `<b>${rv.blocking}</b> bloquant${rv.blocking > 1 ? "s" : ""} · ` : ""}${rv.important ? `<b>${rv.important}</b> important${rv.important > 1 ? "s" : ""} · ` : ""}<b>${rv.suggestion}</b> suggestion${rv.suggestion > 1 ? "s" : ""}` : "";
         const reviewBtn = p.mr.state !== "opened" ? ""
           : running ? ""
-            : !rv || stale ? `<button type="button" class="fg-btn" data-fg-piece-review="${taskId}">Faire relire par le Maître de fusion</button>`
+            : !rv || stale ? `<button type="button" class="fg-btn" data-fg-piece-review="${taskId}">Faire relire par le Maître juré</button>`
               : `<button type="button" class="fg-btn ghost" data-fg-piece-review="${taskId}" data-again="1">Relire à nouveau</button>`;
         const ci = p.checks.total === 0 ? "Aucune intégration continue" : p.checks.failed ? `<span class="fg-fail">${p.checks.failed} en échec</span>` : p.checks.pending ? `${p.checks.pending} en cours` : "Verte";
         const reasons = !p.readiness.ok && p.mr.state === "opened" ? `<ul class="fg-reasons">${p.readiness.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : "";
@@ -280,7 +280,7 @@
           html: `<div class="fg-sc-card"><div class="fg-sc-card-head">Demande de fusion</div>
               <h4>${esc(p.mr.title)}</h4>
               <p><span class="fg-tag ${stateTag[1]}">${stateTag[0]}</span> <code>${esc(p.mr.sourceBranch)}</code> vers <code>${esc(p.mr.targetBranch)}</code> · <a href="${esc(p.mr.url)}" target="_blank" rel="noopener noreferrer">ouvrir la MR</a></p></div>
-            <h4>1. Relecture par le Maître de fusion</h4>
+            <h4>1. Relecture par le Maître juré</h4>
             <p><span class="fg-tag ${reviewLabel[1]}">${reviewLabel[0]}</span> ${stale ? `<span class="fg-note">La MR a changé depuis la dernière relecture.</span>` : ""}</p>
             ${rv && rv.summary && !running ? `<p class="fg-note">${esc(rv.summary)}</p>` : ""}${counts ? `<p class="fg-note">${counts}</p>` : ""}
             <div class="fg-inline">${reviewBtn}${rv ? `<button type="button" class="fg-btn ghost" data-fg-review="${rv.id}">Lire la revue complète</button>` : ""}</div>
@@ -395,12 +395,12 @@
     } catch (err) { game.banner(err.message); A.sfx.error(); }
   }
 
-  /** Fait relire la pièce (la MR de l'agent) par le Maître de fusion : aucun commentaire n'est publié. */
+  /** Fait relire la pièce (la MR de l'agent) par le Maître juré : aucun commentaire n'est publié. */
   async function reviewPiece(taskId, again) {
     try {
       const out = await api(`/api/tasks/${taskId}/review`, again ? { again: true } : {});
       A.sfx.select();
-      game.banner(out.already && !again ? "Cette version est déjà relue ou en cours de relecture." : "Le Maître de fusion relit la pièce…");
+      game.banner(out.already && !again ? "Cette version est déjà relue ou en cours de relecture." : "Le Maître juré relit la pièce…");
       game.refresh();
       render();
     } catch (err) { game.banner(err.message); A.sfx.error(); }
@@ -411,7 +411,7 @@
     const ok = await ask({
       title: `Fusionner dans ${target} ?`,
       okLabel: "Fusionner",
-      html: `<p>La MR de l'agent est <b>fusionnée dans la branche <code>${esc(target)}</code></b> chez ta forge, avec le code que le Maître de fusion a relu. La branche de l'agent n'est pas supprimée.</p>
+      html: `<p>La MR de l'agent est <b>fusionnée dans la branche <code>${esc(target)}</code></b> chez ta forge, avec le code que le Maître juré a relu. La branche de l'agent n'est pas supprimée.</p>
         <p class="note">Pour revenir en arrière, il faudra annuler la fusion chez ta forge. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p>`,
     });
     if (!ok) return;

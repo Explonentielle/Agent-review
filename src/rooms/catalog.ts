@@ -49,6 +49,12 @@ export const OBJECTS = {
   banner: { w: 1, h: 2, solid: false, where: "wall", color: true },
   window: { w: 2, h: 2, solid: false, where: "wall", text: true },
   bookshelf: { w: 2, h: 2, solid: false, where: "wall", text: true },
+  dummy: { w: 1, h: 2, solid: true, where: "floor" },
+  armorstand: { w: 1, h: 2, solid: true, where: "floor" },
+  brazier: { w: 1, h: 1, solid: true, where: "floor" },
+  plant: { w: 1, h: 1, solid: true, where: "floor" },
+  fountain: { w: 2, h: 2, solid: true, where: "floor" },
+  tapestry: { w: 2, h: 2, solid: false, where: "wall", color: true },
 } as const satisfies Record<string, ObjectSpec>;
 
 export type ObjectType = keyof typeof OBJECTS;

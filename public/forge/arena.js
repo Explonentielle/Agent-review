@@ -81,6 +81,24 @@
       fx(c, x * T + 3, 2, 0.5, 16, "rgba(255,255,255,.12)"); fx(c, x * T + 8, 2, 0.5, 16, "rgba(0,0,0,.18)"); fx(c, x * T + 12.5, 2, 0.5, 16, "rgba(0,0,0,.25)");
       fx(c, x * T + 7.5, 7, 1, 2, "#9a2a2a"); fx(c, x * T + 3, 19, 10, 0.5, "rgba(0,0,0,.3)");
     }
+    // Trophées sur le mur du haut : deux épées croisées derrière un écu, entre les bannières
+    for (const x of [5.5, 11.5, 17.5]) {
+      const cx = x * T, cy = 15;
+      c.save(); c.lineCap = "round";
+      for (const [w, col] of [[3, "#1d1814"], [1.6, "#c8ced8"]]) { c.lineWidth = w; c.strokeStyle = col; c.beginPath(); c.moveTo(cx - 9, cy - 9); c.lineTo(cx + 9, cy + 9); c.moveTo(cx + 9, cy - 9); c.lineTo(cx - 9, cy + 9); c.stroke(); }
+      c.strokeStyle = "#c8aa4a"; c.lineWidth = 2; c.beginPath(); c.moveTo(cx - 5, cy + 5); c.lineTo(cx - 8, cy + 8); c.moveTo(cx + 5, cy + 5); c.lineTo(cx + 8, cy + 8); c.stroke();
+      c.fillStyle = "#1d1814"; c.beginPath(); c.arc(cx, cy, 6, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "#7a2a2a"; c.beginPath(); c.arc(cx, cy, 5, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "#c8aa4a"; c.fillRect(cx - 0.75, cy - 3.5, 1.5, 7); c.fillRect(cx - 3.5, cy - 0.75, 7, 1.5);
+      c.fillStyle = "rgba(255,255,255,.2)"; c.beginPath(); c.arc(cx - 1.5, cy - 1.8, 3.2, Math.PI * 0.9, Math.PI * 1.7); c.lineTo(cx - 1.5, cy - 1.8); c.fill();
+      c.restore();
+    }
+    // Râteliers de lances dans la palissade du bas, avec des têtes de lance qui brillent
+    for (const x of [3, 8.5, 14, 19.5]) {
+      const X = x * T, Y = 14 * T;
+      fx(c, X - 1, Y + 7, 18, 2, "#3a3a44"); fx(c, X - 1, Y + 7, 18, 0.5, "rgba(255,255,255,.2)"); fx(c, X - 1, Y + 12, 18, 1.5, "#3a3a44");
+      for (let i = 0; i < 6; i++) { fx(c, X + i * 3, Y + 2, 1.2, 13, "#9a6a34"); fx(c, X + i * 3 - 0.4, Y + 0.5, 2, 3.5, "#c8ced8"); fx(c, X + i * 3 - 0.4, Y + 0.5, 0.6, 3.5, "#fff"); }
+    }
     // Boucliers et lames accrochés aux murs de côté, supports des braziers
     for (const [sx, sy, col] of [[8, 104, "#3a5fa0"], [8, 144, "#9a2a2a"], [376, 104, "#9a2a2a"], [376, 144, "#3a5fa0"]]) {
       c.fillStyle = "#1d1814"; c.beginPath(); c.arc(sx, sy, 6.5, 0, Math.PI * 2); c.fill();

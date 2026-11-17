@@ -63,6 +63,10 @@ La salle fait **24 colonnes sur 15 rangées**, numérotées à partir de 0.
 | `torch` | 1 x 1 | mur | non | |
 | `banner` | 1 x 2 | mur | non | `color` |
 | `window`, `bookshelf` | 2 x 2 | mur | non | `text` |
+| `tapestry` | 2 x 2 | mur | non | `color` |
+| `dummy`, `armorstand` | 1 x 2 | sol | oui | |
+| `brazier`, `plant` | 1 x 1 | sol | oui | |
+| `fountain` | 2 x 2 | sol | oui | |
 
 - `x` et `y` sont la case en haut à gauche de l'objet. La taille est celle du tableau (seul le tapis se règle avec `w` et `h`).
 - Couleurs : `red`, `blue`, `green`, `purple`, `gold`.

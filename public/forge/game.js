@@ -10,7 +10,7 @@
   const SKINS = ["#f2c9a0", "#d9a066", "#8d5a3b"];
   const HAIRS = ["#3a2a1c", "#c9a227", "#23252b", "#8a3b12", "#e8e4da"];
   const TUNICS = ["#3e6fb0", "#b0503e", "#3e9a6a", "#8a5cb0", "#d8a63a", "#2f7a8a"];
-  const ANVIL_X = [8, 11, 14, 17];
+  const ANVIL_X = [8, 10, 13, 15];
   /** Tenues à acheter chez le marchand : un décor de jeu, sans effet sur l'outil. */
   const COSMETICS = [
     { id: "cape", rarity: "common", name: "Cape rouge", price: 120, part: "cape", value: "#b0302e" },
@@ -133,19 +133,38 @@
   function buildEntities() {
     const E = [];
     const add = (e) => E.push({ solid: true, ...e });
-    add({ id: "brann", name: "Maître Brann", verb: "Parler", tiles: [[11, 9]], z: 10 * T, lx: 11.5, ly: 8.35, always: true, draw: (c) => S.person(c, 11 * T, 9 * T, { ...S.LOOKS.brann, dir: "down" }), interact: brannTalk });
+    add({ id: "brann", name: "Maître Brann", verb: "Parler", tiles: [[11, 10]], z: 11 * T, lx: 11.5, ly: 9.35, always: true, draw: (c) => S.person(c, 11 * T, 10 * T, { ...S.LOOKS.brann, dir: "down" }), interact: brannTalk });
     add({ id: "furnace-github", name: "Forge GitHub", verb: "Forger", tiles: rect(2, 1, 4, 3), z: 4 * T, lx: 4, ly: 4.35, always: true, draw: (c, t) => S.furnace(c, 2, 1, lit("github"), t), interact: () => furnaceTalk("github") });
     add({ id: "furnace-gitlab", name: "Forge GitLab", verb: "Forger", tiles: rect(18, 1, 4, 3), z: 4 * T, lx: 20, ly: 4.35, always: true, draw: (c, t) => S.furnace(c, 18, 1, lit("gitlab"), t), interact: () => furnaceTalk("gitlab") });
     add({ id: "board", name: "Tableau des quêtes", verb: "Lire", tiles: rect(11, 1, 2, 2), z: 3 * T, lx: 12, ly: 3.4, always: true, draw: (c) => S.board(c, 11, 1), interact: () => openPopup("board") });
     add({ id: "stone", name: "Pierre d'éveil", verb: "Toucher", tiles: [[6, 3], [6, 4]], z: 5 * T + 12, lx: 6.5, ly: 3.1, when: () => flag("forge"), draw: (c, t) => S.stone(c, 6, 3, flag("claude"), t), interact: () => openPopup("stone") });
-    add({ id: "rack", name: "Râtelier", verb: "Choisir", tiles: rect(1, 7, 6, 2), z: 9 * T, lx: 4, ly: 6.85, when: () => flag("forge"), draw: (c) => S.rack(c, 1, 7, rackWeapons()), interact: rackTalk });
+    add({ id: "rack", name: "Râtelier", verb: "Choisir", tiles: rect(1, 5, 6, 2), z: 7 * T, lx: 4, ly: 4.85, when: () => flag("forge"), draw: (c) => S.rack(c, 1, 5, rackWeapons()), interact: rackTalk });
     add({ id: "anvils", tiles: ANVIL_X.map((x) => [x, 7]), z: 8 * T, when: () => flag("forge"), decor: true, draw: (c) => ANVIL_X.forEach((x) => S.anvil(c, x, 7)) });
-    add({ id: "crates", tiles: [[22, 5], [22, 6], [1, 12]], z: 7 * T, when: () => flag("forge"), decor: true, draw: (c) => { S.barrel(c, 22, 5); S.crate(c, 22, 6); S.barrel(c, 1, 12); } });
-    add({ id: "merchant", name: "Marchand Sélim", verb: "Commercer", tiles: rect(17, 10, 6, 3), z: 13 * T, lx: 19.5, ly: 7.6, when: hasLoot, draw: (c) => { S.person(c, 19 * T, 8 * T, { ...S.LOOKS.marchand, dir: "down" }); S.stall(c, 17, 10); }, interact: merchantTalk });
-    add({ id: "apprentice", name: "Apprenti", verb: "Parler", tiles: [[9, 11]], z: 12 * T, lx: 9.5, ly: 10.35, when: () => flag("claude"), draw: (c) => S.person(c, 9 * T, 11 * T, { ...S.LOOKS.apprenti, dir: "right" }), interact: apprenticeTalk });
-    add({ id: "guard", name: "Maître de fusion", verb: "Parler", tiles: [[6, 11]], z: 12 * T, lx: 6.5, ly: 10.35, when: () => flag("project"), draw: (c) => S.person(c, 6 * T, 11 * T, { ...S.LOOKS.gardien, dir: "right" }), interact: guardTalk });
-    add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[15, 10]], z: 11 * T, lx: 15.5, ly: 9.35, when: () => flag("forge"), draw: (c) => S.person(c, 15 * T, 10 * T, { ...S.LOOKS.scribe, dir: "left" }), interact: scribeTalk });
-    add({ id: "architect", name: "Architecte", verb: "Parler", tiles: [[3, 11]], z: 12 * T, lx: 3.5, ly: 10.35, when: () => flag("forge"), draw: (c) => S.person(c, 3 * T, 11 * T, { ...S.LOOKS.architecte, dir: "right" }), interact: architectTalk });
+    add({ id: "crates", tiles: [[22, 5], [22, 6], [1, 13]], z: 7 * T, when: () => flag("forge"), decor: true, draw: (c) => { S.barrel(c, 22, 5); S.crate(c, 22, 6); S.barrel(c, 1, 13); } });
+    add({ id: "merchant", name: "Marchand Sélim", verb: "Commercer", tiles: rect(17, 7, 6, 3), z: 10 * T, lx: 19.5, ly: 4.6, when: hasLoot, draw: (c) => { S.person(c, 19 * T, 5 * T, { ...S.LOOKS.marchand, dir: "down" }); S.stall(c, 17, 7); }, interact: merchantTalk });
+    add({ id: "apprentice", name: "Apprenti", verb: "Parler", tiles: [[9, 12]], z: 13 * T, lx: 9.5, ly: 11.35, when: () => flag("claude"), draw: (c) => S.person(c, 9 * T, 12 * T, { ...S.LOOKS.apprenti, dir: "right" }), interact: apprenticeTalk });
+    add({ id: "guard", name: "Maître juré", verb: "Parler", tiles: [[4, 8]], z: 9 * T, lx: 4.5, ly: 7.35, when: () => flag("project"), draw: (c) => S.person(c, 4 * T, 8 * T, { ...S.LOOKS.gardien, dir: "down" }), interact: guardTalk });
+    add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[13, 4]], z: 5 * T, lx: 13.5, ly: 3.35, when: () => flag("forge"), draw: (c) => S.person(c, 13 * T, 4 * T, { ...S.LOOKS.scribe, dir: "up" }), interact: scribeTalk });
+    add({ id: "architect", name: "Architecte", verb: "Parler", tiles: [[6, 11]], z: 12 * T, lx: 6.5, ly: 10.35, when: () => flag("forge"), draw: (c) => S.person(c, 6 * T, 11 * T, { ...S.LOOKS.architecte, dir: "left" }), interact: architectTalk });
+    /** Décor plein d'un coin du hall : visible avec la forge, il bloque le passage comme les autres meubles. */
+    const deco = (id, tiles, z, draw) => add({ id, tiles, z, when: () => flag("forge"), decor: true, draw });
+    const obj = (type, x, y) => (c, t) => S.drawObject(c, { type, x, y }, t);
+    // Armurerie (en haut à gauche) : râtelier, mannequin d'entraînement, armure
+    deco("armory-dummy", [[1, 8], [1, 9]], 10 * T, obj("dummy", 1, 8));
+    deco("armory-armor", [[6, 8], [6, 9]], 10 * T, obj("armorstand", 6, 8));
+    // Scriptorium (en bas à gauche) : table de travail, chaises, plantes, coffre d'archives
+    deco("scriptorium-table", rect(2, 11, 3, 2), 13 * T, obj("table", 2, 11));
+    deco("scriptorium-chairs", [[2, 13], [4, 13]], 14 * T, (c, t) => { S.drawObject(c, { type: "chair", x: 2, y: 13 }, t); S.drawObject(c, { type: "chair", x: 4, y: 13 }, t); });
+    deco("scriptorium-plants", [[1, 10], [7, 10]], 11 * T, (c, t) => { S.drawObject(c, { type: "plant", x: 1, y: 10 }, t); S.drawObject(c, { type: "plant", x: 7, y: 10 }, t); });
+    deco("scriptorium-chest", [[7, 13]], 14 * T, obj("chest", 7, 13));
+    // Entrée de l'arène (en bas à droite) : deux braseros de part et d'autre de la herse, un mannequin
+    deco("arena-braziers", [[17, 13], [20, 13]], 14 * T, (c, t) => { S.drawObject(c, { type: "brazier", x: 17, y: 13 }, t); S.drawObject(c, { type: "brazier", x: 20, y: 13 }, t); });
+    deco("arena-dummy", [[22, 12], [22, 13]], 14 * T, obj("dummy", 22, 12));
+    // Atelier (au centre) : deux braseros au pied du tapis, une plante près de la pierre d'éveil
+    deco("atelier-braziers", [[8, 13], [15, 13]], 14 * T, (c, t) => { S.drawObject(c, { type: "brazier", x: 8, y: 13 }, t); S.drawObject(c, { type: "brazier", x: 15, y: 13 }, t); });
+    deco("atelier-plant", [[7, 3]], 4 * T, obj("plant", 7, 3));
+    // Établi d'échange (en haut à droite, près des portails) : trois objets de même rareté contre un de la rareté au-dessus
+    add({ id: "trade-bench", name: "Établi d'échange", verb: "Échanger", tiles: [[16, 4], [17, 4]], z: 5 * T, lx: 17, ly: 3.6, when: () => flag("forge"), draw: (c, t) => S.tradebench(c, 16, 4, t), interact: () => openCustomizer(false, "trade", { solo: true, title: "L'établi d'échange" }) });
     add({ id: "door", name: "Porte", verb: "Sortir", tiles: [[11, 14], [12, 14]], z: 0, lx: 12, ly: 13.7, always: true, decor: true, draw: () => undefined, interact: doorTalk });
     add({ id: "arena-gate", portal: true, name: "Arène", verb: "Entrer", tiles: [[ARENA_GATE_X, 14], [ARENA_GATE_X + 1, 14]], z: 0, lx: ARENA_GATE_X + 1, ly: 13.7, when: () => flag("project") && g.rooms.byId.has(ARENA_ROOM), draw: (c, t) => S.ironGate(c, ARENA_GATE_X, H, t), interact: arenaGateTalk });
     hubRooms().forEach((room, i) => {
@@ -323,7 +342,7 @@
       project: ["Pose ta première arme au râtelier, à gauche : choisis un projet à forger."],
       dev: ["Ton arme est posée. Au râtelier, autorise l'agent dev sur ce projet : tes apprentis pourront forger."],
       task: ["Parle à l'Apprenti : confie-lui un ticket. Tu le verras travailler à l'enclume."],
-      review: ["Va voir le Maître de fusion : il contrôle les lames des autres, les revues de demandes de fusion."],
+      review: ["Va voir le Maître juré : il contrôle les lames des autres, les revues de demandes de fusion."],
     }[h?.nextQuest ?? ""];
     if (lines) return say("Maître Brann", lines);
     const atelier = (h?.extraQuests ?? []).find((q) => !q.done);
@@ -351,14 +370,14 @@
     await say("Apprenti", ["Patron ! Quel ticket je forge ?"]);
     openPopup("tickets");
   }
-  /** Pièces forgées qui attendent (relecture ou fusion), relues chez le serveur toutes les 45 s, pour le repère du Maître de fusion. */
+  /** Pièces forgées qui attendent (relecture ou fusion), relues chez le serveur toutes les 45 s, pour le repère du Maître juré. */
   async function loadPieces() {
     g.piecesAt = g.time;
-    try { g.pieces = await api("/api/pieces"); } catch { /* le Maître de fusion reste muet : la forge fonctionne sans */ }
+    try { g.pieces = await api("/api/pieces"); } catch { /* le Maître juré reste muet : la forge fonctionne sans */ }
   }
   const piecesReady = () => g.pieces.filter((p) => p.readiness && p.readiness.ok);
   const piecesUnread = () => g.pieces.filter((p) => !p.review || p.review.current === false);
-  /** Fusionne une pièce que le Maître de fusion vient de proposer : le choix du dialogue est la confirmation. */
+  /** Fusionne une pièce que le Maître juré vient de proposer : le choix du dialogue est la confirmation. */
   async function mergePieceNow(p) {
     try {
       await api(`/api/tasks/${p.taskId}/merge`, {});
@@ -372,10 +391,10 @@
     await loadPieces();
     const ready = piecesReady(), unread = piecesUnread();
     if (ready.length) {
-      // La relecture est OK : le Maître de fusion propose lui-même la fusion
+      // La relecture est OK : le Maître juré propose lui-même la fusion
       const p = ready[0], more = ready.length > 1 ? ` (et ${ready.length - 1} autre${ready.length > 2 ? "s" : ""} aussi prête${ready.length > 2 ? "s" : ""})` : "";
-      await say("Maître de fusion", ["Halte, forgeron ! J'ai relu la pièce #" + p.issueIid + " « " + p.issueTitle + " » : rien de grave" + more + "."]);
-      const answer = await choose("Maître de fusion", "Je la fusionne dans « " + p.mr.targetBranch + " » ?", ["Fusionner", "Voir la liste", "Plus tard"]);
+      await say("Maître juré", ["Halte, forgeron ! J'ai relu la pièce #" + p.issueIid + " « " + p.issueTitle + " » : rien de grave" + more + "."]);
+      const answer = await choose("Maître juré", "Je la fusionne dans « " + p.mr.targetBranch + " » ?", ["Fusionner", "Voir la liste", "Plus tard"]);
       if (answer === 0) return mergePieceNow(p);
       if (answer === 1) openPopup("reviews");
       return;
@@ -384,7 +403,7 @@
     if (unread.length) lines.push(`${unread.length} pièce${unread.length > 1 ? "s" : ""} forgée${unread.length > 1 ? "s" : ""} par tes apprentis attend${unread.length > 1 ? "ent" : ""} ma relecture.`);
     else if (g.pieces.length) lines.push("Je relis tes pièces. Dès qu'elles sont prêtes, je te propose de les fusionner.");
     else lines.push("Je te montre ce que j'ai contrôlé.");
-    await say("Maître de fusion", lines);
+    await say("Maître juré", lines);
     openPopup("reviews");
   }
   async function scribeTalk() {
@@ -475,10 +494,10 @@
   const ARENA_HELP = [
     "Chaque niveau te donne un point à répartir entre quatre caractéristiques : Force pour les dégâts, Agilité pour la vitesse, Vitalité pour les points de vie, Chance pour les critiques et l'or.",
     "Ton équipement compte aussi : la cape donne de l'Agilité, le tablier de la Vitalité, le couvre-chef de la Chance. Plus l'objet est rare, plus il donne.",
-    "Chaque arme est unique : ses dégâts, sa cadence et ses points de caractéristique sont tirés au hasard dans la fourchette de sa rareté. Un bon rare peut valoir mieux qu'un mauvais épique, et un jet parfait existe à chaque rareté. Avant chaque combat, tu choisis ton arme sur l'écran d'introduction (flèches gauche et droite), ou dans ton profil, onglet Armes.",
+    "Chaque arme est unique : ses dégâts, sa cadence et ses points de caractéristique sont tirés au hasard dans la fourchette de sa rareté. Un bon rare peut valoir mieux qu'un mauvais épique, et un jet parfait existe à chaque rareté. Avant chaque combat, tu choisis ton arme sur l'écran d'introduction (flèches gauche et droite), ou dans ton équipement (touche I).",
     "Chaque arme a son effet. La dague est rapide, très courte, et frappe souvent en critique. La lance transperce deux ennemis alignés. L'arc tire vite et loin, mais faiblement. Le marteau assomme et secoue le sol autour de l'impact. Le bâton ralentit ceux qu'il touche. La hache balaie tout devant toi, et l'épée reste équilibrée.",
     "Les vagues de bots ne s'arrêtent pas : un boss toutes les 5 vagues (le Seigneur des braises, le Colosse de pierre, l'Archimage, puis on recommence, plus fort). Tu combats jusqu'à tomber, ou tu bats en retraite avec Échap et tes vagues comptent. Chaque style a sa place : l'arc et le bâton pour tenir à distance, la lance pour la portée, la dague pour les assassins rapides, le marteau et la hache pour les groupes.",
-    "Tu gagnes un peu d'or par vague (plafonné par jour), jamais d'objet rare : ceux-là viennent de ton vrai travail. Les points se règlent dans ton profil, onglet Combat.",
+    "Tu gagnes un peu d'or par vague (plafonné par jour), jamais d'objet rare : ceux-là viennent de ton vrai travail. Les points se règlent dans ton profil (touche P).",
   ];
   async function arenaTalk(npc) {
     await say(npc.name, npc.lines.map(fillName));
@@ -487,8 +506,8 @@
       const left = pointsLeft();
       const answer = await choose(npc.name, left > 0 ? `Tu as ${left} point${left > 1 ? "s" : ""} de caractéristique à répartir.` : "Que veux-tu faire ?", ["Combattre", "Changer d'arme", "Mes caractéristiques", "Comment ça marche ?", "Plus tard"]);
       if (answer === 0) return playArena();
-      if (answer === 1) return openCustomizer(false, "arsenal");
-      if (answer === 2) return openCustomizer(false, "combat");
+      if (answer === 1) { items.ui.cat = "weapon"; return openCustomizer(false, "inv"); }
+      if (answer === 2) return openCustomizer(false, "profile");
       if (answer !== 3) return;
       await say(npc.name, ARENA_HELP);
     }
@@ -758,38 +777,40 @@
       <h4>Équipement</h4>
       <p class="fg-note">${worn.length ? esc(worn.join(" · ")) : "Aucun équipement porté : équipe des objets du sac pour gagner des points."}</p>
       <h4>Arène</h4>
-      <p class="fg-note">${a.fights ? `${a.fights} combat${a.fights > 1 ? "s" : ""}, record :${a.bestWave} vague${a.bestWave > 1 ? "s" : ""}, premier boss vaincu ${a.wins} fois.` : "Pas encore de combat : la herse de fer, en bas à droite de la forge, mène à l'arène."}</p>
+      <p class="fg-note">${a.fights ? `${a.fights} combat${a.fights > 1 ? "s" : ""}, record : ${a.bestWave} vague${a.bestWave > 1 ? "s" : ""}, premier boss vaincu ${a.wins} fois.` : "Pas encore de combat : la herse de fer, en bas à droite de la forge, mène à l'arène."}</p>
       <p><button type="button" class="fg-mini" data-stat-reset>Réinitialiser mes points</button></p>
     </div>`;
   }
 
   /** Popup du profil : un seul endroit pour le forgeron (profil, sac, apparence, échange, quêtes). Le jeu garde l'aperçu et l'équipement visibles à gauche. */
-  function openCustomizer(first, tab = "profile") {
+  function openCustomizer(first, tab = "profile", opts = {}) {
     if (g.custom) return;
     const look = { ...g.save.look };
     let current = first ? "look" : tab;
+    let nameValue = g.save.name;
     let seenBag = false, shown = null;
     const el = document.createElement("div");
     el.className = "fg-custom";
     const swatches = (key, list) => `<div class="fg-swatches" data-key="${key}">${list.map((c) => `<button type="button" class="fg-sw ${look[key] === c ? "on" : ""}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>`;
-    const tabs = first ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Sac"], ["arsenal", "Armes"], ["look", "Apparence"], ["trade", "Échange"], ["combat", "Combat"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
-    // Hors création du personnage, le popup a toujours la même taille : aperçu et équipement à gauche, l'onglet choisi à droite
-    el.innerHTML = `<div class="fg-card ${first ? "" : "wide"}">
-      ${first ? "" : `<button type="button" class="fg-x" data-cancel aria-label="Fermer" title="Fermer sans enregistrer l'apparence (Échap)"></button>`}
-      <h2>${first ? "Qui es-tu, forgeron ?" : "Ton forgeron"}</h2>
-      ${tabs}
-      <div class="fg-side"><canvas class="fg-preview" width="32" height="40"></canvas><div class="fg-worn" ${first ? "hidden" : ""}></div></div>
-      <div class="fg-look">
-        <label>Ton nom<input maxlength="24" value="${esc(g.save.name)}" placeholder="Aldric" autocomplete="off"></label>
+    const tabs = first || opts.solo ? "" : `<div class="fg-tabs fg-ctabs">${[["profile", "Profil"], ["inv", "Équipement"], ["progress", "Progression"], ["quests", "Quêtes"]].map(([k, label]) => `<button type="button" class="fg-tab" data-ctab="${k}">${label}${k === "inv" && items.freshCount() ? ` <i>${items.freshCount()}</i>` : ""}</button>`).join("")}</div>`;
+    /** Nom et couleurs du forgeron (à la création, ou section Apparence de l'onglet Profil). */
+    const lookFormHtml = () => `<label>Ton nom<input data-name maxlength="24" value="${esc(nameValue)}" placeholder="Aldric" autocomplete="off"></label>
         <div class="fg-box fg-looks">
           <div class="fg-row"><span>Peau</span>${swatches("skin", SKINS)}</div>
           <div class="fg-row"><span>Cheveux</span>${swatches("hair", HAIRS)}</div>
           <div class="fg-row"><span>Tunique</span>${swatches("tunic", TUNICS)}</div>
-        </div>
-        ${first ? "" : `<p class="fg-note">L'aperçu à gauche change tout de suite. Clique sur « Enregistrer et fermer » pour garder ton nom et tes couleurs.</p>`}
-      </div>
+        </div>${first ? "" : `<p class="fg-note">L'aperçu à gauche change tout de suite. Clique sur « Enregistrer et fermer » pour garder ton nom et tes couleurs.</p>`}`;
+    /** Onglet Profil : les caractéristiques (points, valeurs de combat, record de l'arène), puis l'apparence. */
+    const profileTabHtml = () => `${combatHtml()}<h4>Apparence</h4><div class="fg-look">${lookFormHtml()}</div>`;
+    // Hors création du personnage, le popup a toujours la même taille : aperçu et équipement à gauche, l'onglet choisi à droite
+    el.innerHTML = `<div class="fg-card ${first ? "" : "wide"}">
+      ${first ? "" : `<button type="button" class="fg-x" data-cancel aria-label="Fermer" title="Fermer sans enregistrer l'apparence (Échap)"></button>`}
+      <h2>${first ? "Qui es-tu, forgeron ?" : opts.title ?? "Ton forgeron"}</h2>
+      ${tabs}
+      <div class="fg-side"><canvas class="fg-preview" width="32" height="40"></canvas><div class="fg-worn" ${first ? "hidden" : ""}></div></div>
+      ${first ? `<div class="fg-look">${lookFormHtml()}</div>` : ""}
       <div class="fg-panel" hidden></div>
-      <button type="button" class="fg-btn" data-ok>${first ? "Entrer dans la forge" : "Enregistrer et fermer"}</button></div>`;
+      <button type="button" class="fg-btn" data-ok>${first ? "Entrer dans la forge" : opts.solo ? "Fermer" : "Enregistrer et fermer"}</button></div>`;
     g.el.stage.append(el);
     g.custom = el;
     const draw = () => {
@@ -802,13 +823,12 @@
     const show = () => {
       const panel = el.querySelector(".fg-panel"), pane = el.querySelector(".fg-look");
       el.querySelectorAll("[data-ctab]").forEach((b) => b.classList.toggle("on", b.dataset.ctab === current));
-      pane.hidden = current !== "look";
-      panel.hidden = current === "look";
+      if (first) { pane.hidden = false; panel.hidden = true; } else panel.hidden = false;
       if (!first) el.querySelector(".fg-worn").innerHTML = sideIdHtml() + items.equippedHtml();
       // Un changement d'équipement redessine l'onglet : on garde la position dans la liste, sauf quand on change d'onglet
-      const scroller = current === "look" ? pane : panel;
+      const scroller = first ? pane : panel;
       const keep = shown === current ? scroller.scrollTop : 0;
-      if (current !== "look") panel.innerHTML = current === "profile" ? profileHtml() : current === "combat" ? combatHtml() : current === "quests" ? window.ForgePopups.questsHtml(api2) : items.panelHtml(current);
+      if (!first) panel.innerHTML = current === "profile" ? profileTabHtml() : current === "progress" ? profileHtml() : current === "quests" ? window.ForgePopups.questsHtml(api2) : items.panelHtml(current);
       scroller.scrollTop = keep;
       shown = current;
       if (current === "inv") seenBag = true;
@@ -826,6 +846,7 @@
     g.customUi = { redraw: draw, rerender: show, close: first ? null : close };
     draw();
     show();
+    el.addEventListener("input", (ev) => { if (ev.target.matches("[data-name]")) nameValue = ev.target.value; });
     el.addEventListener("click", (ev) => {
       const t = ev.target.closest("[data-ctab], [data-pf-tab]");
       if (t) { current = t.dataset.ctab ?? t.dataset.pfTab; A.sfx.select(); show(); return; }
@@ -841,14 +862,12 @@
       const sw = ev.target.closest(".fg-sw");
       if (sw) { look[sw.parentElement.dataset.key] = sw.dataset.c; sw.parentElement.querySelectorAll(".fg-sw").forEach((b) => b.classList.toggle("on", b === sw)); A.sfx.select(); draw(); return; }
       if (ev.target.closest("[data-ok]")) {
-        g.save.name = el.querySelector("input").value.trim() || "Forgeron";
-        g.save.look = look;
-        g.save.created = true;
+        if (!opts.solo) { g.save.name = nameValue.trim() || "Forgeron"; g.save.look = look; g.save.created = true; }
         close();
         if (first) startAdventure();
       }
     });
-    if (current === "look") el.querySelector("input").focus();
+    if (first) el.querySelector("input").focus();
   }
   async function startAdventure() {
     await sleep(500);
@@ -928,7 +947,7 @@
     const aura = prestige()?.rank.aura;
     if (aura) items.push([p.y + T - 1, () => drawAura(c, p, aura, t)]);
     if (g.roomId === "forge" && claimable().length) items.push([99 * T, () => drawMarker(c, 12 * T - 2, 5, t)]);
-    // Une pièce attend la relecture ou la fusion : un « ! » au-dessus du Maître de fusion
+    // Une pièce attend la relecture ou la fusion : un « ! » au-dessus du Maître juré
     if (g.roomId === "forge" && flag("project") && (piecesReady().length || piecesUnread().length)) items.push([99 * T, () => drawMarker(c, 6 * T + 5, 11 * T - 17, t)]);
     items.push([p.y + T, () => S.person(c, p.x, p.y, { ...playerLook(), dir: p.dir, frame: p.frame })]);
     items.sort((a, b) => a[0] - b[0]).forEach((it) => it[1]());
@@ -1027,7 +1046,7 @@
       const what = t.dataset.fg;
       if (what === "sfx") A.set("sfx", !A.prefs().sfx);
       if (what === "music") A.set("music", !A.prefs().music);
-      if (what === "profile" && !modal()) openCustomizer(false, "profile");
+      if (what === "profile" && !modal()) openCustomizer(false, "progress");
       if (what === "board" && !modal()) openPopup("board");
       renderHud();
       return;

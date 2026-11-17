@@ -6,7 +6,7 @@ Une salle de la forge où l'on se bat en temps réel contre des bots, avec l'éq
 
 1. Quand ta première arme est posée au râtelier, une **herse de fer** apparaît dans le mur du bas de la forge (une autre porte que les portes magiques violettes du mur du fond). Maître Brann t'y envoie.
 2. Dans la salle de l'arène, le **Maître d'armes** t'explique tout, puis propose : combattre, régler ses caractéristiques, ou réécouter les règles.
-3. **Chaque niveau te donne un point** à répartir entre quatre caractéristiques, dans **Profil > Combat**. Les objets que tu portes en ajoutent selon leur rareté.
+3. **Chaque niveau te donne un point** à répartir entre quatre caractéristiques, dans **Profil** (touche P). Les objets que tu portes en ajoutent selon leur rareté.
 4. Le combat : **des vagues de bots sans fin, un boss toutes les 5 vagues** (le Seigneur des braises à la 5e). Tu combats jusqu'à tomber ; à la fin, un peu d'or et un record.
 
 Commandes : flèches ou ZQSD pour bouger, **Espace** pour frapper (le coup part vers l'ennemi proche, devant toi), **Maj** pour une roulade (intouchable un instant), Échap pour quitter, R pour rejouer.
@@ -38,7 +38,7 @@ Les sept types de la forge ont chacun leur façon de se battre.
 | Arc | 7 | 0,38 s (rapide) | longue (260) | Flèches rapides (300 px/s), faibles dégâts ; tire sur le plus proche, où qu'il soit |
 | Bâton | 13 | 0,85 s | longue (200) | Trait lent qui traverse tout et **ralentit** de 40 % pendant 1,5 s ; contre le seigneur : 15 % pendant 0,75 s |
 
-Le profil de l'arme équipée (et son effet) s'affiche en haut de **Profil > Combat**, dans l'introduction de l'arène et dans les explications du Maître d'armes. La rareté multiplie toujours les dégâts, et la Force s'y ajoute.
+Le profil de l'arme équipée (et son effet) s'affiche en haut de **Profil** (touche P), dans l'introduction de l'arène et dans les explications du Maître d'armes. La rareté multiplie toujours les dégâts, et la Force s'y ajoute.
 
 ## Armes uniques et choix de l'arme
 
@@ -73,8 +73,8 @@ Les effets s'appliquent aux coups de l'arme (corps à corps et projectiles), pas
 
 **Comment équiper une arme** :
 - **Dans l'arène** : à l'écran d'introduction (avant chaque combat), la rangée de pastilles montre toutes tes armes. **Flèches gauche et droite** (ou Q et D), ou un clic sur une pastille, changent l'arme, et les valeurs du forgeron se recalculent aussitôt. Après un combat : « Changer d'arme (A) ».
-- **Chez le Maître d'armes** : « Changer d'arme » ouvre la page **Armes** du profil.
-- **Dans le profil** (P), onglet **Armes** : l'arme portée en détail, puis toutes les armes avec leurs dégâts, leur cadence, leurs bonus, la qualité du jet et la différence de dégâts par seconde avec l'arme portée. Le sac (I) permet aussi de les équiper.
+- **Chez le Maître d'armes** : « Changer d'arme » ouvre l'onglet **Équipement** du profil, filtré sur les armes.
+- **Dans le profil** (touche I), onglet **Équipement** : les armes s'équipent comme la cape, le couvre-chef et le tablier (filtre « Arme »). Chaque arme montre ses dégâts, sa cadence, ses bonus, ses effets, la qualité du jet et la différence de dégâts par seconde avec l'arme portée.
 
 ## Les bots et les vagues
 
@@ -108,7 +108,7 @@ Par vague terminée : 3 + 2 x numéro de la vague, plus **25 par boss vaincu** (
 |---|---|
 | `public/forge/combat.js` | Logique pure (aucun DOM) : caractéristiques, armes, bots, vagues, combat à pas fixe et graine (même combat = même déroulé). Chargé par le navigateur et par les tests |
 | `public/forge/arena.js` | Calque plein écran : touches, dessin en pixel art, écrans d'intro et de fin. Fermé quand on quitte l'onglet de la forge (il capture le clavier) |
-| `public/forge/game.js` | La herse dans la forge, le Maître d'armes, l'onglet Combat du profil, l'or et le record (`g.save.stats`, `g.save.arena`) |
+| `public/forge/game.js` | La herse dans la forge, le Maître d'armes, l'onglet Profil, l'or et le record (`g.save.stats`, `g.save.arena`) |
 | `public/rooms/arene.json` | La salle de l'arène : une salle livrée comme les autres (donnée), sans porte magique. Le jeu retrouve le Maître d'armes par son identifiant (`ARENA_ROOM`, `ARENA_MASTER` dans `game.js`) |
 | `public/forge/sprites.js` | `ironGate` (herse de fer) et l'apparence `armurier` |
 
@@ -118,7 +118,7 @@ La porte de fer est aussi un **style de porte** (`"style": "iron"`) utilisable d
 
 - **Une arme** (nouveau type dans le butin, `src/game/loot.ts`) : ajouter son profil dans `WEAPONS` de `combat.js`, avec un `perk` (l'effet affiché) différent de celui des autres. Un effet est un champ du profil : `critBonus` et `critMult` (critique), `maxHits` (transperce), `shock` (onde de choc), `slow` (ralentit), `stun`, `pierce`, ou `ranged` avec `range` et `projSpeed`. Le test de cohérence (`src/rooms/combat.test.ts`) échoue tant qu'une arme ou une rareté du butin n'a pas sa place dans l'arène, et un autre exige qu'aucune arme n'annonce le même effet qu'une autre.
 - **Un bot** : `BOTS` (statistiques), son apparence dans `BOT_LOOKS` (`arena.js`) et sa vague dans `WAVES`.
-- **Une caractéristique** : `STATS`, `SLOT_STAT` et la formule dans `build`, puis l'onglet Combat.
+- **Une caractéristique** : `STATS`, `SLOT_STAT` et la formule dans `build`, puis l'onglet Profil.
 
 ## Limites connues
 

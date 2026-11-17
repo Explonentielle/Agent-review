@@ -432,6 +432,7 @@
       const cx = Math.floor(w / 2) - 4;
       carpetRug(c, cx, 4, 8, h - 5, "#5a2f3a", "#6e3a47", "#c9a35b");
       polishCarpet(c, cx, 4, 8, h - 5);
+      hallZones(c);
       doorBottom(c, Math.floor(w / 2) - 1, h);
     }
     return cv;
@@ -516,7 +517,7 @@
     red: ["#7a2a3a", "#9a3a4c", "#f0d078"], blue: ["#2a3f7a", "#3a56a0", "#f0d078"], green: ["#2a6a4a", "#3a8a60", "#f0d078"],
     purple: ["#5a2a7a", "#7a3aa0", "#f0d078"], gold: ["#b8903a", "#d8b04a", "#fff0b0"],
   };
-  const OBJECT_NAME = { throne: "Trône", statue: "Statue", table: "Table", chest: "Coffre", window: "Fenêtre", bookshelf: "Bibliothèque" };
+  const OBJECT_NAME = { throne: "Trône", statue: "Statue", table: "Table", chest: "Coffre", window: "Fenêtre", bookshelf: "Bibliothèque", dummy: "Mannequin", armorstand: "Armure", brazier: "Brasero", plant: "Plante", fountain: "Fontaine", tapestry: "Tapisserie" };
 
   /** Tapis : posé au sol, sous les meubles. */
   function carpet(c, tx, ty, w, h, color) {
@@ -600,6 +601,127 @@
     sprite(c, x, y, L);
   }
   /** Dessine un objet de salle (voir src/rooms/catalog.ts). Un type inconnu devient une caisse : jamais d'erreur. */
+  /* ---------- décors supplémentaires : mannequin, armure, brasero, plante, fontaine, tapisserie ---------- */
+  /** Mannequin d'entraînement : poteau, traverse, corps de paille cerclé, cible sur la poitrine. */
+  function dummy(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    softShadow(c, x + 8, y + 31, 9, 3.5, 0.34);
+    sprite(c, x, y, [
+      [3, 29, 10, 3, "#5a3a1c"], [3, 29, 10, 1, WOOD], [7, 12, 2, 18, WOOD2], [7, 12, 1, 18, "#9a6a34"],
+      [2, 13, 12, 2, WOOD2], [2, 13, 12, 1, WOOD],
+      [4, 9, 8, 12, "#c9a85a"], [4, 9, 8, 1, "#e8d28a"], [10, 10, 2, 10, SH], [4, 13, 8, 1, "#8a6a2c"], [4, 18, 8, 1, "#8a6a2c"],
+      [5, 2, 6, 7, "#b8975a"], [5, 2, 6, 1, "#d8b878"], [10, 3, 1, 5, SH], [6, 5, 1, 1, "#2a1d12"], [9, 5, 1, 1, "#2a1d12"], [7, 7, 2, 1, "#2a1d12"],
+      [6, 11, 4, 4, "#e8e4da"], [7, 12, 2, 2, "#c0392b"], [11, 14, 4, 1, "#c8aa4a"], [14, 13, 1, 3, "#c0392b"],
+    ]);
+  }
+  /** Armure sur son support : heaume à plumet, plastron, tabard, jupe, socle. */
+  function armorstand(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    softShadow(c, x + 8, y + 31, 9, 3.5, 0.34);
+    sprite(c, x, y, [
+      [4, 28, 8, 3, "#5a3a1c"], [4, 28, 8, 1, WOOD], [7, 20, 2, 8, WOOD2],
+      [4, 17, 8, 4, "#7d838f"], [4, 17, 8, 1, "#b9bfca"], [2, 10, 2, 7, "#8a909c"], [12, 10, 2, 7, "#8a909c"], [2, 10, 2, 1, HI2],
+      [4, 9, 8, 9, "#9aa0ab"], [4, 9, 8, 1, HI2], [10, 10, 2, 8, SH], [4, 16, 8, 1, "#8a6a1c"], [7, 11, 2, 5, "#9a2a2a"], [7, 11, 2, 1, "#f0d078"],
+      [5, 2, 6, 7, "#b9bfca"], [5, 2, 6, 1, HI2], [10, 3, 1, 6, SH], [6, 5, 4, 1, "#23252b"], [7, 0, 2, 3, "#c0392b"],
+    ]);
+  }
+  /** Brasero de fer : trépied, coupe, braises et flammes qui dansent (et éclairent). */
+  function brazier(c, tx, ty, t = 0) {
+    const x = tx * T, y = ty * T, f = Math.floor(t * 8 + tx) % 3;
+    softShadow(c, x + 8, y + 15, 8, 3, 0.34);
+    sprite(c, x, y, [[4, 10, 2, 5, "#3a3a44"], [10, 10, 2, 5, "#3a3a44"], [7, 11, 2, 4, "#2e2e36"], [3, 7, 10, 4, "#4a4a55"], [3, 7, 10, 1, "#8a909c"], [4, 10, 8, 1, SH2], [4, 6, 8, 2, "#7a2a10"]]);
+    px(c, x + 5, y + 1 - (f === 1 ? 1 : 0), 6, 6, "#ff7a1a"); px(c, x + 6, y - (f === 2 ? 1 : 0) + 1, 4, 5, "#ffc83d"); px(c, x + 7, y + 3, 2, 3, "#fff3b0");
+    glow(x + 8, y + 4, 44, "255,140,50", 0.34);
+  }
+  /** Plante en pot. */
+  function plant(c, tx, ty) {
+    const x = tx * T, y = ty * T;
+    softShadow(c, x + 8, y + 15, 7, 2.5, 0.3);
+    sprite(c, x, y, [
+      [4, 10, 8, 5, "#a8582a"], [4, 10, 8, 1, "#c9753a"], [10, 11, 2, 4, SH], [5, 14, 6, 1, "#7a3a1a"], [5, 9, 6, 2, "#3a2a1c"],
+      [6, 2, 4, 8, "#2f7a3a"], [3, 4, 4, 5, "#3a8a46"], [9, 3, 4, 6, "#3a8a46"], [2, 6, 3, 3, "#2a6a34"], [11, 6, 3, 3, "#2a6a34"],
+      [6, 2, 1, 6, "#6ac46a"], [4, 4, 1, 3, "#6ac46a"], [10, 4, 1, 3, "#6ac46a"], [7, 0, 2, 2, "#e8685a"], [7, 0, 1, 1, "#ffd0c8"],
+    ]);
+  }
+  /** Fontaine de pierre de 2 x 2 tuiles : vasque, eau qui ondule, jet central. */
+  function fountain(c, tx, ty, t = 0) {
+    const x = tx * T, y = ty * T, k = Math.floor(t * 3) % 3;
+    softShadow(c, x + 16, y + 30, 18, 5.5, 0.38);
+    sprite(c, x, y, [
+      [1, 18, 30, 11, "#a9a6b4"], [1, 18, 30, 1, HI2], [1, 27, 30, 3, "#6a6776"], [3, 16, 26, 3, "#b9b6c4"], [3, 16, 26, 1, "#d4d1de"],
+      [4, 18, 24, 7, "#3a8ad0"], [4, 18, 24, 2, "#6ab8ff"], [4, 24, 24, 1, "#2a6aa8"],
+      [13, 7, 6, 12, "#b9b6c4"], [13, 7, 2, 12, HI2], [17, 8, 2, 11, SH], [10, 5, 12, 3, "#a9a6b4"], [10, 5, 12, 1, HI2],
+    ]);
+    px(c, x + 6 + k * 6, y + 20, 5, 1, "rgba(255,255,255,.45)"); px(c, x + 16 - k * 3, y + 22, 6, 1, "rgba(255,255,255,.3)");
+    px(c, x + 15, y + 0 + (k === 1 ? 1 : 0), 2, 5, "#9ad7ff"); px(c, x + 12, y + 3 + k, 1, 2, "#bfe4ff"); px(c, x + 19, y + 4 - (k === 2 ? 1 : 0), 1, 2, "#bfe4ff");
+    glow(x + 16, y + 14, 26, "125,212,255", 0.14);
+  }
+  /** Tapisserie du mur du fond (2 x 2) : tringle, étoffe bordée, écu brodé, franges. */
+  function tapestry(c, tx, ty, color) {
+    const [a, b, e] = CLOTH[color] || CLOTH.red, x = tx * T, y = ty * T;
+    sprite(c, x, y, [
+      [1, 0, 30, 3, "#5a3a1c"], [1, 0, 30, 1, WOOD], [-1, -1, 3, 5, "#c8aa4a"], [30, -1, 3, 5, "#c8aa4a"],
+      [3, 3, 26, 25, a], [5, 5, 22, 21, b], [5, 5, 22, 1, HI], [23, 6, 4, 20, SH],
+      [11, 8, 10, 13, e], [12, 9, 8, 11, a], [13, 11, 6, 2, e], [15, 10, 2, 8, e], [14, 14, 4, 1, e],
+      [3, 28, 26, 2, e], [5, 30, 1, 2, e], [11, 30, 1, 2, e], [16, 30, 1, 2, e], [21, 30, 1, 2, e], [26, 30, 1, 2, e],
+    ]);
+  }
+
+  /** Établi d'échange (2 x 1 tuiles, les objets dépassent vers le haut) : comptoir, balance qui oscille, pièces et gemmes des quatre raretés. */
+  function tradebench(c, tx, ty, t = 0) {
+    const x = tx * T, y = ty * T, k = Math.sin(t * 1.6) * 1.2;
+    softShadow(c, x + 16, y + 15, 17, 4, 0.34);
+    sprite(c, x, y, [
+      [1, 5, 30, 10, "#7a4a1c"], [1, 5, 30, 1, "#a06a2c"], [1, 6, 30, 1, HI], [1, 13, 30, 2, "#5a3a1c"], [24, 7, 6, 6, SH], [5, 7, 1, 6, "rgba(0,0,0,.2)", true], [13, 7, 1, 6, "rgba(0,0,0,.2)", true],
+      [2, 15, 3, 1, "#3a2410"], [27, 15, 3, 1, "#3a2410"],
+      [15, -7, 2, 12, "#c8aa4a"], [15, -7, 1, 12, "#f0d078"], [14, 4, 4, 1, "#a8872a"], [11, -8, 10, 2, "#c8aa4a"], [12, -8, 3, 1, "#f0d078"],
+    ]);
+    // Les plateaux de la balance oscillent doucement
+    const l = Math.round(k), r = -Math.round(k);
+    px(c, x + 10, y - 6 + l, 1, 5, "#8a909c"); px(c, x + 21, y - 6 + r, 1, 5, "#8a909c");
+    sprite(c, x, y, [[6, -1 + l, 9, 2, "#c8aa4a"], [6, -1 + l, 9, 1, "#f0d078"], [17, -1 + r, 9, 2, "#c8aa4a"], [17, -1 + r, 9, 1, "#f0d078"]]);
+    // Pièces et gemmes : commun, rare, épique, légendaire
+    sprite(c, x, y, [[2, 1, 4, 4, "#f0d078"], [2, 1, 4, 1, "#fff0b0"], [3, 3, 4, 3, "#d8b04a"], [8, 3, 3, 3, "#9aa0ab"], [20, 3, 3, 3, "#4f8bff"], [24, 2, 3, 4, "#b062ff"], [28, 3, 3, 3, "#ffb02e"], [28, 3, 3, 1, "#ffe9a0"]]);
+    glow(x + 26, y + 2, 20, "176,98,255", 0.12);
+  }
+
+  /* ---------- coins du hall : tapis de zone (armurerie, marché, scriptorium, arène) ---------- */
+  /** Tapis de zone au demi-pixel : ombre, bordure, fond tissé, coutures, puis un emblème tracé (`kind`). Les cases sont celles de `buildEntities` (`game.js`). */
+  function zoneMat(c, tx, ty, w, h, base, edge, accent, kind, ex, ey) {
+    const X = tx * T + 2, Y = ty * T + 2, Wd = w * T - 4, Hd = h * T - 4;
+    fx(c, X - 0.5, Y - 0.5, Wd + 1, Hd + 2, "rgba(0,0,0,.4)");
+    fx(c, X, Y, Wd, Hd, edge); fx(c, X + 1.5, Y + 1.5, Wd - 3, Hd - 3, base);
+    if (kind === "market") for (let i = 0; i < Wd - 3; i += 8) fx(c, X + 1.5 + i, Y + 1.5, 4, Hd - 3, "rgba(255,240,210,.16)");
+    for (let yy = Y + 4; yy < Y + Hd - 4; yy += 2) fx(c, X + 4, yy, Wd - 8, 0.5, "rgba(255,255,255,.045)");
+    for (let i = 4; i < Wd - 4; i += 3) { fx(c, X + i, Y + 3, 1, 0.5, accent); fx(c, X + i, Y + Hd - 3.5, 1, 0.5, accent); }
+    for (let j = 4; j < Hd - 4; j += 3) { fx(c, X + 3, Y + j, 0.5, 1, accent); fx(c, X + Wd - 3.5, Y + j, 0.5, 1, accent); }
+    fx(c, X, Y, Wd, 0.5, "rgba(255,255,255,.18)"); fx(c, X, Y + Hd - 0.5, Wd, 0.5, "rgba(0,0,0,.3)");
+    c.save(); c.strokeStyle = accent; c.fillStyle = accent; c.globalAlpha = 0.6; c.lineCap = "round";
+    const cx = ex, cy = ey;
+    if (kind === "armory") { // épées croisées et écu
+      c.lineWidth = 1.6; c.beginPath(); c.moveTo(cx - 9, cy - 8); c.lineTo(cx + 9, cy + 8); c.moveTo(cx + 9, cy - 8); c.lineTo(cx - 9, cy + 8); c.stroke();
+      c.lineWidth = 1; c.beginPath(); c.moveTo(cx - 12, cy - 4); c.lineTo(cx - 6, cy - 10); c.moveTo(cx + 12, cy - 4); c.lineTo(cx + 6, cy - 10); c.stroke();
+    } else if (kind === "market") { // pièce
+      c.lineWidth = 1.4; c.beginPath(); c.arc(cx, cy, 8, 0, Math.PI * 2); c.stroke(); c.lineWidth = 0.8; c.beginPath(); c.arc(cx, cy, 5.2, 0, Math.PI * 2); c.stroke();
+      c.fillRect(cx - 0.8, cy - 3, 1.6, 6);
+    } else if (kind === "scribe") { // plume et parchemin
+      c.lineWidth = 1.4; c.beginPath(); c.moveTo(cx - 7, cy + 8); c.quadraticCurveTo(cx + 2, cy - 2, cx + 9, cy - 9); c.stroke();
+      c.lineWidth = 0.8; c.beginPath(); c.moveTo(cx - 3, cy + 5); c.quadraticCurveTo(cx + 5, cy, cx + 8, cy - 6); c.stroke();
+      c.lineWidth = 1; c.strokeRect(cx - 12, cy + 3, 10, 7);
+    } else { // arène : anneau et rayons
+      c.lineWidth = 1.4; c.beginPath(); c.ellipse(cx, cy, 14, 9, 0, 0, Math.PI * 2); c.stroke(); c.lineWidth = 0.7; c.beginPath(); c.ellipse(cx, cy, 10, 6, 0, 0, Math.PI * 2); c.stroke();
+      for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; c.beginPath(); c.moveTo(cx + Math.cos(a) * 10, cy + Math.sin(a) * 6); c.lineTo(cx + Math.cos(a) * 14, cy + Math.sin(a) * 9); c.stroke(); }
+    }
+    c.restore();
+  }
+  /** Les quatre tapis de zone du hall. */
+  function hallZones(c) {
+    zoneMat(c, 1, 5, 6, 5, "#4a3220", "#2a1c12", "#c9a35b", "armory", 4 * T, 7.45 * T);
+    zoneMat(c, 16, 6, 7, 5, "#7a3226", "#3a1810", "#f0d078", "market", 19.5 * T, 10.45 * T);
+    zoneMat(c, 1, 10, 7, 4, "#2a3f7a", "#141c3a", "#f0d078", "scribe", 6 * T, 12.2 * T);
+    zoneMat(c, 16, 11, 7, 3, "#b9945a", "#7a5a2a", "#5a3a18", "arena", 19.5 * T, 12.2 * T);
+  }
+
   function drawObject(c, o, t = 0) {
     const w = o.w || 1, h = o.h || 1;
     switch (o.type) {
@@ -616,9 +738,15 @@
       case "banner": return banner(c, o.x, o.y, o.color);
       case "window": return windowSprite(c, o.x, o.y);
       case "bookshelf": return bookshelf(c, o.x, o.y);
+      case "dummy": return dummy(c, o.x, o.y);
+      case "armorstand": return armorstand(c, o.x, o.y);
+      case "brazier": return brazier(c, o.x, o.y, t + o.x * 0.4);
+      case "plant": return plant(c, o.x, o.y);
+      case "fountain": return fountain(c, o.x, o.y, t);
+      case "tapestry": return tapestry(c, o.x, o.y, o.color);
       default: return crate(c, o.x, o.y);
     }
   }
 
-  window.ForgeSprites = { glow, lightPass, softShadow, buildRoomLayer, roomTorches, polishShell, fx, hash, half, T, px, GRADE, TYPES, weapon, icon, person, LOOKS, roomShell, doorBottom, ironGate, hubDoor, drawObject, OBJECT_NAME, torch, furnace, anvil, board, stone, rack, stall, barrel, crate, sparks, sparkle, pointer };
+  window.ForgeSprites = { tradebench, dummy, armorstand, brazier, plant, fountain, tapestry, glow, lightPass, softShadow, buildRoomLayer, roomTorches, polishShell, fx, hash, half, T, px, GRADE, TYPES, weapon, icon, person, LOOKS, roomShell, doorBottom, ironGate, hubDoor, drawObject, OBJECT_NAME, torch, furnace, anvil, board, stone, rack, stall, barrel, crate, sparks, sparkle, pointer };
 })();

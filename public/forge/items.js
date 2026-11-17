@@ -197,28 +197,6 @@
     /** Les effets spéciaux d'une arme, un par ligne. */
     const affixesHtml = (card) => (card.affixes || []).map((a) => `<small class="fg-aff"><i></i>${esc(a.text)}</small>`).join("");
 
-    /** Page « Armes » : l'arme portée en détail, puis toutes les armes du sac à comparer avec elle, une par une. */
-    function arsenalHtml() {
-      const cat = catalog(), s = save();
-      const weapons = [...cat.values()].filter((i) => i.kind === "weapon" && owns(i.id)).sort(byRarity);
-      const worn = cat.get(s.equip.weapon), ref = worn && owns(worn.id) ? cardOf(worn) : null;
-      const head = worn && ref
-        ? `<div class="fg-box fg-wworn" style="--rc:${color(worn.rarity)}"><img src="${thumb(worn)}" alt="" class="fg-ithumb"><div><b>${esc(worn.name)}</b> ${tag(worn.rarity)}<small>${esc(weaponLine(ref))}</small><small>${esc(ref.perk)}</small>${affixesHtml(ref)}${qualityHtml(ref)}</div></div>`
-        : `<div class="fg-box fg-wworn"><div><b>Épée d'entraînement</b><small>Aucune arme portée : choisis-en une ci-dessous.</small></div></div>`;
-      const cards = weapons.map((item) => {
-        const card = cardOf(item), isWorn = isEquipped(item.id), isNew = s.fresh.includes(item.id);
-        const diff = ref && !isWorn ? card.dps - ref.dps : 0;
-        const delta = ref && !isWorn ? `<em class="${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "+" : "-"}${fmt(Math.abs(Math.round(diff * 10) / 10))} dégâts/s</em>` : "";
-        return `<div class="fg-icard fg-wcard ${isWorn ? "worn" : ""}" style="--rc:${color(item.rarity)}"><img src="${thumb(item)}" alt="" class="fg-ithumb">
-          <div><div class="fg-icard-name"><b>${esc(item.name)}</b></div>
-          <small>${tag(item.rarity)} ${delta}</small><small>${esc(card.perk)}</small><small>${esc(weaponLine(card))} · ${fmt(card.dps)} dégâts/s</small>${affixesHtml(card)}${qualityHtml(card)}</div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
-          <button type="button" class="fg-mini" ${isWorn ? "disabled" : `data-it-equip="${esc(item.id)}"`}>${isWorn ? "Portée" : "Équiper"}</button></div>`;
-      }).join("");
-      return `<p class="fg-note">Chaque arme est unique : ses dégâts, sa cadence et ses bonus sont tirés au hasard dans la fourchette de sa rareté. Les dégâts par seconde permettent de comparer (sans tes caractéristiques ni les coups critiques).</p>
-        ${head}<h4>Mes armes (${weapons.length})</h4>
-        <div class="fg-igrid">${cards || `<p class="fg-empty">Aucune arme pour l'instant. Elles tombent en forgeant, en faisant relire ou fusionner une pièce, et un peu en créant un projet.</p>`}</div>`;
-    }
-
     /** Les armes du sac, de la meilleure rareté à la moins bonne, pour les choisir depuis l'arène. */
     function weapons() {
       const cat = catalog();
@@ -241,16 +219,25 @@
       const shown = mine.filter((i) => ui.cat === "all" || i.part === ui.cat).sort(byRarity);
       const progress = RARITIES.map((r) => `<span><i style="background:${color(r)}"></i>${rarityName(r)} ${all.filter((i) => owns(i.id) && i.rarity === r).length}/${all.filter((i) => i.rarity === r).length}</span>`).join("");
       const filters = [["all", "Tout"], ...PARTS.map((p) => [p, PART_NAME[p]])].map(([k, label]) => `<button type="button" class="fg-fchip ${ui.cat === k ? "on" : ""}" data-it-cat="${k}">${label}</button>`).join("");
+      const worn0 = cat.get(s.equip.weapon), ref = worn0 && owns(worn0.id) ? cardOf(worn0) : null;
       const cards = shown.map((item) => {
-        const worn = isEquipped(item.id), isNew = s.fresh.includes(item.id);
-        return `<div class="fg-icard ${worn ? "worn" : ""}" style="--rc:${color(item.rarity)}"><img src="${thumb(item)}" alt="" class="fg-ithumb">
+        const worn = isEquipped(item.id), isNew = s.fresh.includes(item.id), isWeapon = item.kind === "weapon";
+        let detail = `<small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small>`;
+        if (isWeapon) {
+          // Une arme : son effet, ses valeurs, son jet, et la différence de dégâts par seconde avec l'arme portée
+          const card = cardOf(item), diff = ref && !worn ? card.dps - ref.dps : 0;
+          const delta = ref && !worn ? `<em class="${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "+" : "-"}${fmt(Math.abs(Math.round(diff * 10) / 10))} dégâts/s</em>` : "";
+          detail = `<small>${tag(item.rarity)} · Arme ${delta}</small><small>${esc(card.perk)}</small><small>${esc(weaponLine(card))} · ${fmt(card.dps)} dégâts/s</small>${affixesHtml(card)}${qualityHtml(card)}`;
+        }
+        return `<div class="fg-icard ${isWeapon ? "fg-wcard" : ""} ${worn ? "worn" : ""}" style="--rc:${color(item.rarity)}"><img src="${thumb(item)}" alt="" class="fg-ithumb">
           <div><div class="fg-icard-name"><b title="${esc(item.name)}">${esc(item.name)}</b>${count(item.id) > 1 ? `<em>×${count(item.id)}</em>` : ""}</div>
-          <small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small>${item.kind === "weapon" ? `<small>${esc(weaponLine(cardOf(item)))}</small>${affixesHtml(cardOf(item))}${qualityHtml(cardOf(item))}` : ""}<small class="fg-origin">${esc(sourcesText(item.id))}</small></div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
+          ${detail}<small class="fg-origin">${esc(sourcesText(item.id))}</small></div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
           <button type="button" class="fg-mini" data-it-${worn ? "unequip" : "equip"}="${worn ? item.part : esc(item.id)}">${worn ? "Retirer" : "Équiper"}</button></div>`;
       }).join("");
       // L'en-tête (progression et filtres) reste en haut pendant que la liste défile
+      const weaponNote = mine.some((i) => i.kind === "weapon") ? `<p class="fg-note">Chaque arme est unique : ses dégâts, sa cadence, ses bonus et ses effets sont tirés au hasard dans la fourchette de sa rareté. Les dégâts par seconde (sans tes caractéristiques ni les critiques) permettent de comparer.</p>` : "";
       return `<div class="fg-sticky"><div class="fg-prog">${progress}</div><div class="fg-fchips">${filters}</div></div>
-        <div class="fg-igrid">${cards || `<p class="fg-empty">Rien ici pour l'instant. Les objets s'obtiennent en forgeant des pièces, en faisant relire et fusionner tes pièces (butin aléatoire), chez le marchand, ou par échange.</p>`}</div>`;
+        ${weaponNote}<div class="fg-igrid">${cards || `<p class="fg-empty">Rien ici pour l'instant. Les objets s'obtiennent en forgeant des pièces, en faisant relire et fusionner tes pièces (butin aléatoire), un peu en créant un projet, chez le marchand, ou à l'établi d'échange de la forge.</p>`}</div>`;
     }
 
     function tradeHtml() {
@@ -284,7 +271,7 @@
     /** Contenu des onglets « Inventaire » et « Échange » de la page du personnage. */
     function panelHtml(tab) {
       ui.tab = tab;
-      return tab === "trade" ? tradeHtml() : tab === "arsenal" ? arsenalHtml() : inventoryHtml();
+      return tab === "trade" ? tradeHtml() : inventoryHtml();
     }
 
     /** Clics du panneau. @returns Vrai si le clic était pour les objets. */
