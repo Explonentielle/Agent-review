@@ -920,7 +920,13 @@
 
   function draw() {
     const c = g.c, t = g.time, p = g.player;
-    if (g.roomId === "forge") S.room(c, t, W, H); else S.roomShell(c, t, W, H, currentRoom()?.theme);
+    // Double résolution : tout le dessin garde ses coordonnées de tuiles de 16 px, le canevas a deux fois plus de pixels
+    c.setTransform(2, 0, 0, 2, 0, 0);
+    // Sol, murs, tapis : un calque fixe, fini au demi-pixel, rendu une fois par salle
+    const hall = g.roomId === "forge", theme = hall ? "forge" : currentRoom()?.theme ?? "forge", key = `${hall ? "hall" : "shell"}:${theme}`;
+    if (g.layer?.key !== key) g.layer = { key, cv: S.buildRoomLayer(W, H, theme, hall) };
+    c.drawImage(g.layer.cv, 0, 0, W * T, H * T);
+    if (hall) S.roomTorches(c, t, W);
     const items = g.entities.filter(isVisible).map((e) => [e.z, () => e.draw(c, t)]);
     for (const d of g.deco) items.push([d.z, () => d.draw(c, t)]);
     const aura = prestige()?.rank.aura;
@@ -933,6 +939,7 @@
     for (const f of g.fx) S.sparkle(c, f.x, f.y, (g.time - f.t0) / 1.1);
     const e = !modal() && !p.moving ? front() : null;
     if (e && e.interact) S.pointer(c, e.lx * T, e.ly * T - 2, t);
+    S.lightPass(c, t, W, H);
   }
 
   /** Noms et bulles posés au-dessus des personnages et objets proches. */
@@ -1031,7 +1038,7 @@
   /* ---------- montage ---------- */
   function build(root) {
     root.innerHTML = `<div class="fg-wrap"><div class="fg-stage">
-      <canvas class="fg-canvas" width="${W * T}" height="${H * T}" tabindex="0"></canvas>
+      <canvas class="fg-canvas" width="${W * T * 2}" height="${H * T * 2}" tabindex="0"></canvas>
       <div class="fg-labels"></div>
       <div class="fg-hud" data-fg="profile" role="button"></div><div class="fg-hud2"></div><div class="fg-quest"></div><div class="fg-tools"></div>
       <div class="fg-help">Flèches ou ZQSD : marcher · E : parler, toucher · clic : aller là · P : profil · I : sac · M : couper le son</div>

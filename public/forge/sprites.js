@@ -173,14 +173,6 @@
     architecte: { hair: "#7a5a3a", tunic: "#2a7f86", apron: "#d8cfa8", skin: "#e0b088", hat: "copper", beard: true },
   };
 
-  /** Sol, murs, tapis, torches et porte d'une salle de w x h tuiles. */
-  function room(c, t, w, h) {
-    roomShell(c, t, w, h, "forge");
-    const cx = Math.floor(w / 2) - 4;
-    carpetRug(c, cx, 4, 8, h - 5, "#5a2f3a", "#6e3a47", "#c9a35b");
-    doorBottom(c, Math.floor(w / 2) - 1, h);
-    [0, w - 1, cx - 2, cx + 9].forEach((tx, i) => torch(c, tx, 2, t + i));
-  }
   /** Tapis : bordure dorée et liseré intérieur (les franges sont ajoutées par `carpet`, quand le tapis ne touche pas un mur). */
   function carpetRug(c, tx, ty, w, h, a, b, e) {
     const X = tx * T, Y = ty * T, Wd = w * T, Hd = h * T;
@@ -195,7 +187,7 @@
     const x = tx * T, y = ty * T, f = Math.floor(t * 6) % 3;
     sprite(c, x, y, [[6, 6, 4, 8, WOOD2], [6, 6, 1, 8, WOOD], [4, 4, 8, 3, "#555b66"], [4, 4, 8, 1, "#8a909c"]]);
     px(c, x + 5, y - 1 - (f === 1 ? 1 : 0), 6, 6, "#ff7a1a"); px(c, x + 6, y + 1 - (f === 2 ? 1 : 0), 4, 4, "#ffc83d"); px(c, x + 7, y + 2 - (f === 2 ? 1 : 0), 2, 2, "#fff3b0");
-    c.fillStyle = "rgba(255,160,70,.07)"; c.beginPath(); c.arc(x + 8, y + 8, 22, 0, Math.PI * 2); c.fill();
+    glow(x + 8, y + 5, 34, "255,150,60", 0.32);
   }
   /** Four de 4 x 3 tuiles ; allumé (flammes qui dansent) ou éteint (cendres). */
   function furnace(c, tx, ty, lit, t = 0) {
@@ -219,7 +211,7 @@
       px(c, x + 22, y + 32, 6, 8, "#ffc83d"); px(c, x + 32, y + 30, 6, 10, "#ffd96a");
       px(c, x + 24, y + 36, 3, 4, "#fff3b0"); px(c, x + 34, y + 35, 3, 5, "#fff3b0");
       px(c, x + 14, y + 40, 36, 2, "#6a2a10"); px(c, x + 12, y + 41, 40, 1, "rgba(255,150,60,.35)");
-      c.fillStyle = "rgba(255,150,60,.09)"; c.beginPath(); c.arc(x + 32, y + 38, 38, 0, Math.PI * 2); c.fill();
+      glow(x + 32, y + 36, 64, "255,140,50", 0.38);
     } else {
       px(c, x + 18, y + 38, 28, 4, "#2a2622"); px(c, x + 24, y + 36, 6, 2, "#3a3430"); px(c, x + 36, y + 37, 4, 1, "#4a4540");
     }
@@ -251,7 +243,7 @@
     ]);
     const col = on ? "#7dd4ff" : "#4a5060", p = on ? 1 + (Math.floor(t * 3) % 2) : 1;
     px(c, x + 7, y + 8, 2, 4 * p, col); px(c, x + 5, y + 14, 6, 1, col); px(c, x + 6, y + 17, 1, 3, col); px(c, x + 9, y + 17, 1, 3, col);
-    if (on) { c.fillStyle = "rgba(125,212,255,.10)"; c.beginPath(); c.arc(x + 8, y + 16, 20, 0, Math.PI * 2); c.fill(); }
+    if (on) glow(x + 8, y + 14, 30, "125,212,255", 0.28);
   }
   /** Râtelier de 6 x 2 tuiles garni d'armes [type, qualité]. */
   function rack(c, tx, ty, list) {
@@ -306,6 +298,150 @@
   }
 
 
+  /* ---------- rendu net : détails au demi-pixel, ombres et lumières douces ---------- */
+  // Le monde est dessiné sur un canevas en double résolution (voir `game.js`) : une unité de dessin = 2 pixels écran. Les personnages et les
+  // objets gardent leurs gros pixels ; le sol, les murs et la lumière sont finis au demi-pixel, avec des dégradés, donc plus nets et moins en escalier.
+  const fx = (c, x, y, w, h, col) => { c.fillStyle = col; c.fillRect(x, y, w, h); };
+  const half = (v) => Math.round(v * 2) / 2;
+  /** Hasard déterministe : le même décor à chaque dessin (variations de dalles, fissures, mousse). */
+  function hash(a, b = 0) {
+    let h = Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  /** Les sources de lumière de l'image en cours, vidées à chaque `lightPass`. */
+  const lights = [];
+  /** Déclare une lumière (flamme, portail...) : `rgb` comme « 255,150,60 », `a` son intensité. Elle s'affiche dans `lightPass`, par-dessus tout le décor. */
+  function glow(x, y, r, rgb, a = 0.25) { if (lights.length < 64) lights.push({ x, y, r, rgb, a }); }
+  /** Lumières douces (dégradés additifs qui vacillent) puis vignette : à appeler une fois par image, après le dessin de la salle et de ses habitants. */
+  function lightPass(c, t, w, h) {
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    for (const l of lights) {
+      const k = 0.88 + 0.12 * Math.sin(t * 9 + l.x * 0.7 + l.y * 0.3) + 0.04 * Math.sin(t * 23 + l.x);
+      const g = c.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
+      g.addColorStop(0, `rgba(${l.rgb},${(l.a * k).toFixed(3)})`); g.addColorStop(0.5, `rgba(${l.rgb},${(l.a * k * 0.4).toFixed(3)})`); g.addColorStop(1, `rgba(${l.rgb},0)`);
+      c.fillStyle = g; c.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+    }
+    c.restore();
+    lights.length = 0;
+    const W2 = w * T, H2 = h * T, v = c.createRadialGradient(W2 / 2, H2 / 2, H2 * 0.32, W2 / 2, H2 / 2, W2 * 0.62);
+    v.addColorStop(0, "rgba(8,5,14,0)"); v.addColorStop(1, "rgba(8,5,14,.34)");
+    c.fillStyle = v; c.fillRect(0, 0, W2, H2);
+  }
+  /** Ombre douce posée au sol (une ellipse qui s'estompe) : sous les piliers, les statues, les meubles. */
+  function softShadow(c, cx, cy, rx, ry, a = 0.34) {
+    c.save(); c.translate(cx, cy); c.scale(1, ry / rx);
+    const g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgba(0,0,0,${a})`); g.addColorStop(0.6, `rgba(0,0,0,${a * 0.5})`); g.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, rx, 0, Math.PI * 2); c.fill(); c.restore();
+  }
+  /** Toile d'araignée dans un coin : rayons et fils (sx, sy : sens de la toile à partir du coin). */
+  function web(c, x, y, sx, sy, size = 15) {
+    c.save(); c.strokeStyle = "rgba(235,235,245,.16)"; c.lineWidth = 0.5;
+    const pts = (r) => [0, 1, 2, 3, 4].map((i) => { const a = (i / 4) * (Math.PI / 2); return [x + sx * Math.cos(a) * r, y + sy * Math.sin(a) * r]; });
+    for (const [px2, py2] of pts(size)) { c.beginPath(); c.moveTo(x, y); c.lineTo(px2, py2); c.stroke(); }
+    for (const r of [size * 0.35, size * 0.65, size]) { const p = pts(r); c.beginPath(); c.moveTo(p[0][0], p[0][1]); for (let i = 1; i < p.length; i++) { const mx = (p[i][0] + p[i - 1][0]) / 2 - sx * 0.8, my = (p[i][1] + p[i - 1][1]) / 2 - sy * 0.8; c.quadraticCurveTo(mx, my, p[i][0], p[i][1]); } c.stroke(); }
+    c.restore();
+  }
+  /** Sol et murs finis au demi-pixel : variation des dalles, joints doubles, fissures, gravillons, briques teintées, mousse, ombres de fond. */
+  function polishShell(c, w, h, p) {
+    const wood = p === THEMES.tavern, marble = p === THEMES.castle, W2 = w * T;
+    for (let y = 3; y < h - 1; y++) for (let x = 0; x < w; x++) {
+      const X = x * T, Y = y * T, r = hash(x * 31 + 7, y * 17 + 3), r2 = hash(x * 11 + 5, y * 29 + 1);
+      fx(c, X, Y, T, T, r < 0.5 ? `rgba(255,255,255,${(0.01 + r * 0.04).toFixed(3)})` : `rgba(0,0,0,${(0.01 + (r - 0.5) * 0.06).toFixed(3)})`);
+      if (wood) {
+        // Planches : deux joints par tuile, décalés, et des veinures
+        for (const [yy, off] of [[5, 0], [10.5, 6]]) {
+          fx(c, X, Y + yy, T, 0.5, "rgba(0,0,0,.26)"); fx(c, X, Y + yy + 0.5, T, 0.5, "rgba(255,230,180,.07)");
+          fx(c, X + ((off + x * 5) % 12) + 1, Y + yy - 5, 0.5, 5, "rgba(0,0,0,.22)");
+        }
+        for (let k = 0; k < 5; k++) fx(c, X + half(hash(x * 3 + k, y * 5) * 12) + 1, Y + half(hash(x * 7, y * 3 + k) * 14) + 1, half(2 + hash(k, x + y) * 4), 0.5, "rgba(0,0,0,.12)");
+        continue;
+      }
+      // Joints doubles : un trait sombre et un reflet d'un demi-pixel, coins écaillés
+      fx(c, X, Y + T - 0.5, T, 0.5, "rgba(0,0,0,.2)"); fx(c, X + T - 0.5, Y, 0.5, T, "rgba(0,0,0,.16)");
+      fx(c, X, Y + 0.5, T, 0.5, "rgba(255,255,255,.06)"); fx(c, X + 0.5, Y, 0.5, T, "rgba(255,255,255,.05)");
+      fx(c, X, Y, 1, 1, "rgba(255,255,255,.07)"); fx(c, X + T - 1, Y + T - 1, 1, 1, "rgba(0,0,0,.14)");
+      if (marble && r2 > 0.8) for (let k = 0; k < 6; k++) fx(c, X + 2 + k * 1.5 + hash(k, x + y) * 1.5, Y + 12 - k * 1.5, 1, 0.5, "rgba(255,255,255,.045)");
+      // Fissure : une marche de petits segments
+      if (r > 0.94 || r2 > 0.975) {
+        let cx = X + 2 + hash(x, y) * 11, cy = Y + 2 + hash(y, x) * 11;
+        for (let k = 0; k < 8; k++) {
+          const horiz = hash(x * 9 + k, y * 4) > 0.5, len = 1 + Math.floor(hash(x + k, y * 3) * 2);
+          fx(c, half(cx), half(cy), horiz ? len : 0.5, horiz ? 0.5 : len, "rgba(0,0,0,.22)");
+          fx(c, half(cx) + 0.5, half(cy) + 0.5, horiz ? len : 0.5, horiz ? 0.5 : len, "rgba(255,255,255,.05)");
+          if (horiz) cx += hash(k, x) > 0.4 ? len : -len; else cy += len;
+        }
+      }
+      for (let k = 0; k < 3; k++) fx(c, half(X + 1 + hash(x * 13 + k, y * 7 + 1) * 13), half(Y + 1 + hash(x * 5 + 2, y * 11 + k) * 13), 0.5, 0.5, k ? "rgba(0,0,0,.22)" : "rgba(255,255,255,.09)");
+    }
+    // Murs du haut : briques teintées une à une, joints au demi-pixel, mousse et traînées
+    for (let y = 0; y < 3; y++) for (let x = 0; x < w; x++) {
+      const X = x * T, Y = y * T;
+      for (let i = 0; i < 2; i++) {
+        const r = hash(x * 5 + i, y * 13 + 2);
+        fx(c, X + i * 8, Y, 8, T - 1, r < 0.5 ? `rgba(255,255,255,${(0.01 + r * 0.05).toFixed(3)})` : `rgba(0,0,0,${(0.015 + (r - 0.5) * 0.07).toFixed(3)})`);
+      }
+      fx(c, X, Y + T - 1.5, T, 0.5, "rgba(0,0,0,.25)"); fx(c, X, Y + 0.5, T, 0.5, "rgba(255,255,255,.07)");
+      const jx = X + (y % 2 ? 8 : 0); fx(c, jx + 0.5, Y, 0.5, T - 1, "rgba(255,255,255,.05)");
+      if (y === 2 && hash(x, 99) > 0.74) { fx(c, X + 3, Y + 11, 8, 4, "rgba(70,110,60,.17)"); for (let k = 0; k < 5; k++) fx(c, half(X + 3 + hash(x + k, 5) * 8), half(Y + 10 + hash(k, x) * 4), 0.5, 1, "rgba(120,170,90,.22)"); }
+      if (hash(x * 3, y + 40) > 0.8) { const g = c.createLinearGradient(0, Y, 0, Y + T); g.addColorStop(0, "rgba(0,0,0,.18)"); g.addColorStop(1, "rgba(0,0,0,0)"); c.fillStyle = g; c.fillRect(X + 4 + hash(x, 3) * 6, Y, 1.5, T); }
+    }
+    // Profondeur : le haut du mur dans l'ombre, et une ombre douce du mur sur le sol
+    let g = c.createLinearGradient(0, 0, 0, 3 * T); g.addColorStop(0, "rgba(0,0,0,.42)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = g; c.fillRect(0, 0, W2, 3 * T);
+    g = c.createLinearGradient(0, 3 * T, 0, 3 * T + 12); g.addColorStop(0, "rgba(0,0,0,.34)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = g; c.fillRect(0, 3 * T, W2, 12);
+    // Mur du bas : mêmes briques, et l'ombre douce qu'il jette vers le haut
+    for (let x = 0; x < w; x++) {
+      const X = x * T, Y = (h - 1) * T, r = hash(x * 5, 77);
+      fx(c, X, Y, T, T, r < 0.5 ? "rgba(255,255,255,.02)" : "rgba(0,0,0,.05)"); fx(c, X, Y + 0.5, T, 0.5, "rgba(255,255,255,.07)");
+    }
+    g = c.createLinearGradient(0, (h - 1) * T - 8, 0, (h - 1) * T); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.28)");
+    c.fillStyle = g; c.fillRect(0, (h - 1) * T - 8, W2, 8);
+    // Toiles d'araignée dans les coins du haut
+    web(c, 0, 0, 1, 1); web(c, W2, 0, -1, 1, 13);
+    // Une très légère lumière chaude au centre de la salle
+    const L = c.createRadialGradient(W2 / 2, h * T * 0.6, 8, W2 / 2, h * T * 0.6, W2 * 0.55);
+    L.addColorStop(0, "rgba(255,225,170,.06)"); L.addColorStop(1, "rgba(255,225,170,0)");
+    c.fillStyle = L; c.fillRect(0, 3 * T, W2, (h - 4) * T);
+  }
+  /** Tapis du hall : tissage au demi-pixel et losanges. */
+  function polishCarpet(c, tx, ty, w, h) {
+    const X = tx * T, Y = ty * T, Wd = w * T, Hd = h * T;
+    for (let yy = Y + 6; yy < Y + Hd - 6; yy += 2) fx(c, X + 6, yy, Wd - 12, 0.5, "rgba(255,255,255,.035)");
+    for (let xx = X + 6; xx < X + Wd - 6; xx += 2) fx(c, xx, Y + 6, 0.5, Hd - 12, "rgba(0,0,0,.05)");
+    for (let k = 0; k < Math.floor((Hd - 20) / 16); k++) {
+      const cx = X + Wd / 2, cy = Y + 14 + k * 16;
+      for (let i = 0; i < 5; i++) fx(c, cx - 4 + i, cy - i, 8 - 2 * i, 0.5, "rgba(240,208,120,.4)"), fx(c, cx - 4 + i, cy + i, 8 - 2 * i, 0.5, "rgba(240,208,120,.4)");
+      fx(c, cx - 1, cy - 0.5, 2, 1, "rgba(240,208,120,.65)");
+    }
+    fx(c, X, Y + Hd - 2.5, Wd, 0.5, "rgba(0,0,0,.2)");
+  }
+  /** Le calque fixe d'une salle (sol, murs, et pour le hall : tapis et porte), rendu une fois en double résolution. */
+  function buildRoomLayer(w, h, theme, hall) {
+    const cv = document.createElement("canvas");
+    cv.width = w * T * 2; cv.height = h * T * 2;
+    const c = cv.getContext("2d");
+    c.imageSmoothingEnabled = false; c.scale(2, 2);
+    const name = hall ? "forge" : theme;
+    roomShell(c, 0, w, h, name);
+    polishShell(c, w, h, THEMES[name] || THEMES.forge);
+    if (hall) {
+      const cx = Math.floor(w / 2) - 4;
+      carpetRug(c, cx, 4, 8, h - 5, "#5a2f3a", "#6e3a47", "#c9a35b");
+      polishCarpet(c, cx, 4, 8, h - 5);
+      doorBottom(c, Math.floor(w / 2) - 1, h);
+    }
+    return cv;
+  }
+  /** Les torches du hall (animées, donc dessinées à chaque image par-dessus le calque fixe). */
+  function roomTorches(c, t, w) {
+    const cx = Math.floor(w / 2) - 4;
+    [0, w - 1, cx - 2, cx + 9].forEach((tx, i) => torch(c, tx, 2, t + i));
+  }
+
   /* ---------- salles décrites par des données : thèmes, décors, porte du fond ---------- */
   const THEMES = {
     forge: { f1: "#4b4452", f2: "#453e4c", spot: "#3b3542", w1: "#2b2732", w2: "#1d1a22", trim: null },
@@ -353,6 +489,7 @@
     const x = tx * T, y = (h - 1) * T;
     sprite(c, x, y, [[-5, -6, 2 * T + 10, T + 6, "#3d3a48"], [-5, -6, 2 * T + 10, 2, HI2], [-5, -6, 3, T + 6, HI], [2 * T + 2, -6, 3, T + 6, SH], [-1, -3, 2 * T + 2, T + 3, "#1a0d10"]]);
     c.globalAlpha = 0.3 + 0.12 * Math.sin(t * 3); px(c, x - 1, y - 3, 2 * T + 2, T + 3, "#c0392b"); c.globalAlpha = 1;
+    glow(x + T, y + 6, 36, "220,60,50", 0.18);
     for (let i = 0; i < 8; i++) { px(c, x + i * 4, y - 3, 2, T + 3, "#7d838f"); px(c, x + i * 4, y - 3, 1, T + 3, "#c8ced8"); px(c, x + i * 4, y + T - 3, 2, 3, "#e8ecf2"); }
     px(c, x - 1, y + 2, 2 * T + 2, 2, "#4a4f5a"); px(c, x - 1, y + 10, 2 * T + 2, 2, "#4a4f5a");
     // Écu rouge au centre, deux épées croisées
@@ -363,6 +500,7 @@
     for (const tx2 of [x - 9, x + 2 * T + 5]) {
       const f = Math.floor(t * 8 + tx2) % 2;
       px(c, tx2 + 1, y + 2, 3, 8, "#3b2616"); px(c, tx2, y - 3 + f, 5, 5, "#ff9a2a"); px(c, tx2 + 1, y - 2 + f, 3, 3, "#ffd37a");
+      glow(tx2 + 2, y - 1, 26, "255,150,50", 0.3);
     }
   }
   /** Porte magique dans le mur du fond de la forge, qui mène à une salle (2 x 2 tuiles à partir de (tx, ty)). */
@@ -371,7 +509,7 @@
     sprite(c, x, y, [[0, 0, 32, 32, "#6e6a7a"], [2, 2, 28, 30, "#4a4756"], [0, 0, 32, 1, HI2], [0, 0, 2, 32, HI], [30, 0, 2, 32, SH], [5, 6, 22, 26, "#1b1430"], [5, 6, 22, 2, "rgba(0,0,0,.4)"],
       [3, 0, 26, 4, "#8a8698"], [3, 0, 26, 1, HI2], [11, -2, 10, 3, "#a9a6b4"], [14, 0, 4, 2, "#8a6aff"]]);
     for (let i = 0; i < 4; i++) { const f = Math.floor(t * 3 + i) % 3; px(c, x + 8 + i * 5, y + 9 + f * 6, 2, 3, "#8a6aff"); px(c, x + 10 + i * 4, y + 12 + ((f + 1) % 3) * 5, 1, 2, "#c4b0ff"); }
-    c.fillStyle = "rgba(138,106,255,.10)"; c.beginPath(); c.arc(x + 16, y + 22, 26, 0, Math.PI * 2); c.fill();
+    glow(x + 16, y + 20, 40, "138,106,255", 0.3);
   }
 
   const CLOTH = {
@@ -388,6 +526,7 @@
   }
   function pillar(c, tx, ty) {
     const x = tx * T, y = ty * T;
+    softShadow(c, x + 8, y + 31, 13, 4.5, 0.4);
     sprite(c, x, y, [
       [2, 27, 12, 5, "#8a8794"], [2, 27, 12, 1, "#b9b6c4"], [3, 5, 10, 22, "#a9a6b4"], [10, 5, 3, 22, "#8a8794"], [4, 5, 2, 22, "#c8c5d2"],
       [7, 6, 1, 20, "rgba(0,0,0,.1)", true], [1, 1, 14, 5, "#b9b6c4"], [1, 1, 14, 1, HI2], [1, 5, 14, 1, "#8a8794"], [2, 29, 12, 3, SH],
@@ -395,6 +534,7 @@
   }
   function statue(c, tx, ty) {
     const x = tx * T, y = ty * T;
+    softShadow(c, x + 8, y + 31, 13, 4.5, 0.4);
     sprite(c, x, y, [
       [2, 22, 12, 10, "#7d7a88"], [2, 22, 12, 2, "#9a97a6"], [2, 22, 12, 1, HI2], [11, 24, 3, 8, SH], [5, 9, 6, 13, "#a9a6b4"], [9, 9, 2, 13, "#8a8794"],
       [6, 3, 5, 6, "#b9b6c4"], [9, 3, 2, 6, "#a9a6b4"], [6, 3, 5, 1, HI2], [3, 10, 3, 8, "#a9a6b4"], [11, 10, 3, 8, "#8a8794"], [5, 9, 6, 1, HI],
@@ -480,5 +620,5 @@
     }
   }
 
-  window.ForgeSprites = { T, px, GRADE, TYPES, weapon, icon, person, LOOKS, room, roomShell, doorBottom, ironGate, hubDoor, drawObject, OBJECT_NAME, torch, furnace, anvil, board, stone, rack, stall, barrel, crate, sparks, sparkle, pointer };
+  window.ForgeSprites = { glow, lightPass, softShadow, buildRoomLayer, roomTorches, polishShell, fx, hash, half, T, px, GRADE, TYPES, weapon, icon, person, LOOKS, roomShell, doorBottom, ironGate, hubDoor, drawObject, OBJECT_NAME, torch, furnace, anvil, board, stone, rack, stall, barrel, crate, sparks, sparkle, pointer };
 })();
