@@ -4,7 +4,7 @@
  * le tirage d'un événement ne dépend que de son identifiant, donc recharger la page ne change rien et on ne peut pas « farmer » en
  * relançant. Aucune table, aucune donnée à migrer. Le navigateur retient ce qu'il a déjà ramassé (voir `public/forge/items.js`).
  */
-import { gradeOfScore, itemScore, type ArmoryTask, type Grade } from "./armory.js";
+import { defaultWeaponType, gradeOfScore, itemScore, type ArmoryProject, type ArmoryTask, type Grade, type WeaponTypeId } from "./armory.js";
 import { REVIEW_DONE, TASK_FORGED } from "./hero.js";
 
 export type ItemKind = "cosmetic" | "weapon";
@@ -83,6 +83,8 @@ export interface LootEvent {
   at: string;
   /** Qualité de la pièce (forge et fusion) : une meilleure pièce donne de meilleures chances. */
   quality: Grade;
+  /** Type d'arme du projet concerné : une arme qui tombe est toujours de ce type (absent : aucun projet connu, tous les types sont possibles). */
+  weaponType?: WeaponTypeId;
 }
 
 export interface Drop {
@@ -171,19 +173,34 @@ export function rollDrop(event: LootEvent): Drop | null {
   }
 
   const wantWeapon = rand() < WEAPON_SHARE;
-  const pool = LOOT_CATALOG.filter((item) => item.rarity === rarity && (item.kind === "weapon") === wantWeapon);
+  const pool = LOOT_CATALOG.filter((item) => item.rarity === rarity && (item.kind === "weapon") === wantWeapon && (!wantWeapon || !event.weaponType || item.weapon === event.weaponType));
   const item = pool[Math.floor(rand() * pool.length)]!;
   return { eventId: event.id, event: event.kind, at: event.at, itemId: item.id, rarity, seed: event.id };
 }
 
 /** Ce que le calcul lit de l'outil. */
 export interface LootInput {
-  tasks: Array<Pick<ArmoryTask, "id" | "status" | "files_changed" | "num_turns" | "mode" | "updated_at">>;
-  reviews: Array<{ id: number; status: string; updated_at: string }>;
+  tasks: Array<Pick<ArmoryTask, "id" | "status" | "files_changed" | "num_turns" | "mode" | "updated_at"> & Partial<Pick<ArmoryTask, "source" | "project_id">>>;
+  reviews: Array<{ id: number; status: string; updated_at: string; source?: string; project_id?: number }>;
   /** Tâches dont la MR a été fusionnée depuis l'outil. */
   mergedTaskIds: number[];
   /** Projets créés depuis l'outil (lignes `project_create` réussies du journal) : un petit butin, plafonné. */
-  projects?: Array<{ id: number; created_at: string }>;
+  projects?: Array<{ id: number; created_at: string; source?: string; path?: string }>;
+  /** Projets configurés dans la forge : ils donnent le type d'arme du butin de chaque événement. */
+  weaponProjects?: ArmoryProject[];
+}
+
+/**
+ * Type d'arme que le butin d'un projet doit avoir.
+ * @param projects Projets configurés.
+ * @param ref Le projet de l'événement : sa forge, et son identifiant ou son chemin.
+ * @returns Le type du projet, un type fixe tiré de son identifiant s'il est inconnu ou sans type, ou undefined si l'événement ne désigne aucun projet.
+ */
+function weaponTypeFor(projects: ArmoryProject[], ref: { source?: string; projectId?: number; path?: string }): WeaponTypeId | undefined {
+  if (!ref.source) return undefined;
+  const found = projects.find((p) => p.source === ref.source && (ref.projectId !== undefined ? p.projectId === ref.projectId : ref.path !== undefined && p.path === ref.path));
+  if (found) return found.weaponType ?? defaultWeaponType(found.source, found.projectId);
+  return ref.projectId !== undefined ? defaultWeaponType(ref.source, ref.projectId) : undefined;
 }
 
 /**
@@ -194,18 +211,25 @@ export interface LootInput {
 export function lootEvents(input: LootInput): LootEvent[] {
   const events: LootEvent[] = [];
   const merged = new Set(input.mergedTaskIds);
+  const configured = input.weaponProjects ?? [];
+  /** Le type d'arme du projet de l'événement, sous la forme d'un champ à ajouter à l'événement. */
+  const typed = (ref: { source?: string; projectId?: number; path?: string }): Pick<LootEvent, "weaponType"> => {
+    const weaponType = weaponTypeFor(configured, ref);
+    return weaponType ? { weaponType } : {};
+  };
   for (const task of input.tasks) {
     if (!TASK_FORGED.includes(task.status)) continue;
     const quality = gradeOfScore(itemScore(task));
-    events.push({ id: `forge-${task.id}`, kind: "forge", at: task.updated_at, quality });
-    if (merged.has(task.id)) events.push({ id: `merge-${task.id}`, kind: "merge", at: task.updated_at, quality });
+    const type = typed({ source: task.source, projectId: task.project_id });
+    events.push({ id: `forge-${task.id}`, kind: "forge", at: task.updated_at, quality, ...type });
+    if (merged.has(task.id)) events.push({ id: `merge-${task.id}`, kind: "merge", at: task.updated_at, quality, ...type });
   }
   for (const review of input.reviews) {
-    if (REVIEW_DONE.includes(review.status)) events.push({ id: `review-${review.id}`, kind: "review", at: review.updated_at, quality: "common" });
+    if (REVIEW_DONE.includes(review.status)) events.push({ id: `review-${review.id}`, kind: "review", at: review.updated_at, quality: "common", ...typed({ source: review.source, projectId: review.project_id }) });
   }
   // Les premiers projets créés seulement (les plus anciens), pour que créer des projets à la chaîne ne rapporte pas sans fin
   const firstProjects = [...(input.projects ?? [])].sort((a, b) => a.id - b.id).slice(0, PROJECT_MAX_EVENTS);
-  for (const project of firstProjects) events.push({ id: `project-${project.id}`, kind: "project", at: project.created_at, quality: "common" });
+  for (const project of firstProjects) events.push({ id: `project-${project.id}`, kind: "project", at: project.created_at, quality: "common", ...typed({ source: project.source, path: project.path }) });
   return events.sort((a, b) => b.at.localeCompare(a.at));
 }
 

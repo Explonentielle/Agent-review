@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { IMAGE_NAME_RE } from "../agent/imageName.js";
 import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
+import { WEAPON_TYPE_IDS } from "../game/armory.js";
 
 /**
  * Modèles autorisés. Plafond volontaire : Sonnet 5.5 au maximum, pour ne pas épuiser le quota
@@ -149,6 +150,11 @@ export const ProjectSettingsSchema = z.object({
    * ou `AGENT_IMAGES` du .env, ce qui est vérifié à l'enregistrement et au lancement de chaque tâche.
    */
   agentImage: z.string().trim().refine((v) => v === "" || IMAGE_NAME_RE.test(v), "nom d'image invalide").default(""),
+  /**
+   * Type d'arme du projet dans la forge : choisi à la création, il ne change plus (`saveProject` refuse de le modifier). Absent des projets
+   * enregistrés avant ce réglage : `saveProject` leur en donne un à leur prochain enregistrement (`defaultWeaponType`).
+   */
+  weaponType: z.enum(WEAPON_TYPE_IDS).optional(),
 });
 
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;

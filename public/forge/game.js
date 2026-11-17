@@ -56,7 +56,7 @@
     running: false, raf: 0, last: 0, time: 0, poll: 0,
     save: loadSave(), data: { hero: null, armory: { weapons: [], loot: [] }, forges: [] }, firstRefresh: true, done: null,
     player: { tx: 12, ty: 11, x: 12 * T, y: 11 * T, dir: "up", frame: 0, moving: null, path: [] },
-    keys: [], fx: [], entities: [], dlg: null, popup: false, custom: null, labelEls: new Map(), lastBump: 0, lastFire: 0, hammer: new Map(),
+    keys: [], fx: [], entities: [], dlg: null, popup: false, custom: null, labelEls: new Map(), hover: null, lastBump: 0, lastFire: 0, hammer: new Map(),
   };
   const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(g.save)); } catch { /* stockage indisponible */ } };
   /** Objets du forgeron : sac, équipement, butin, échanges (public/forge/items.js). */
@@ -95,13 +95,9 @@
     return total;
   }
 
-  /** Type d'arme d'un projet : celui choisi au râtelier, sinon un type fixe tiré de son nom. */
+  /** Type d'arme d'un projet : celui fixé à sa création (calculé par le serveur, il ne change jamais). */
   function weaponType(weapon) {
-    const chosen = g.save.weapons[weapon.key];
-    if (chosen && S.TYPES.some((t) => t.id === chosen)) return chosen;
-    let h = 0;
-    for (const ch of weapon.key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return S.TYPES[h % S.TYPES.length].id;
+    return S.TYPES.some((t) => t.id === weapon.weaponType) ? weapon.weaponType : S.TYPES[0].id;
   }
   const rackWeapons = () => g.data.armory.weapons.slice(0, 6).map((w) => [weaponType(w), w.grade]);
   const playerLook = () => ({ ...g.save.look, ...items.look() });
@@ -942,13 +938,13 @@
     S.lightPass(c, t, W, H);
   }
 
-  /** Noms et bulles posés au-dessus des personnages et objets proches. */
+  /** Bulles des agents, et nom du personnage ou de l'objet que la souris survole (jamais de nom affiché pour la seule proximité du joueur). */
   function updateLabels() {
-    const p = g.player, want = new Map();
+    const p = g.player, want = new Map(), hover = g.hover && !modal() ? g.hover : null;
     for (const e of g.entities) {
       if (!isVisible(e) || e.decor) continue;
       if (e.bubble) { want.set(e.id, { cls: "bubble", text: e.bubble, x: e.lx, y: e.ly }); continue; }
-      if (e.name && Math.hypot(e.lx - 0.5 - p.tx, e.ly - p.ty) <= 3.8) want.set(e.id, { cls: "pill", text: e.name, x: e.lx, y: e.ly });
+      if (e.name && hover && e.tiles.some(([tx, ty]) => tx === hover.tx && ty === hover.ty)) want.set(e.id, { cls: "pill", text: e.name, x: e.lx, y: e.ly });
     }
     const f = !modal() && !p.moving ? front() : null;
     if (f && f.interact) want.set("prompt", { cls: "prompt", text: `E · ${f.verb ?? "Parler"}`, x: f.lx, y: f.ly - 0.55 });
@@ -1018,6 +1014,12 @@
     g.keys = [];
     walkTo(tx, ty);
   }
+  /** Retient la case sous la souris : c'est elle qui décide quel nom s'affiche (`updateLabels`). */
+  function onCanvasMove(ev) {
+    const r = g.canvas.getBoundingClientRect();
+    g.hover = { tx: Math.floor(((ev.clientX - r.left) / r.width) * W), ty: Math.floor(((ev.clientY - r.top) / r.height) * H) };
+  }
+  const onCanvasLeave = () => { g.hover = null; };
   function onStageClick(ev) {
     const t = ev.target.closest("[data-fg]");
     if (t) {
@@ -1050,6 +1052,8 @@
     g.c.imageSmoothingEnabled = false;
     g.el = { stage: g.stage, labels: q(".fg-labels"), hud: q(".fg-hud"), hud2: q(".fg-hud2"), quest: q(".fg-quest"), tools: q(".fg-tools"), dialog: q(".fg-dialog"), banners: q(".fg-banners"), popups: q(".fg-popups") };
     g.canvas.addEventListener("click", onCanvasClick);
+    g.canvas.addEventListener("mousemove", onCanvasMove);
+    g.canvas.addEventListener("mouseleave", onCanvasLeave);
     g.stage.addEventListener("click", onStageClick);
     g.labelEls.clear();
     g.entities = buildAll();
@@ -1091,6 +1095,7 @@
     gameplay?.close();
     arena?.close();
     g.keys = [];
+    g.hover = null;
     A.stop();
   }
 

@@ -152,7 +152,7 @@ La forge (onglet « La forge », monde 2D, voir roadmap Annexe B) :
 - [ ] Premier passage : création du personnage, puis Maître Brann parle dans une forge vide. Marcher aux flèches ou ZQSD, cliquer pour aller quelque part, E pour parler. Aucun son tant que tu n'as pas cliqué sur Son ou Musique.
 - [ ] Un fourneau (GitHub ou GitLab) ouvre une fenêtre avec les vrais champs de connexion ; enregistrer un jeton fait apparaître la forge et la quête suivante.
 - [ ] La pierre d'éveil ouvre le bloc Claude et le terminal ; une fois connecté, l'apprenti apparaît.
-- [ ] Le râtelier liste les projets (arme, type au choix, éditeur de projet dans la fenêtre) ; l'apprenti liste les tickets et « Forger » lance une vraie tâche ; le gardien montre les reviews.
+- [ ] Le râtelier liste les projets (arme, type fixé à la création du projet et non modifiable, éditeur de projet dans la fenêtre) ; l'apprenti liste les tickets et « Forger » lance une vraie tâche ; le gardien montre les reviews.
 - [ ] Pendant une tâche : un forgeron frappe l'enclume, sa bulle dit la dernière étape ; à la fin, la pièce apparaît chez le marchand, qui la rachète pour de l'or ; l'or sert à acheter une tenue.
 - [ ] Tableau des quêtes, onglet « Aujourd'hui » : trois missions du jour, un coffre, trois missions de la semaine. Après une vraie action (lancer un ticket, forger une pièce, terminer une review), la barre avance, une bannière annonce la mission accomplie, un « ! » apparaît sur le tableau et « Réclamer » donne l'or une seule fois.
 - [ ] Série : après du travail deux jours de suite, « Série N j » apparaît sous la barre de niveau ; le lendemain, avant d'avoir travaillé, elle clignote (« s'éteint à minuit ») ; un jour sans rien la remet à zéro mais garde le record.

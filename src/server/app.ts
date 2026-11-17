@@ -344,9 +344,10 @@ export function buildServer(base: ServerDeps) {
 
   /** Le butin : le catalogue d'objets et ceux que l'activité réelle (pièces forgées, reviews, fusions) a fait tomber, de façon déterministe. */
   app.get("/api/forge/loot", async () => {
-    const [tasks, reviews, mergedTaskIds, journal] = await Promise.all([deps.tasks.list(500), deps.reviews.list(undefined, 500), deps.tasks.listMergedTaskIds(), deps.audit.list(500)]);
-    const projects = journal.filter((entry) => entry.action === "project_create" && entry.outcome === "ok").map((entry) => ({ id: entry.id, created_at: entry.created_at }));
-    return { catalog: LOOT_CATALOG, drops: computeDrops({ tasks, reviews, mergedTaskIds, projects }) };
+    const [tasks, reviews, mergedTaskIds, journal, weaponProjects] = await Promise.all([deps.tasks.list(500), deps.reviews.list(undefined, 500), deps.tasks.listMergedTaskIds(), deps.audit.list(500), deps.settings.listProjects()]);
+    const projects = journal.filter((entry) => entry.action === "project_create" && entry.outcome === "ok").map((entry) => ({ id: entry.id, created_at: entry.created_at, source: entry.source, path: entry.target }));
+    // Une arme qui tombe est toujours du type d'arme du projet concerné
+    return { catalog: LOOT_CATALOG, drops: computeDrops({ tasks, reviews, mergedTaskIds, projects, weaponProjects }) };
   });
 
   // --- Paramètres ------------------------------------------------------------

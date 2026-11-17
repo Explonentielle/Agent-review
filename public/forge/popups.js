@@ -70,7 +70,7 @@
       },
     },
 
-    /** Le râtelier : un projet = une arme. Niveau et qualité viennent du travail réel ; le type d'arme se choisit. */
+    /** Le râtelier : un projet = une arme. Niveau et qualité viennent du travail réel ; le type d'arme est choisi à la création du projet. */
     rack: {
       rerender: true,
       live: true,
@@ -92,7 +92,7 @@
             <h4>${esc(chosen.path)}</h4><div>${gradeTag(chosen.grade)} · Niveau ${chosen.level} · ${chosen.xp} XP</div>${pct(((chosen.xp - lo) * 100) / (hi - lo))}
             <div class="fg-stats"><span><b>${chosen.forged}</b> pièce${chosen.forged > 1 ? "s" : ""} forgée${chosen.forged > 1 ? "s" : ""}</span><span><b>${chosen.reviews}</b> revue${chosen.reviews > 1 ? "s" : ""}</span><span><b>${chosen.failures}</b> échec${chosen.failures > 1 ? "s" : ""}</span><span><b>${chosen.blocked}</b> question${chosen.blocked > 1 ? "s" : ""}</span></div>
             <p class="fg-note">${chosen.devEnabled ? "L'agent dev est autorisé sur ce projet." : "L'agent dev n'est pas encore autorisé sur ce projet : règle-le pour qu'on puisse y forger."}</p></div></div>
-            <div class="fg-types"><span>Type d'arme</span>${S.TYPES.map((t) => `<button type="button" class="fg-type ${t.id === type ? "on" : ""}" data-fg-type="${t.id}" title="${esc(t.name)}">${weaponImg(t.id, chosen.grade)}</button>`).join("")}</div>
+            <div class="fg-types"><span>Type d'arme (fixé à la création du projet)</span><span class="fg-type on" title="${esc(S.TYPES.find((t) => t.id === type)?.name ?? "")}">${weaponImg(type, chosen.grade)}</span></div>
             <div class="fg-inline"><button type="button" class="fg-btn" data-fg-edit="${esc(chosen.key)}">Régler le projet</button></div>`;
         })() : `<p class="fg-note">Aucune arme pour l'instant. Chaque projet que tu ajoutes devient une arme à forger.</p>`;
         return {
@@ -571,10 +571,6 @@
       return;
     }
     if ((el = by("data-fg-sel"))) { current.sel = el.dataset.fgSel; A.sfx.select(); return render(); }
-    if ((el = by("data-fg-type"))) {
-      game.save.weapons[current.sel] = el.dataset.fgType;
-      game.persist(); A.sfx.select(); return render();
-    }
     if ((el = by("data-fg-edit"))) { openProjectEditor(el.dataset.fgEdit); return; }
     if (by("data-fg-new")) { openProjectEditor(null); return; }
     if ((el = by("data-fg-launch"))) return launch(el.dataset.fgLaunch);
