@@ -754,7 +754,8 @@
     return `<div class="fg-pf">
       <div class="fg-box fg-pf-head"><div class="fg-pf-level"><span><b>${left}</b> point${left > 1 ? "s" : ""} à répartir</span><span>1 point par niveau (niveau ${h.level})</span></div>
         <small class="fg-note">${left > 0 ? "Plus tu montes de niveau en travaillant, plus tu en gagnes." : "Tous tes points sont répartis."}</small>
-        <small class="fg-note"><b>${esc(b.weapon.spec.name)}</b>${b.weapon.training ? " d'entraînement" : ""} : ${esc(b.weapon.spec.perk)}</small></div>
+        <small class="fg-note"><b>${esc(b.weapon.spec.name)}</b>${b.weapon.training ? " d'entraînement" : ""} : ${esc(b.weapon.spec.perk)}</small>
+        ${(b.weapon.roll.affixes || []).map((a) => `<small class="fg-note fg-aff"><i></i>${esc(a.text)}</small>`).join("")}</div>
       <div class="fg-box fg-stats">${rows}</div>
       <div class="fg-tiles">${tiles}</div>
       <h4>Équipement</h4>

@@ -51,7 +51,23 @@ Une arme du butin n'est plus un modèle fixe : **chaque exemplaire est unique**.
 | Épique | 1,20 à 1,50 | 1,00 à 0,88 | 4 à 7 | 1 à 2 | 2 à 5 |
 | Légendaire | 1,40 à 1,80 | 0,96 à 0,82 | 7 à 12 | 2 à 3 | 3 à 7 |
 
-Les fourchettes se **chevauchent** : un bon rare peut valoir mieux qu'un mauvais épique, et un jet parfait ou très faible existe à chaque rareté. Les lignes de bonus tombent sur des caractéristiques différentes (Agilité, Vitalité, Chance), jamais deux fois la même. La **qualité du jet** (0 à 100 %, moyenne des tirages) s'affiche : jet faible, moyen, bon, très bon, exceptionnel. Une arme sans graine (ancienne sauvegarde, objet du catalogue, arme d'entraînement) vaut la moyenne de sa rareté, comme avant.
+Les fourchettes se **chevauchent** : un bon rare peut valoir mieux qu'un mauvais épique, et un jet parfait ou très faible existe à chaque rareté. Les lignes de bonus tombent sur des caractéristiques différentes (Agilité, Vitalité, Chance), jamais deux fois la même. La **qualité du jet** est un **rang** : « 87 % » veut dire meilleur que 87 % des tirages possibles de cette arme (jet faible sous 20 %, moyen, bon à partir de 50 %, très bon à partir de 80 %, exceptionnel à partir de 95 %). Une simple moyenne des valeurs se tasserait autour de 50 % et rendrait un jet parfait impossible. Une arme sans graine (ancienne sauvegarde, objet du catalogue, arme d'entraînement) vaut la moyenne de sa rareté, comme avant.
+
+### Effets spéciaux
+
+Plus l'arme est rare, plus elle a d'effets : **commun aucun, rare 1, épique 2, légendaire 3**, tous différents, tirés avec la graine (après les valeurs ci-dessus : elles ne changent pas). Leur valeur est tirée dans une fourchette puis multipliée par la rareté (rare x 0,85, épique x 1, légendaire x 1,2). Une arme épique ou légendaire prend un surnom de son premier effet (« Lance mythique des braises »).
+
+| Effet | Fourchette | Ce qu'il fait |
+|---|---|---|
+| Brûlure | 12 à 26 % | Brûle l'ennemi : ce pourcentage des dégâts du coup, par seconde, pendant 3 s (même assommé, même contre le seigneur). Un nouveau coup relance la brûlure |
+| Recul | +50 à +140 % | Repousse plus loin (réduit à 30 % contre le seigneur, comme tout recul) |
+| Vol de vie | 3 à 8 % | Rend ce pourcentage des dégâts infligés en points de vie, jamais au-delà du maximum |
+| Givre | 25 à 45 % | Ralentit l'ennemi touché pendant 1,2 s (au plus 15 % et moitié moins longtemps contre le seigneur) ; avec le bâton, c'est le plus fort des deux qui compte |
+| Étourdissement | 10 à 22 % | Chance d'assommer 0,5 s à chaque coup (0,15 s contre le seigneur) |
+| Foudre | 18 à 35 % | Chance d'un éclair à chaque coup : 50 % des dégâts à l'ennemi le plus proche de celui qui est touché (à 70 px au plus) |
+| Précision | +4 à +10 points | Chance de critique en plus, plafond relevé d'autant |
+
+Les effets s'appliquent aux coups de l'arme (corps à corps et projectiles), pas à l'onde de choc du marteau. Dans l'arène : des flammes sur l'ennemi brûlé, un éclair visible entre deux ennemis, des chiffres orange (brûlure), bleus (éclair) et verts (vie rendue).
 
 **Où les armes tombent** : une pièce forgée, une review terminée (une fois sur deux), une pièce fusionnée (meilleures chances) et, un peu, **la création d'un projet** (une fois sur trois environ, raretés plus basses, seuls les 20 premiers projets comptent : créer un projet est facile). Un échange de 3 objets contre 1 de la rareté au-dessus donne aussi une arme tirée au sort.
 

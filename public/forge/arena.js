@@ -92,6 +92,15 @@
       c.globalAlpha = 0.42; px(c, b.x - 5 * scale, feetY - 15 * scale, 10 * scale, 15 * scale, "#6ab8ff");
       c.globalAlpha = 0.85; px(c, b.x - 6 * scale, feetY - 1, 3, 2, "#bfe4ff"); px(c, b.x + 3 * scale, feetY - 2, 3, 2, "#6ab8ff");
     }
+    // Brûlé : des flammes qui dansent sur la tête et les épaules
+    if (b.alive && b.burn) {
+      c.globalAlpha = 0.2; px(c, b.x - 5 * scale, feetY - 15 * scale, 10 * scale, 15 * scale, "#ff5a1a");
+      c.globalAlpha = 0.95;
+      for (let i = 0; i < 3; i++) {
+        const rise = (Math.floor(t * 11 + i * 2 + b.x) % 3) * 2;
+        px(c, b.x - 5 * scale + i * 4 * scale, feetY - (12 + rise) * scale, 2 * scale, 3 * scale, i === 1 ? "#ffd37a" : "#ff7a2a");
+      }
+    }
     c.globalAlpha = 1;
     if (!b.alive) return;
     if (b.windup > 0 && b.tell) { px(c, b.x - 1, b.y - 22 * scale, 2, 6, "#ff4a3a"); px(c, b.x - 1, b.y - 14 * scale, 2, 2, "#ff4a3a"); }
@@ -153,6 +162,7 @@
             ${weaponPicker()}
             <p>Arme : <b>${esc(w.spec.name)}</b>${w.training ? " d'entraînement" : ` ${esc(S.GRADE[w.rarity]?.name.toLowerCase() ?? "")}`}${jet}</p>
             <p class="fg-play-note">${esc(w.spec.perk)}</p>
+            ${(r.affixes || []).map((a) => `<p class="fg-play-note fg-play-aff">◆ ${esc(a.text)}</p>`).join("")}
             <p>${d.maxHp} PV · ${d.damage} dégâts · ${round2(1 / d.cooldown)} coups/s · vitesse ${d.speed} · critique ${pct(d.crit)} · roulade ${d.dashCd} s</p>
             <p>${esc(bonusLine)}</p>
             ${options.best ? `<p>Ton record : ${options.best.wave} vague${options.best.wave > 1 ? "s" : ""} terminée${options.best.wave > 1 ? "s" : ""}${options.best.wins ? `, ${options.best.wins} victoire${options.best.wins > 1 ? "s" : ""}` : ""}.</p>` : ""}
@@ -245,7 +255,14 @@
           for (const f of fight.fx) {
             if (f.kind === "puff") { const k = f.t / f.life; c.globalAlpha = 1 - k; for (let i = 0; i < 6; i++) { const a = i * 1.05; px(c, f.x + Math.cos(a) * (3 + k * 10), f.y + Math.sin(a) * (3 + k * 10) - k * 4, 3, 3, "#f5e9c8"); } c.globalAlpha = 1; }
             else if (f.kind === "shock") { const k = f.t / f.life, rr = f.r * (0.4 + 0.6 * k); c.globalAlpha = 0.85 * (1 - k); for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI * 2; px(c, Math.round(f.x + Math.cos(a) * rr) - 1, Math.round(f.y + Math.sin(a) * rr * 0.8) - 1, 3, 3, i % 2 ? "#f5e9c8" : "#c9a36a"); } c.globalAlpha = 1; }
-            else if (f.kind === "num") { const k = f.t / f.life; c.globalAlpha = 1 - k * k; c.font = f.crit ? "bold 10px monospace" : "bold 8px monospace"; c.textAlign = "center"; c.fillStyle = "#1d1814"; c.fillText(f.text, f.x + 1, f.y - k * 14 + 1); c.fillStyle = f.hero ? "#ff6a5a" : f.crit ? "#ffd37a" : "#ffffff"; c.fillText(f.text, f.x, f.y - k * 14); c.globalAlpha = 1; }
+            else if (f.kind === "num") { const k = f.t / f.life; c.globalAlpha = 1 - k * k; c.font = f.crit ? "bold 10px monospace" : "bold 8px monospace"; c.textAlign = "center"; c.fillStyle = "#1d1814"; c.fillText(f.text, f.x + 1, f.y - k * 14 + 1); c.fillStyle = f.hero ? "#ff6a5a" : f.heal ? "#7be092" : f.burn ? "#ff9a3a" : f.bolt ? "#9ad7ff" : f.crit ? "#ffd37a" : "#ffffff"; c.fillText(f.text, f.x, f.y - k * 14); c.globalAlpha = 1; }
+            else if (f.kind === "bolt") {
+              // Éclair de l'arme : un trait brisé du bot touché à son voisin, qui s'efface vite
+              const k = f.t / f.life, n = 5;
+              c.globalAlpha = 1 - k; c.lineWidth = 2; c.strokeStyle = "#bfe4ff"; c.beginPath(); c.moveTo(f.x, f.y);
+              for (let i = 1; i <= n; i++) { const u = i / n, jx = i < n ? ((i * 7919) % 5 - 2) * 1.6 : 0, jy = i < n ? ((i * 104729) % 5 - 2) * 1.6 : 0; c.lineTo(f.x + (f.x2 - f.x) * u + jx, f.y + (f.y2 - f.y) * u + jy); }
+              c.stroke(); c.lineWidth = 1; c.strokeStyle = "#ffffff"; c.stroke(); c.globalAlpha = 1;
+            }
           }
           // Jauges : points de vie et roulade, en haut à gauche, sur la palissade
           const h = fight.hero, frac = Math.max(0, h.hp / h.maxHp);

@@ -36,7 +36,11 @@
       // Les exemplaires uniques possédés : le modèle du catalogue, plus leur graine (qui fixe leurs valeurs)
       for (const id of Object.keys(save().items || {})) {
         const [baseId, seed] = splitId(id), base = seed ? map.get(baseId) : null;
-        if (base?.kind === "weapon") map.set(id, { ...base, id, seed, unique: true });
+        if (base?.kind === "weapon") {
+          // Une arme épique ou légendaire prend un surnom de son premier effet : « Lance mythique des braises »
+          const epithet = window.ForgeCombat.rollWeapon(base.weapon, base.rarity, seed)?.epithet;
+          map.set(id, { ...base, id, seed, unique: true, name: epithet ? `${base.name} ${epithet}` : base.name });
+        }
       }
       return map;
     }
@@ -190,13 +194,16 @@
     /** Jauge de qualité du jet : de faible à exceptionnel. */
     const qualityHtml = (card) => card.standard ? "" : `<span class="fg-qual" title="Qualité du tirage de cette arme"><span class="fg-qbar"><i style="width:${Math.round(card.quality * 100)}%"></i></span>${esc(card.label)} · ${Math.round(card.quality * 100)} %</span>`;
 
+    /** Les effets spéciaux d'une arme, un par ligne. */
+    const affixesHtml = (card) => (card.affixes || []).map((a) => `<small class="fg-aff"><i></i>${esc(a.text)}</small>`).join("");
+
     /** Page « Armes » : l'arme portée en détail, puis toutes les armes du sac à comparer avec elle, une par une. */
     function arsenalHtml() {
       const cat = catalog(), s = save();
       const weapons = [...cat.values()].filter((i) => i.kind === "weapon" && owns(i.id)).sort(byRarity);
       const worn = cat.get(s.equip.weapon), ref = worn && owns(worn.id) ? cardOf(worn) : null;
       const head = worn && ref
-        ? `<div class="fg-box fg-wworn" style="--rc:${color(worn.rarity)}"><img src="${thumb(worn)}" alt="" class="fg-ithumb"><div><b>${esc(worn.name)}</b> ${tag(worn.rarity)}<small>${esc(weaponLine(ref))}</small><small>${esc(ref.perk)}</small>${qualityHtml(ref)}</div></div>`
+        ? `<div class="fg-box fg-wworn" style="--rc:${color(worn.rarity)}"><img src="${thumb(worn)}" alt="" class="fg-ithumb"><div><b>${esc(worn.name)}</b> ${tag(worn.rarity)}<small>${esc(weaponLine(ref))}</small><small>${esc(ref.perk)}</small>${affixesHtml(ref)}${qualityHtml(ref)}</div></div>`
         : `<div class="fg-box fg-wworn"><div><b>Épée d'entraînement</b><small>Aucune arme portée : choisis-en une ci-dessous.</small></div></div>`;
       const cards = weapons.map((item) => {
         const card = cardOf(item), isWorn = isEquipped(item.id), isNew = s.fresh.includes(item.id);
@@ -204,7 +211,7 @@
         const delta = ref && !isWorn ? `<em class="${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "+" : "-"}${fmt(Math.abs(Math.round(diff * 10) / 10))} dégâts/s</em>` : "";
         return `<div class="fg-icard fg-wcard ${isWorn ? "worn" : ""}" style="--rc:${color(item.rarity)}"><img src="${thumb(item)}" alt="" class="fg-ithumb">
           <div><div class="fg-icard-name"><b>${esc(item.name)}</b></div>
-          <small>${tag(item.rarity)} ${delta}</small><small>${esc(card.perk)}</small><small>${esc(weaponLine(card))} · ${fmt(card.dps)} dégâts/s</small>${qualityHtml(card)}</div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
+          <small>${tag(item.rarity)} ${delta}</small><small>${esc(card.perk)}</small><small>${esc(weaponLine(card))} · ${fmt(card.dps)} dégâts/s</small>${affixesHtml(card)}${qualityHtml(card)}</div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
           <button type="button" class="fg-mini" ${isWorn ? "disabled" : `data-it-equip="${esc(item.id)}"`}>${isWorn ? "Portée" : "Équiper"}</button></div>`;
       }).join("");
       return `<p class="fg-note">Chaque arme est unique : ses dégâts, sa cadence et ses bonus sont tirés au hasard dans la fourchette de sa rareté. Les dégâts par seconde permettent de comparer (sans tes caractéristiques ni les coups critiques).</p>
@@ -238,7 +245,7 @@
         const worn = isEquipped(item.id), isNew = s.fresh.includes(item.id);
         return `<div class="fg-icard ${worn ? "worn" : ""}" style="--rc:${color(item.rarity)}"><img src="${thumb(item)}" alt="" class="fg-ithumb">
           <div><div class="fg-icard-name"><b title="${esc(item.name)}">${esc(item.name)}</b>${count(item.id) > 1 ? `<em>×${count(item.id)}</em>` : ""}</div>
-          <small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small>${item.kind === "weapon" ? `<small>${esc(weaponLine(cardOf(item)))}</small>${qualityHtml(cardOf(item))}` : ""}<small class="fg-origin">${esc(sourcesText(item.id))}</small></div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
+          <small>${tag(item.rarity)} · ${PART_NAME[item.part] ?? ""}</small>${item.kind === "weapon" ? `<small>${esc(weaponLine(cardOf(item)))}</small>${affixesHtml(cardOf(item))}${qualityHtml(cardOf(item))}` : ""}<small class="fg-origin">${esc(sourcesText(item.id))}</small></div>${isNew ? '<span class="fg-new">nouveau</span>' : ""}
           <button type="button" class="fg-mini" data-it-${worn ? "unequip" : "equip"}="${worn ? item.part : esc(item.id)}">${worn ? "Retirer" : "Équiper"}</button></div>`;
       }).join("");
       // L'en-tête (progression et filtres) reste en haut pendant que la liste défile
