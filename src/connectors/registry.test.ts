@@ -20,7 +20,7 @@ describe("registre des forges", () => {
     const registry = new ForgeRegistry([forge("gitlab", "alex")]);
 
     expect(registry.has("github")).toBe(false);
-    expect(() => registry.get("github")).toThrow("La forge « github » n'est pas configurée");
+    expect(() => registry.get("github")).toThrow("Aucun jeton GitHub enregistré");
     expect(() => registry.get("gitea")).toThrow("n'est pas configurée");
     expect(() => registry.get("")).toThrow("n'est pas configurée");
   });
@@ -34,6 +34,6 @@ describe("registre des forges", () => {
     const registry = new ForgeRegistry([], { allowEmpty: true });
     expect(registry.all()).toEqual([]);
     expect(registry.has("gitlab")).toBe(false);
-    expect(() => registry.get("gitlab")).toThrow("n'est pas configurée");
+    expect(() => registry.get("gitlab")).toThrow("Aucun jeton GitLab enregistré");
   });
 });

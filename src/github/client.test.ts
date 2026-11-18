@@ -161,3 +161,80 @@ describe("client GitHub : garde-fous sur les entrées", () => {
     expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ event: "APPROVE", commit_id: "b".repeat(40) });
   });
 });
+
+describe("client GitHub : fusion d'une PR", () => {
+  it("fusion : le commit relu est transmis (GitHub refuse en 409 si la tête a bougé), fusion normale", async () => {
+    const calls = stubFetch(() => reply({ merged: true }));
+    await client().mergePull("acme/projet", 7, "c".repeat(40));
+
+    expect(calls[0]!.url).toBe(`${BASE}/repos/acme/projet/pulls/7/merge`);
+    expect(calls[0]!.init?.method).toBe("PUT");
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ sha: "c".repeat(40), merge_method: "merge" });
+  });
+
+  it("un refus de fusion (droits, conflit, tête changée) remonte avec son code", async () => {
+    stubFetch(() => reply({ message: "Head branch was modified" }, 409));
+    await expect(client().mergePull("acme/projet", 7, "c".repeat(40))).rejects.toThrow(GithubError);
+    stubFetch(() => reply({ message: "Not Allowed" }, 405));
+    await expect(client().mergePull("acme/projet", 7, "c".repeat(40))).rejects.toMatchObject({ status: 405 });
+  });
+
+  it("sortie du brouillon : mutation GraphQL avec l'identifiant global de la PR", async () => {
+    const calls = stubFetch(() => reply({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }));
+    await client().markPullReady("PR_kwDOabc");
+
+    expect(calls[0]!.url).toBe(`${BASE}/graphql`);
+    expect(calls[0]!.init?.method).toBe("POST");
+    const body = JSON.parse(String(calls[0]!.init?.body)) as { query: string; variables: { id: string } };
+    expect(body.variables).toEqual({ id: "PR_kwDOabc" });
+    expect(body.query).toContain("markPullRequestReadyForReview");
+  });
+
+  it("GitHub Enterprise : l'adresse GraphQL se déduit de /api/v3", async () => {
+    const calls = stubFetch(() => reply({ data: {} }));
+    await new GithubClient("https://ghe.example/api/v3", "jeton").markPullReady("PR_x");
+    expect(calls[0]!.url).toBe("https://ghe.example/api/graphql");
+  });
+
+  it("GraphQL répond 200 avec des erreurs : c'est un échec, pas un succès", async () => {
+    stubFetch(() => reply({ errors: [{ message: "Resource not accessible by personal access token" }] }));
+    await expect(client().markPullReady("PR_x")).rejects.toThrow(/Resource not accessible/);
+  });
+});
+
+describe("client GitHub : ressource supprimée", () => {
+  it("un ticket supprimé (410) ou absent (404) est « introuvable » : null, pas une erreur ; une autre erreur reste une exception", async () => {
+    stubFetch(() => reply({ message: "This issue was deleted" }, 410));
+    expect(await client().getIssue("acme/projet", 2)).toBeNull();
+    stubFetch(() => reply({ message: "Not Found" }, 404));
+    expect(await client().getIssue("acme/projet", 2)).toBeNull();
+    stubFetch(() => reply({ message: "Server Error" }, 500));
+    await expect(client().getIssue("acme/projet", 2)).rejects.toThrow(GithubError);
+  });
+});
+
+describe("client GitHub : ticket créé par le Scribe", () => {
+  it("assigné à l'utilisateur du jeton (lu une seule fois)", async () => {
+    const calls = stubFetch((url) => (url.endsWith("/user") ? reply({ id: 9, login: "alex" }) : reply({ number: 8, title: "t" }, 201)));
+    const c = client();
+    await c.createIssue("acme/projet", { title: "t", body: "b", labels: ["bug"] });
+    await c.createIssue("acme/projet", { title: "u", body: "b" });
+
+    expect(calls.map((x) => `${x.init?.method} ${x.url.replace(BASE, "")}`)).toEqual(["GET /user", "POST /repos/acme/projet/issues", "POST /repos/acme/projet/issues"]);
+    expect(JSON.parse(String(calls[1]!.init?.body))).toEqual({ title: "t", body: "b", labels: ["bug"], assignees: ["alex"] });
+    expect(JSON.parse(String(calls[2]!.init?.body)).assignees).toEqual(["alex"]);
+  });
+
+  it("l'utilisateur du jeton illisible : le ticket est créé quand même, sans assigné", async () => {
+    const calls = stubFetch((url) => (url.endsWith("/user") ? reply({ message: "Bad credentials" }, 401) : reply({ number: 8 }, 201)));
+    await client().createIssue("acme/projet", { title: "t", body: "b" });
+    expect(JSON.parse(String(calls[1]!.init?.body))).toEqual({ title: "t", body: "b" });
+  });
+
+  it("sans assignation demandée, aucune requête sur l'utilisateur", async () => {
+    const calls = stubFetch(() => reply({ number: 8 }, 201));
+    await client().createIssue("acme/projet", { title: "t", body: "b" }, false);
+    expect(calls.length).toBe(1);
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ title: "t", body: "b" });
+  });
+});

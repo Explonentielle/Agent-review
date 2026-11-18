@@ -1,22 +1,25 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { createRunner, type AgentRunner } from "../agent/index.js";
+import { ATTACHMENTS_DIRNAME } from "../attachments/rules.js";
+import type { AttachmentStore } from "../attachments/store.js";
 import { agentRunConfig, ProcessCancelledError } from "../claude/process.js";
 import type { Config } from "../config.js";
 import { assertBudgetAvailable } from "../budget.js";
 import type { ForgeRegistry } from "../connectors/registry.js";
-import type { CurrentUser } from "../connectors/types.js";
+import type { CurrentUser, ForgeConnector } from "../connectors/types.js";
 import type { CostRepo } from "../db/costs.js";
 import type { DevTaskRepo, DevTaskRow } from "../db/devTasks.js";
 import { errorMessage, log } from "../logger.js";
 import { loadSystemPrompt } from "../prompts.js";
 import type { ProjectSettings, Settings } from "../settings/schema.js";
 import type { SettingsStore } from "../settings/store.js";
-import { buildDevPrompt, buildFollowupPrompt } from "./context.js";
+import { buildAttachmentsBlock, buildDevPrompt, buildFollowupPrompt } from "./context.js";
+import { splitInstructions } from "./reviewFeedback.js";
 import { Journal } from "./journal.js";
 import { DevResultSchema, runDevAgent, type DevEngineOutput, type DevResult } from "./engine.js";
 import { FileGuardError, checkChangedFiles } from "./fileGuard.js";
-import { assertBranchAllowed, isSecretFile, isSensitiveFile } from "./guard.js";
+import { assertBranchAllowed, isAttachmentFile, isSecretFile, isSensitiveFile } from "./guard.js";
 import { cleanCommitSubject, ensureDraftTitle, renderTemplate, slugify } from "./templates.js";
 
 export interface DevDeps {
@@ -28,6 +31,8 @@ export interface DevDeps {
   tasks: DevTaskRepo;
   /** Exécuteur d'agent imposé (tests). Par défaut : celui qui correspond aux réglages. */
   runner?: AgentRunner;
+  /** Pièces jointes de l'espace (captures, maquettes, données) à mettre à disposition de l'agent. Absent : aucune. */
+  attachments?: AttachmentStore;
 }
 
 /** Contexte commun aux deux modes (nouveau ticket, reprise de MR). */
@@ -128,12 +133,10 @@ async function runNewTicket(c: RunContext): Promise<void> {
   if (!issue) throw new Error(`Ticket #${task.issue_iid} introuvable`);
 
   // --- Branche -------------------------------------------------------------
-  const branch = renderTemplate(settings.templates.branch, { iid: issue.iid, title: issue.title, slug: slugify(issue.title) });
+  const wanted = renderTemplate(settings.templates.branch, { iid: issue.iid, title: issue.title, slug: slugify(issue.title) });
   const forbidden = [project.baseBranch, project.targetBranch, ...protectedBranches];
-  assertBranchAllowed(branch, { issueIid: issue.iid, forbidden });
-  if (await connector.branchExists(task.project_id, branch)) {
-    throw new Error(`La branche « ${branch} » existe déjà sur le dépôt distant : supprime-la, ou utilise « Reprendre avec des consignes » sur la tâche qui l'a créée`);
-  }
+  assertBranchAllowed(wanted, { issueIid: issue.iid, forbidden });
+  const branch = await freeBranch(c, connector, wanted, forbidden, issue.iid);
 
   const worktree = await workspace.createBranchWorktree(task.project_id, gproject.cloneUrl, project.baseBranch, branch);
   const baseSha = await workspace.headSha(worktree);
@@ -178,6 +181,38 @@ async function runNewTicket(c: RunContext): Promise<void> {
   await tasks.update(task.id, { status: "mr_created", mr_iid: mr.iid, mr_url: mr.url, files_changed: changed.length });
   await step(`MR Draft !${mr.iid} créée vers ${project.targetBranch}`);
   log.info("dev.done", { taskId: task.id, mr: mr.iid, files: changed.length, costUsd: out.costUsd });
+}
+
+/**
+ * Choisit la branche du ticket. Une branche déjà présente chez la forge est refusée : on ne touche jamais à la branche de quelqu'un d'autre.
+ * Exception : une branche laissée par un essai PRÉCÉDENT de l'outil sur ce même ticket, qui n'a jamais abouti à une MR (échec après le push,
+ * par exemple). Elle ne bloque plus la relance : l'outil prend la suivante libre (-2, -3...) sans rien modifier à l'ancienne, que la personne
+ * pourra supprimer chez la forge. Si une MR existe déjà pour cette branche, c'est « Reprendre la MR » qu'il faut utiliser.
+ * @param c Contexte de la tâche.
+ * @param connector Connecteur de la forge de la tâche.
+ * @param wanted Nom de branche calculé d'après le ticket.
+ * @param forbidden Branches interdites (base, cible, protégées).
+ * @param issueIid Numéro du ticket.
+ * @returns Le nom de branche à créer.
+ * @throws Error Si la branche appartient à quelqu'un d'autre ou à une MR existante, ou si les neuf noms sont pris.
+ */
+async function freeBranch(c: RunContext, connector: ForgeConnector, wanted: string, forbidden: string[], issueIid: number): Promise<string> {
+  const { task } = c;
+  if (!(await connector.branchExists(task.project_id, wanted))) return wanted;
+  const previous = (await c.deps.tasks.listForIssue(task.source, task.project_id, task.issue_iid)).filter((t) => t.id !== task.id && t.branch === wanted);
+  const abandoned = previous.length > 0 && previous.every((t) => !t.mr_iid);
+  if (!abandoned) {
+    throw new Error(`La branche « ${wanted} » existe déjà sur le dépôt distant : supprime-la, ou utilise « Reprendre avec des consignes » sur la tâche qui l'a créée`);
+  }
+  for (let n = 2; n <= 9; n++) {
+    const candidate = `${wanted}-${n}`;
+    assertBranchAllowed(candidate, { issueIid, forbidden });
+    if (!(await connector.branchExists(task.project_id, candidate))) {
+      await c.step(`La branche « ${wanted} » existe déjà (essai précédent, sans MR) : nouvelle branche « ${candidate} »`);
+      return candidate;
+    }
+  }
+  throw new Error(`Les branches « ${wanted} » à « ${wanted}-9 » existent toutes déjà sur le dépôt distant : supprime les anciens essais chez la forge`);
 }
 
 async function runFollowup(c: RunContext): Promise<void> {
@@ -244,19 +279,30 @@ async function runFollowup(c: RunContext): Promise<void> {
 async function runAgent(c: RunContext, worktree: string, prompt: string): Promise<DevEngineOutput> {
   const { tasks } = c.deps;
   const commands = resolveCommands(c.project.allowedCommands, worktree);
-  const out = await runDevAgent({
-    cwd: worktree,
-    systemPrompt: await loadDevSystemPrompt(c.settings, c.project, commands),
-    prompt,
-    engine: agentRunConfig(c.settings.dev),
-    runner: c.deps.runner ?? createRunner(c.deps.config, c.settings, c.project),
-    allowedCommands: commands,
-    signal: c.signal,
-    onEvent: (kind, text) => void c.journal.event(kind, text),
-    onSession: (sessionId) => void c.journal.update({ session_id: sessionId }),
-  });
-  await tasks.update(c.task.id, { result_json: JSON.stringify(out.result), cost_usd: out.costUsd, num_turns: out.numTurns });
-  return out;
+
+  // Pièces jointes (captures, maquettes, données) : posées dans le dossier de travail le temps du passage de l'agent, puis supprimées quoi
+  // qu'il arrive. Elles ne sont jamais committées (voir `commitAgentWork`).
+  const attachDir = path.join(worktree, ATTACHMENTS_DIRNAME);
+  const placed = c.deps.attachments ? await c.deps.attachments.materialize({ task: c.task.id }, attachDir) : [];
+  if (placed.length > 0) await c.step(`Pièces jointes mises à disposition de l'agent : ${placed.map((f) => f.name).join(", ")}`);
+  try {
+    const out = await runDevAgent({
+      cwd: worktree,
+      systemPrompt: await loadDevSystemPrompt(c.settings, c.project, commands),
+      prompt: prompt + buildAttachmentsBlock(placed),
+      engine: agentRunConfig(c.settings.dev),
+      runner: c.deps.runner ?? createRunner(c.deps.config, c.settings, c.project),
+      allowedCommands: commands,
+      signal: c.signal,
+      onEvent: (kind, text) => void c.journal.event(kind, text),
+      onSession: (sessionId) => void c.journal.update({ session_id: sessionId }),
+    });
+    await tasks.update(c.task.id, { result_json: JSON.stringify(out.result), cost_usd: out.costUsd, num_turns: out.numTurns });
+    return out;
+  } finally {
+    // Même si l'agent a planté ou a été arrêté : rien de l'utilisateur ne reste dans le dossier de travail
+    await rm(attachDir, { recursive: true, force: true }).catch((err: unknown) => log.warn("dev.attachments_cleanup_failed", { taskId: c.task.id, error: errorMessage(err) }));
+  }
 }
 
 async function markBlocked(c: RunContext): Promise<void> {
@@ -279,6 +325,11 @@ async function commitAgentWork(
   }
   const changed = await workspace.changedFiles(worktree);
   if (changed.length === 0) throw new Error("L'agent n'a modifié aucun fichier");
+  // Une pièce jointe (capture, maquette, données de la personne) ne part jamais dans une MR : même si le nettoyage a échoué ou si l'agent en a recopié une
+  const attached = changed.filter(isAttachmentFile);
+  if (attached.length > 0) {
+    throw new Error(`Pièces jointes présentes parmi les fichiers modifiés (${attached.join(", ")}) : push refusé. Le travail reste dans le dossier local.`);
+  }
   const secrets = changed.filter(isSecretFile);
   if (secrets.length > 0) {
     throw new Error(`Fichiers sensibles modifiés (${secrets.join(", ")}) : push refusé. Le travail reste dans le dossier local.`);
@@ -333,11 +384,14 @@ export function formatDevReport(result: DevResult, changedFiles: string[]): stri
 
 /** Commentaire posté sur la MR après une reprise. */
 export function formatFollowupNote(instructions: string, result: DevResult, changedFiles: string[]): string {
+  // La relecture de l'outil n'est jamais recopiée sur la MR : seule la note de la personne l'est
+  const { note, review } = splitInstructions(instructions);
   return [
     "🤖 **Reprise par un agent IA** : nouveau commit sur cette MR, à relire.",
     "",
     "**Consignes :**",
-    ...instructions.split("\n").map((l) => `> ${l}`),
+    ...note.split("\n").map((l) => `> ${l}`),
+    ...(review ? ["> (Les points de la relecture avant fusion de l'outil ont aussi été pris en compte.)"] : []),
     "",
     `**Ce qui a changé :** ${result.summary}`,
     "",

@@ -41,6 +41,59 @@ describe("journal d'audit des écritures sur les forges", () => {
     expect(JSON.stringify(await audit.list())).not.toContain("confidentiel"); // le texte des commentaires n'est jamais gardé
   });
 
+  it("la création d'un ticket et d'un projet est tracée, y compris quand la forge refuse", async () => {
+    const forge = new FakeConnector({ cloneUrl: "file:///x" }, "gitlab");
+    const connector = auditConnector(forge, audit);
+
+    const ticket = await connector.createTicket(5, { title: "Ajouter un export", description: "texte confidentiel", labels: ["Statut::A traiter"] });
+    const project = await connector.createProject({ name: "Mon outil", description: "d", namespaceId: "2", private: true, withReadme: true });
+    forge.failNextWrite = new Error("403 Forbidden");
+    await expect(connector.createTicket(5, { title: "Refusé", description: "x" })).rejects.toThrow("403");
+
+    expect(forge.createdTickets.length).toBe(1); // la création refusée n est pas enregistrée chez la forge
+    expect(forge.createdProjects.length).toBe(1);
+    expect(await entries()).toEqual([
+      { action: "ticket_create", source: "gitlab", target: `5/${ticket.iid}`, outcome: "ok", error: null, detail: { title: "Ajouter un export", labels: ["Statut::A traiter"], url: ticket.url }, user: h.local.userId },
+      { action: "project_create", source: "gitlab", target: project.path, outcome: "ok", error: null, detail: { namespaceId: "2", private: true, url: project.url }, user: h.local.userId },
+      { action: "ticket_create", source: "gitlab", target: "5/?", outcome: "error", error: "403 Forbidden", detail: { title: "Refusé", labels: [], url: undefined }, user: h.local.userId },
+    ]);
+    expect(JSON.stringify(await audit.list())).not.toContain("confidentiel"); // la description d'un ticket n'est jamais gardée
+  });
+
+  it("l'envoi d'un fichier pour un ticket est tracé par son nom et son poids, jamais son contenu ; une forge sans envoi est tracée aussi", async () => {
+    const forge = new FakeConnector({ cloneUrl: "file:///x" }, "gitlab");
+    const connector = auditConnector(forge, audit);
+    const sent = await connector.uploadTicketFile(5, "capture.png", new Uint8Array([9, 9, 9]));
+    forge.supportsUploads = false;
+    const skipped = await connector.uploadTicketFile(5, "regles.csv", new Uint8Array([1, 2]));
+
+    expect(sent?.markdown).toContain("capture.png");
+    expect(skipped).toBeNull();
+    expect(forge.uploadedFiles).toEqual([{ projectId: 5, name: "capture.png", size: 3 }]);
+    expect(await entries()).toEqual([
+      { action: "ticket_file_upload", source: "gitlab", target: "5", outcome: "ok", error: null, detail: { name: "capture.png", size: 3, sent: true }, user: h.local.userId },
+      { action: "ticket_file_upload", source: "gitlab", target: "5", outcome: "ok", error: null, detail: { name: "regles.csv", size: 2, sent: false }, user: h.local.userId },
+    ]);
+  });
+
+  it("sortir une MR du brouillon et la fusionner sont tracés, avec le commit fusionné ; un refus aussi", async () => {
+    const forge = new FakeConnector({ cloneUrl: "file:///x" }, "github");
+    const connector = auditConnector(forge, audit);
+    const created = await connector.createChangeRequest(5, { sourceBranch: "feature/9-x", targetBranch: "develop", title: "Draft: x", description: "d" });
+
+    await connector.markChangeRequestReady(5, created.iid);
+    await connector.mergeChangeRequest(5, created.iid, "0".repeat(40));
+    forge.failNextWrite = new Error("405 Method Not Allowed");
+    await expect(connector.mergeChangeRequest(5, created.iid, "0".repeat(40))).rejects.toThrow("405");
+
+    const rows = (await entries()).filter((e) => e.action !== "change_request_create");
+    expect(rows).toEqual([
+      { action: "change_request_ready", source: "github", target: `5/${created.iid}`, outcome: "ok", error: null, detail: null, user: h.local.userId },
+      { action: "change_request_merge", source: "github", target: `5/${created.iid}`, outcome: "ok", error: null, detail: { headSha: "0".repeat(40) }, user: h.local.userId },
+      { action: "change_request_merge", source: "github", target: `5/${created.iid}`, outcome: "error", error: "405 Method Not Allowed", detail: { headSha: "0".repeat(40) }, user: h.local.userId },
+    ]);
+  });
+
   it("les lectures ne laissent aucune trace", async () => {
     const forge = new FakeConnector({ cloneUrl: "file:///x" });
     forge.tickets.set(1, h.ticket({ iid: 1 }));

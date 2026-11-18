@@ -171,6 +171,31 @@ describe.skipIf(process.platform === "win32")("CliRunner avec un faux binaire cl
     expect(args).not.toContain("--no-session-persistence");
   });
 
+  it("un agent sans aucun outil (Scribe) : « --tools » vide, pas de « --allowedTools » sans valeur, toutes les protections restent", () => {
+    const req: AgentRequest = {
+      cwd: dir,
+      systemPrompt: "s",
+      prompt: "p",
+      outputSchema: {},
+      tools: [],
+      allowedTools: [],
+      disallowedTools: [],
+      model: "m",
+      effort: "high",
+      maxTurns: 1,
+      timeoutMs: 1000,
+      persistSession: false,
+      stream: false,
+    };
+    const args = buildCliArgs(req);
+    expect(args.slice(args.indexOf("--tools"), args.indexOf("--tools") + 2)).toEqual(["--tools", ""]);
+    expect(args).not.toContain("--allowedTools");
+    expect(args).toContain("--safe-mode");
+    expect(args).toContain("--strict-mcp-config");
+    expect(args.slice(args.indexOf("--permission-mode"), args.indexOf("--permission-mode") + 2)).toEqual(["--permission-mode", "dontAsk"]);
+    expect(args.slice(args.indexOf("--disallowedTools"), args.indexOf("--disallowedTools") + 2)).toEqual(["--disallowedTools", "mcp__*"]);
+  });
+
   it("erreurs : échec de la CLI, sortie illisible, flux sans résultat, rapport invalide", async () => {
     const failing = new CliRunner(installStub(JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true, result: "trop de tours" })));
     await expect(runReviewAgent({ cwd: dir, systemPrompt: "s", prompt: "p", engine: agentRunConfig(DEFAULT_SETTINGS.review), runner: failing })).rejects.toThrow(

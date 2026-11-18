@@ -101,19 +101,15 @@ const EnvSchema = z
       }
     }
     const gitlab = { GITLAB_URL: e.GITLAB_URL, GITLAB_TOKEN: e.GITLAB_TOKEN, GITLAB_USERNAME: e.GITLAB_USERNAME };
-    // GITLAB_URL seule est permise (adresse de l'instance, jetons personnels saisis dans le dashboard) ; un jeton ou un nom d'utilisateur exige les trois
+    // Aucune forge n'est exigée dans le .env : adresse GitLab et jetons se saisissent dans le dashboard (Paramètres > Connexion).
+    // Un jeton ou un nom d'utilisateur GitLab dans le .env exige en revanche les trois variables.
     const personal = Boolean(e.GITLAB_TOKEN || e.GITLAB_USERNAME);
     if (personal) {
       for (const [name, value] of Object.entries(gitlab)) {
         if (!value) ctx.addIssue({ code: "custom", path: [name], message: `${name} manquant (GitLab demande GITLAB_URL, GITLAB_TOKEN et GITLAB_USERNAME ensemble)` });
       }
     }
-    if (!personal && !e.GITHUB_TOKEN) {
-      ctx.addIssue({ code: "custom", path: ["GITLAB_TOKEN"], message: "aucune forge configurée : renseigne GITLAB_URL, GITLAB_TOKEN et GITLAB_USERNAME, et/ou GITHUB_TOKEN" });
-    }
   });
-
-export type ActionMode = "shadow" | "comment" | "auto";
 
 /** Connexion par compte de forge (OAuth). Absente de la configuration : pas de connexion, l'outil sert l'utilisateur local. */
 export interface AuthConfig {

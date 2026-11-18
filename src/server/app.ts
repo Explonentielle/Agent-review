@@ -7,6 +7,8 @@ import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 import type { ForgeKind } from "../connectors/types.js";
 import { diagnoseAgentRuntime, type RuntimeDiagnostic } from "../agent/dockerDiagnostic.js";
 import { allowedImages, imageFor } from "../agent/imageName.js";
+import { attachmentIds, failAttachment, giveAttachments, planAttachments, registerAttachments } from "../attachments/routes.js";
+import type { AttachmentOwner } from "../attachments/store.js";
 import { registerAuth, type AuthRuntime } from "../auth/routes.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
 import { currentMonth } from "../db/costs.js";
@@ -16,12 +18,27 @@ import { renderTemplate, slugify } from "../dev/templates.js";
 import { errorMessage, log } from "../logger.js";
 import { PROJECT_ROOT } from "../paths.js";
 import { readDefaultSystemPrompt } from "../prompts.js";
-import { approve, publishComment, type PipelineDeps } from "../review/pipeline.js";
+import { approve, publishComment } from "../review/pipeline.js";
 import type { Finding, ReviewResult } from "../review/schema.js";
 import { SecretError } from "../secrets/crypto.js";
 import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret } from "../secrets/vault.js";
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
 import type { TenantContext, TenantDeps } from "../tenants/manager.js";
+import { computeArmory } from "../game/armory.js";
+import { LOOT_CATALOG, computeDrops } from "../game/loot.js";
+import { computeHero, REVIEW_DONE, roomQuests, roomXp, TASK_FORGED } from "../game/hero.js";
+import { computePrestige, computeProgress } from "../game/progress.js";
+import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
+import { registerPiece, summarizePieces } from "../dev/pieceRoutes.js";
+import type { DevTaskRow } from "../db/devTasks.js";
+import { followupInstructions } from "../dev/reviewFeedback.js";
+import { ReviewResultSchema } from "../review/schema.js";
+import { registerRooms } from "../rooms/routes.js";
+import { registerUserRooms } from "../rooms/userRoutes.js";
+import { createRoomStore } from "../rooms/userRooms.js";
+import { registerScribe } from "../scribe/routes.js";
+import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
+import type { AgentRunner } from "../agent/runner.js";
 
 /** Ce que le serveur reçoit : les dépôts et connexions de l'utilisateur local (servis sans connexion), et de quoi servir les autres personnes. */
 export interface ServerDeps extends TenantDeps {
@@ -37,15 +54,21 @@ export interface ServerDeps extends TenantDeps {
    * est refusée, et les dépôts reçus ci-dessus (ceux de l'utilisateur local) servent tels quels.
    */
   tenants?: (who: TenantContext) => Promise<TenantDeps>;
+  /** Terminal Claude du navigateur (connexion de l'abonnement) et état de la connexion. Absent : routes non montées. */
+  terminal?: TerminalFeature;
+  /** Exécuteur d'agent imposé au Scribe (tests). Absent : celui des réglages de la personne. */
+  scribeRunner?: AgentRunner;
 }
 
 /**
  * Propriétés de `ServerDeps` communes à toutes les personnes. Toutes les autres sont celles de la personne servie : une propriété ajoutée
  * plus tard est donc propre à la personne par défaut, jamais partagée par oubli.
  */
-const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants"]);
+const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal", "scribeRunner"]);
 
 type IdParams = { Params: { id: string } };
+/** Une tâche terminée qui a ouvert une MR : ce qu'il faut pour la reprendre. */
+type FollowupOrigin = DevTaskRow & { branch: string; mr_iid: number; mr_url: string };
 
 /** Colonne de l'onglet Tickets d'après les labels du workflow réglés dans le dashboard. */
 export function classifyIssue(labels: string[], workflow: Settings["workflow"]): "techValidation" | "inProgress" | "todo" | "other" {
@@ -263,6 +286,75 @@ export function buildServer(base: ServerDeps) {
     }
   });
 
+  // --- Terminal Claude et forge (jeu) -----------------------------------------
+
+  if (base.terminal) {
+    registerTerminal(app, { feature: base.terminal, authEnabled: Boolean(base.auth), whoIs: (req) => req.session ?? base.local, ownerUserId: base.local.userId, fail });
+  }
+
+  /** La forge : héros, quêtes et hauts faits déduits de l'état réel de l'outil. */
+  app.get<{ Querystring: { tz?: string } }>("/api/hero", async (req) => {
+    const who = req.session ?? base.local;
+    const [projects, reviews, tasks, recentReviews] = await Promise.all([deps.settings.listProjects(), deps.reviews.countByStatus(), deps.tasks.list(500), deps.reviews.list(undefined, 500)]);
+    const taskCounts: Record<string, number> = {};
+    for (const task of tasks) taskCounts[task.status] = (taskCounts[task.status] ?? 0) + 1;
+    // La connexion Claude est celle de la machine : elle ne compte que pour son propriétaire. Une CLI lente ne bloque pas la page (4 s au plus).
+    let claudeConnected = false;
+    if (base.terminal && who.userId === base.local.userId) {
+      const slow = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000).unref());
+      claudeConnected = (await Promise.race([base.terminal.status.get(), slow]))?.connected ?? false;
+    }
+    // Atelier animé : les agents actifs (ou terminés depuis peu) et ce qu'ils disent, d'après leur dernière étape connue
+    const activeTasks = tasks.filter((t) => t.status === "running").slice(0, MAX_WORKERS);
+    const steps: Record<number, string> = {};
+    for (const task of activeTasks) {
+      const events = await deps.tasks.events(task.id, 0);
+      const last = [...events].reverse().find((e) => e.kind === "step") ?? [...events].reverse().find((e) => e.kind === "tool");
+      if (last) steps[task.id] = last.text;
+    }
+    const activeReviews = [...(await deps.reviews.list("running", MAX_WORKERS)), ...(await deps.reviews.list("queued", MAX_WORKERS))];
+    const workers = pickWorkers({ tasks, reviews: activeReviews, steps, now: Date.now() });
+    const forgeKinds = deps.forges.all().map((f) => f.connector.kind);
+    // Progression qui donne envie de revenir : série, missions, maîtrises (le fuseau vient du navigateur, à défaut celui du serveur)
+    const tz = Number(req.query.tz);
+    const armory = computeArmory({ projects, tasks, reviews: recentReviews });
+    const progress = computeProgress({
+      now: Date.now(),
+      tzOffsetMin: req.query.tz !== undefined && Number.isFinite(tz) && Math.abs(tz) <= 840 ? Math.round(tz) : new Date().getTimezoneOffset(),
+      tasks,
+      reviews: recentReviews,
+      totals: { forged: TASK_FORGED.reduce((n, s) => n + (taskCounts[s] ?? 0), 0), reviews: REVIEW_DONE.reduce((n, s) => n + (reviews[s] ?? 0), 0) },
+      pieceGrades: armory.loot.map((i) => i.grade),
+      weaponLevels: armory.weapons.map((w) => w.level),
+    });
+    // Les salles que la personne a dessinées : une quête de l'atelier et un peu d'XP
+    const customRooms = await createRoomStore(path.join(base.config.dataDir, "rooms"), who.workspaceId).count(who.userId);
+    const hero = computeHero({
+      forges: forgeKinds,
+      claudeConnected,
+      projects: projects.length,
+      devProjects: projects.filter((p) => p.devEnabled).length,
+      reviews,
+      tasks: taskCounts,
+      bonusXp: progress.bonusXp + roomXp(customRooms),
+    });
+    return { forges: forgeKinds, ...hero, extraQuests: roomQuests(customRooms), progress, prestige: computePrestige(hero.level, hero.xp), workers };
+  });
+
+  /** L'armurerie : un projet = une arme (niveau et qualité d'après le travail réel), une demande de fusion ouverte = une pièce à vendre. */
+  app.get("/api/forge/armory", async () => {
+    const [projects, tasks, reviews] = await Promise.all([deps.settings.listProjects(), deps.tasks.list(500), deps.reviews.list(undefined, 500)]);
+    return computeArmory({ projects, tasks, reviews });
+  });
+
+  /** Le butin : le catalogue d'objets et ceux que l'activité réelle (pièces forgées, reviews, fusions) a fait tomber, de façon déterministe. */
+  app.get("/api/forge/loot", async () => {
+    const [tasks, reviews, mergedTaskIds, journal, weaponProjects] = await Promise.all([deps.tasks.list(500), deps.reviews.list(undefined, 500), deps.tasks.listMergedTaskIds(), deps.audit.list(500), deps.settings.listProjects()]);
+    const projects = journal.filter((entry) => entry.action === "project_create" && entry.outcome === "ok").map((entry) => ({ id: entry.id, created_at: entry.created_at, source: entry.source, path: entry.target }));
+    // Une arme qui tombe est toujours du type d'arme du projet concerné
+    return { catalog: LOOT_CATALOG, drops: computeDrops({ tasks, reviews, mergedTaskIds, projects, weaponProjects }) };
+  });
+
   // --- Paramètres ------------------------------------------------------------
 
   app.get("/api/settings", async () => ({
@@ -335,6 +427,7 @@ export function buildServer(base: ServerDeps) {
       for (const r of failed) log.warn("issues.forge_error", { error: errorMessage(r.reason) });
       const issues = results.flatMap((r) => (r.status === "fulfilled" ? r.value.tickets.map((ticket) => ({ source: r.value.source, ticket })) : []));
 
+      const pieces = await summarizePieces(deps, issues.flatMap(({ source, ticket }) => latest.get(`${source}#${ticket.projectId}#${ticket.iid}`) ?? []));
       return issues.map(({ source, ticket: i }) => {
         const project = projects.get(`${source}#${i.projectId}`);
         const task = latest.get(`${source}#${i.projectId}#${i.iid}`);
@@ -353,13 +446,28 @@ export function buildServer(base: ServerDeps) {
           branchPreview: project?.devEnabled ? renderTemplate(settings.templates.branch, { iid: i.iid, title: i.title, slug: slugify(i.title) }) : null,
           baseBranch: project?.baseBranch ?? null,
           targetBranch: project?.targetBranch ?? null,
-          task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, mrIid: task.mr_iid } : null,
+          task: task ? { id: task.id, status: task.status, mrUrl: task.mr_url, mrIid: task.mr_iid, error: task.error ? task.error.slice(0, 300) : null, piece: pieces.get(task.id) ?? null } : null,
         };
       });
     } catch (err) {
       return fail(reply, err);
     }
   });
+
+  // --- Salles du monde de la forge (données validées, lecture seule) -------------------------------
+  registerRooms(app);
+  // Salles créées par les personnes : fichiers partagés par toute l'installation (dossier de données de base, pas celui d'une personne), rangés par espace
+  registerUserRooms(app, {
+    root: path.join(base.config.dataDir, "rooms"),
+    whoIs: (req) => req.session ?? base.local,
+    userName: async (id) => (await deps.accounts.getUser(id))?.name ?? "Quelqu'un",
+    fail,
+    deps,
+    runner: base.scribeRunner,
+  });
+
+  // --- Scribe : tickets d'un projet, brouillons, création de tickets et de projets ------------------
+  registerScribe(app, { deps, whoIs: (req) => req.session ?? base.local, fail, forgeOf, classify: classifyIssue, runner: base.scribeRunner });
 
   // --- Agent dev -------------------------------------------------------------
 
@@ -375,7 +483,7 @@ export function buildServer(base: ServerDeps) {
     return await deps.tasks.events(Number(req.params.id), Number(req.query.after ?? 0));
   });
 
-  app.post<{ Body: { source?: string; projectId: number; issueIid: number; extraInstructions?: string } }>("/api/tasks", async (req, reply) => {
+  app.post<{ Body: { source?: string; projectId: number; issueIid: number; extraInstructions?: string; attachments?: string[]; retryOf?: number } }>("/api/tasks", async (req, reply) => {
     try {
       const { projectId, issueIid } = req.body;
       const source = forgeOf(req.body.source);
@@ -387,6 +495,13 @@ export function buildServer(base: ServerDeps) {
       const issue = await deps.forges.get(source).connector.getTicket(Number(projectId), Number(issueIid));
       if (!issue) return reply.code(404).send({ error: "Ticket introuvable" });
 
+      // Pièces jointes (captures, maquettes, données) : celles envoyées maintenant, plus celles du ticket (créées avec le Scribe) ou, pour une
+      // relance, celles de l'essai précédent. Tout est vérifié avant de créer la tâche : un refus ne crée rien.
+      const ids = attachmentIds(req.body.attachments);
+      const retryOf = typeof req.body.retryOf === "number" && Number.isInteger(req.body.retryOf) && req.body.retryOf > 0 ? req.body.retryOf : null;
+      const copyFrom: AttachmentOwner[] = retryOf ? [{ task: retryOf }] : [{ ticket: { source, projectId: project.projectId, iid: issue.iid } }];
+      await planAttachments(deps, copyFrom, ids);
+
       const id = await deps.tasks.insert({
         source,
         projectId: project.projectId,
@@ -396,16 +511,18 @@ export function buildServer(base: ServerDeps) {
         issueUrl: issue.url,
         extraInstructions: req.body.extraInstructions?.trim() || null,
       });
+      const files = await giveAttachments(deps, id, { copyFrom, ids });
       await deps.tasks.addEvent(id, "step", "Tâche créée, en attente de l'agent");
+      if (files.length > 0) await deps.tasks.addEvent(id, "step", `Pièces jointes : ${files.join(", ")}`);
       deps.enqueueDev(id);
       return { id };
     } catch (err) {
-      return fail(reply, err);
+      return failAttachment(reply, err, fail);
     }
   });
 
   /** Reprise : relance l'agent sur la branche de la MR créée par cette tâche, avec des consignes. */
-  app.post<IdParams & { Body: { instructions?: string } }>("/api/tasks/:id/followup", async (req, reply) => {
+  app.post<IdParams & { Body: { instructions?: string; attachments?: string[] } }>("/api/tasks/:id/followup", async (req, reply) => {
     try {
       const origin = await deps.tasks.get(Number(req.params.id));
       if (!origin) return reply.code(404).send({ error: "Tâche introuvable" });
@@ -420,30 +537,71 @@ export function buildServer(base: ServerDeps) {
         return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
       }
 
-      const id = await deps.tasks.insert({
-        source: origin.source,
-        projectId: origin.project_id,
-        projectPath: origin.project_path,
-        issueIid: origin.issue_iid,
-        issueTitle: origin.issue_title,
-        issueUrl: origin.issue_url,
-        extraInstructions: instructions,
-        followup: {
-          parentId: origin.id,
-          branch: origin.branch,
-          baseBranch: origin.base_branch,
-          targetBranch: origin.target_branch,
-          mrIid: origin.mr_iid,
-          mrUrl: origin.mr_url,
-        },
-      });
-      await deps.tasks.addEvent(id, "step", `Reprise de la MR !${origin.mr_iid} (tâche #${origin.id}), en attente de l'agent`);
-      deps.enqueueDev(id);
+      const id = await startFollowup(origin as FollowupOrigin, instructions, req.body?.attachments);
       return { id };
     } catch (err) {
-      return fail(reply, err);
+      return failAttachment(reply, err, fail);
     }
   });
+
+  /**
+   * Corriger avec la relecture : relance l'agent sur la branche de la MR avec les points de la relecture du commit ACTUEL. Les points viennent de la base,
+   * jamais du navigateur, et sont remis à l'agent comme contenu non fiable (voir `reviewFeedback.ts`). La personne peut ajouter une note.
+   */
+  app.post<IdParams & { Body: { note?: string; attachments?: string[] } | null }>("/api/tasks/:id/fix-review", async (req, reply) => {
+    try {
+      const origin = await deps.tasks.get(Number(req.params.id));
+      if (!origin) return reply.code(404).send({ error: "Tâche introuvable" });
+      if (!origin.branch || !origin.mr_iid || !origin.mr_url || origin.status === "running" || origin.status === "queued") {
+        return reply.code(400).send({ error: "Seule une tâche terminée liée à une MR peut être reprise" });
+      }
+      const project = await deps.settings.getProject(origin.source, origin.project_id);
+      if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
+      if (await deps.tasks.findActive(origin.source, origin.project_id, origin.issue_iid)) return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
+      const mr = await deps.forges.get(origin.source).connector.getChangeRequest(origin.project_id, origin.mr_iid);
+      if (mr.state !== "opened") return reply.code(409).send({ error: mr.state === "merged" ? "La MR est déjà fusionnée." : "La MR est fermée." });
+      const latest = (await deps.reviews.listForMergeRequest(origin.source, origin.project_id, origin.mr_iid))[0];
+      if (!latest || !latest.result_json) return reply.code(409).send({ error: "Aucune relecture terminée : fais d'abord relire la pièce." });
+      if (latest.head_sha !== mr.headSha) return reply.code(409).send({ error: "La MR a reçu un nouveau commit depuis la relecture : fais relire la version actuelle." });
+      const parsed = ReviewResultSchema.safeParse(JSON.parse(latest.result_json));
+      if (!parsed.success) return reply.code(409).send({ error: "Le résultat de la relecture est illisible : relance-la." });
+      if (parsed.data.findings.length === 0 && parsed.data.questions_for_author.length === 0) return reply.code(400).send({ error: "La relecture n'a relevé aucun point à corriger." });
+      const note = typeof req.body?.note === "string" ? req.body.note.slice(0, 4000) : "";
+      const id = await startFollowup(origin as FollowupOrigin, followupInstructions(note, parsed.data), req.body?.attachments);
+      return { id };
+    } catch (err) {
+      return failAttachment(reply, err, fail);
+    }
+  });
+
+  /** Crée et met en file la tâche de reprise d'une tâche terminée (même branche, même MR). Les pièces jointes de la tâche reprise sont gardées. */
+  async function startFollowup(origin: FollowupOrigin, instructions: string, attachments: unknown): Promise<number> {
+    const ids = attachmentIds(attachments);
+    const copyFrom: AttachmentOwner[] = [{ task: origin.id }];
+    await planAttachments(deps, copyFrom, ids);
+    const id = await deps.tasks.insert({
+      source: origin.source,
+      projectId: origin.project_id,
+      projectPath: origin.project_path,
+      issueIid: origin.issue_iid,
+      issueTitle: origin.issue_title,
+      issueUrl: origin.issue_url,
+      extraInstructions: instructions,
+      followup: {
+        parentId: origin.id,
+        branch: origin.branch,
+        baseBranch: origin.base_branch,
+        targetBranch: origin.target_branch,
+        mrIid: origin.mr_iid,
+        mrUrl: origin.mr_url,
+      },
+    });
+    const files = await giveAttachments(deps, id, { copyFrom, ids });
+    await deps.tasks.addEvent(id, "step", `Reprise de la MR !${origin.mr_iid} (tâche #${origin.id}), en attente de l'agent`);
+    if (files.length > 0) await deps.tasks.addEvent(id, "step", `Pièces jointes : ${files.join(", ")}`);
+    deps.enqueueDev(id);
+    return id;
+  }
 
   app.post<IdParams>("/api/tasks/:id/cancel", async (req) => {
     const id = Number(req.params.id);
@@ -470,6 +628,46 @@ export function buildServer(base: ServerDeps) {
       return fail(reply, err);
     }
   });
+
+  /**
+   * Supprime une tâche terminée (échec, annulation, question, MR créée) avec son journal et son dossier de travail local. Rien n'est touché
+   * chez la forge : la branche ou la MR éventuelles restent. Une tâche en attente ou en cours doit d'abord être arrêtée.
+   */
+  app.post<IdParams>("/api/tasks/:id/delete", async (req, reply) => {
+    try {
+      const id = Number(req.params.id);
+      const task = await deps.tasks.get(id);
+      if (!task) return reply.code(404).send({ error: "Tâche introuvable" });
+      if (task.status === "running" || task.status === "queued") return reply.code(409).send({ error: "L'agent travaille encore sur cette tâche : arrête-le d'abord" });
+      // Le dossier de travail est partagé par toutes les tâches d'une même branche : on ne le supprime que si aucune autre tâche en cours ne s'en sert
+      if (task.worktree_path) {
+        const shared = (await deps.tasks.list(500)).some((t) => t.id !== id && t.worktree_path === task.worktree_path && (t.status === "running" || t.status === "queued"));
+        if (!shared) {
+          try {
+            const { connector, workspace } = deps.forges.get(task.source);
+            const project = await connector.getProject(task.project_id);
+            await workspace.removeDevWorktree(task.project_id, project.cloneUrl, task.worktree_path);
+          } catch (err) {
+            // Un dossier déjà disparu ou une forge injoignable n'empêche pas de supprimer la tâche
+            log.warn("task.delete_worktree_failed", { taskId: id, error: errorMessage(err) });
+          }
+        }
+      }
+      const outcome = await deps.tasks.delete(id);
+      if (outcome === "active") return reply.code(409).send({ error: "L'agent travaille encore sur cette tâche : arrête-le d'abord" });
+      await deps.attachments?.remove({ task: id }).catch((err: unknown) => log.warn("task.delete_attachments_failed", { taskId: id, error: errorMessage(err) }));
+      log.info("task.deleted", { taskId: id, status: task.status });
+      return { ok: true };
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
+
+  // --- Pièces jointes (captures, maquettes, données) envoyées à l'agent dev --------------------------
+  registerAttachments(app, { deps, fail });
+
+  // --- La pièce : relecture par le Gardien, puis fusion --------------------------------------------
+  registerPiece(app, { deps, fail });
 
   // --- Reviews ---------------------------------------------------------------
 

@@ -160,6 +160,56 @@ export function createDevTaskRepo(db: Db, workspaceId: number) {
     },
 
     /**
+     * La tâche de l'agent dev la plus récente qui a ouvert (ou repris) cette demande de fusion : c'est le lien exact entre une MR et son ticket.
+     * @param source Forge de la demande.
+     * @param projectId Projet chez la forge.
+     * @param mrIid Numéro de la demande.
+     * @returns La tâche, ou undefined si cette MR n'a pas été faite par l'agent dev de cet espace.
+     */
+    findByMergeRequest(source: ForgeKind, projectId: number, mrIid: number): Promise<DevTaskRow | undefined> {
+      return db.get<DevTaskRow>("SELECT * FROM dev_tasks WHERE workspace_id = ? AND source = ? AND project_id = ? AND mr_iid = ? ORDER BY id DESC LIMIT 1", [workspaceId, source, projectId, mrIid]);
+    },
+
+    /**
+     * Les tâches dont la MR a été fusionnée depuis l'outil (le journal de la tâche le note à la fusion). Une fusion faite à la main chez la
+     * forge n'y figure pas : l'outil ne la voit pas.
+     * @returns Les identifiants de ces tâches, dans l'espace.
+     */
+    async listMergedTaskIds(): Promise<number[]> {
+      const rows = await db.all<{ task_id: number }>(
+        "SELECT DISTINCT e.task_id AS task_id FROM dev_task_events e JOIN dev_tasks t ON t.id = e.task_id WHERE t.workspace_id = ? AND e.kind = 'step' AND e.text LIKE ?",
+        [workspaceId, "MR !% fusionnée dans %"],
+      );
+      return rows.map((r) => Number(r.task_id));
+    },
+
+    /**
+     * Tous les essais de l'agent sur un ticket, du plus ancien au plus récent.
+     * @returns Les tâches de l'espace pour ce ticket.
+     */
+    listForIssue(source: ForgeKind, projectId: number, issueIid: number): Promise<DevTaskRow[]> {
+      return db.all<DevTaskRow>("SELECT * FROM dev_tasks WHERE workspace_id = ? AND source = ? AND project_id = ? AND issue_iid = ? ORDER BY id", [workspaceId, source, projectId, issueIid]);
+    },
+
+    /**
+     * Supprime une tâche de l'espace avec son journal. Une tâche en attente ou en cours ne se supprime pas : on l'arrête d'abord. Les
+     * reprises qui s'y rattachaient perdent leur parent (leur propre rapport reste lisible). Rien n'est touché chez la forge.
+     * @param id Tâche à supprimer.
+     * @returns « deleted », « missing » (inconnue dans cet espace) ou « active » (en attente ou en cours : rien n'a été supprimé).
+     */
+    delete(id: number): Promise<"deleted" | "missing" | "active"> {
+      return db.transaction(async (tx) => {
+        const row = await tx.get<{ status: string }>("SELECT status FROM dev_tasks WHERE id = ? AND workspace_id = ?", [id, workspaceId]);
+        if (!row) return "missing";
+        if (row.status === "queued" || row.status === "running") return "active";
+        await tx.run("DELETE FROM dev_task_events WHERE task_id IN (SELECT id FROM dev_tasks WHERE id = ? AND workspace_id = ?)", [id, workspaceId]);
+        await tx.run("UPDATE dev_tasks SET parent_id = NULL WHERE parent_id = ? AND workspace_id = ?", [id, workspaceId]);
+        await tx.run("DELETE FROM dev_tasks WHERE id = ? AND workspace_id = ?", [id, workspaceId]);
+        return "deleted";
+      });
+    },
+
+    /**
      * Dernière tâche de l'espace par ticket, pour l'affichage dans l'onglet Tickets.
      * @returns Les tâches, par clé `source#projet#ticket`.
      */

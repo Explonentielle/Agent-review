@@ -9,6 +9,13 @@ export interface Forge {
   username: string;
 }
 
+function missingForgeMessage(kind: string): string {
+  const where = "à enregistrer dans Paramètres > Connexion";
+  if (kind === "gitlab") return `Aucun jeton GitLab enregistré (${where}). Utilise le jeton d'un compte qui a accès aux dépôts concernés, avec les scopes api, read_repository et write_repository.`;
+  if (kind === "github") return `Aucun jeton GitHub enregistré (${where}). Utilise un jeton à portée fine créé pour l'organisation ou le compte qui possède les dépôts concernés.`;
+  return `La forge « ${kind} » n'est pas configurée (${where}).`;
+}
+
 /**
  * Les forges configurées sur cette machine, retrouvées par leur genre (colonne « source » des reviews,
  * des tâches et des projets). Une review ou une tâche est toujours traitée par la forge qui l'a créée.
@@ -30,10 +37,10 @@ export class ForgeRegistry {
     if (this.byKind.size === 0 && !options.allowEmpty) throw new Error("Aucune forge configurée");
   }
 
-  /** Lève une erreur lisible si la forge n'est pas configurée (jeton absent du .env). */
+  /** Lève une erreur lisible, qui dit quel jeton enregistrer et où, si la forge n'est pas configurée. */
   get(kind: string): Forge {
     const forge = this.byKind.get(kind as ForgeKind);
-    if (!forge) throw new Error(`La forge « ${kind} » n'est pas configurée (jeton absent du .env)`);
+    if (!forge) throw new Error(missingForgeMessage(kind));
     return forge;
   }
 

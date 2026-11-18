@@ -25,7 +25,10 @@ import type {
   Diff,
   ForgeConnector,
   GitCredentials,
+  Namespace,
   NewChangeRequest,
+  NewProject,
+  NewTicket,
   Person,
   Project,
   Ticket,
@@ -133,6 +136,9 @@ export function toReviewBody(r: GithubReview): Comment | null {
 /** Portée d'un label « Portée::valeur » : tout ce qui précède le dernier « :: ». */
 const scopeOf = (label: string): string | null => (label.includes("::") ? label.slice(0, label.lastIndexOf("::")) : null);
 
+/** Nom de dépôt accepté par GitHub. */
+const REPO_NAME = /^[A-Za-z0-9_.-]{1,100}$/;
+
 const DRAFT_PREFIX = /^\s*(?:draft|wip)\s*:\s*/i;
 
 // --- Connecteur ---------------------------------------------------------------------
@@ -207,6 +213,37 @@ export class GithubConnector implements ForgeConnector {
 
   async branchExists(projectId: number, branch: string): Promise<boolean> {
     return this.client.branchExists((await this.repo(projectId)).full_name, branch);
+  }
+
+  async listNamespaces(): Promise<Namespace[]> {
+    const me = await this.user();
+    const orgs = await this.client.listOrgs();
+    return [{ id: me.login, path: me.login, name: me.name || me.login, kind: "personal" }, ...orgs.map((o): Namespace => ({ id: o.login, path: o.login, name: o.login, kind: "group" }))];
+  }
+
+  /** Dépôt dans le compte de la personne, ou dans l'organisation choisie. */
+  async createProject(input: NewProject): Promise<Project> {
+    if (!REPO_NAME.test(input.name)) throw new Error("Nom de dépôt invalide : lettres, chiffres, tirets, points et soulignés seulement.");
+    const me = await this.user();
+    const org = input.namespaceId !== undefined && input.namespaceId !== me.login ? input.namespaceId : undefined;
+    const repo = await this.client.createRepo({ name: input.name, description: input.description, private: input.private, auto_init: input.withReadme }, org);
+    return toProject(this.remember(repo));
+  }
+
+  async listProjectTickets(projectId: number): Promise<Ticket[]> {
+    const repo = await this.repo(projectId);
+    return (await this.client.listRepoIssues(repo.full_name)).filter((i) => !i.pull_request).map((i) => toTicket(i, repo.id, repo.full_name));
+  }
+
+  async createTicket(projectId: number, input: NewTicket): Promise<Ticket> {
+    const repo = await this.repo(projectId);
+    const issue = await this.client.createIssue(repo.full_name, { title: input.title, body: input.description, labels: input.labels?.length ? input.labels : undefined });
+    return toTicket(issue, repo.id, repo.full_name);
+  }
+
+  /** GitHub n'a pas d'API publique pour joindre un fichier à un ticket : le fichier reste côté outil, à la disposition de l'agent dev. */
+  async uploadTicketFile(): Promise<null> {
+    return null;
   }
 
   async listAssignedTickets(): Promise<Ticket[]> {
@@ -331,6 +368,20 @@ export class GithubConnector implements ForgeConnector {
     const pull = await this.client.getPull(repo.full_name, iid);
     if (pull.head.sha !== headSha) throw new Error(`La PR #${iid} a reçu un nouveau commit depuis la review : approbation refusée`);
     await this.client.createReview(repo.full_name, iid, { event: "APPROVE", commit_id: headSha });
+  }
+
+  /** Sort la PR du brouillon (API GraphQL). Sans effet si elle n'est pas en brouillon. */
+  async markChangeRequestReady(projectId: number, iid: number): Promise<void> {
+    const repo = await this.repo(projectId);
+    const pull = await this.client.getPull(repo.full_name, iid);
+    if (!pull.draft) return;
+    if (!pull.node_id) throw new Error(`La PR #${iid} n'a pas d'identifiant global : retire-lui son statut de brouillon chez GitHub`);
+    await this.client.markPullReady(pull.node_id);
+  }
+
+  async mergeChangeRequest(projectId: number, iid: number, headSha: string): Promise<void> {
+    const repo = await this.repo(projectId);
+    await this.client.mergePull(repo.full_name, iid, headSha);
   }
 
   // --- Interne -------------------------------------------------------------------------

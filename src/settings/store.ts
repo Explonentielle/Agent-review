@@ -1,5 +1,6 @@
 import type { ForgeKind } from "../connectors/types.js";
 import type { Db } from "../db/db.js";
+import { defaultWeaponType } from "../game/armory.js";
 import { log } from "../logger.js";
 import { DEFAULT_SETTINGS, ProjectSettingsSchema, SettingsSchema, type ProjectSettings, type Settings } from "./schema.js";
 
@@ -37,6 +38,17 @@ export function mergeWithDefaults(stored: unknown): Settings {
   if (parsed.success) return parsed.data;
   log.warn("settings.invalid_stored", { error: parsed.error.message });
   return DEFAULT_SETTINGS;
+}
+
+/**
+ * Valide un projet stocké. Un projet enregistré avant le type d'arme en reçoit un fixe (`defaultWeaponType`), le même à chaque lecture.
+ * @param config Réglages du projet tels que stockés (JSON).
+ * @param source Forge de la ligne, pour les projets enregistrés avant la prise en charge de GitHub.
+ * @returns Le projet, avec son type d'arme.
+ */
+function parseStoredProject(config: string, source?: ForgeKind): ProjectSettings {
+  const project = ProjectSettingsSchema.parse(source ? { ...JSON.parse(config), source } : JSON.parse(config));
+  return { ...project, weaponType: project.weaponType ?? defaultWeaponType(project.source, project.projectId) };
 }
 
 /**
@@ -78,7 +90,7 @@ export function createSettingsStore(db: Db, workspaceId: number) {
      */
     async listProjects(): Promise<ProjectSettings[]> {
       const rows = await db.all<{ config: string }>("SELECT config FROM projects WHERE workspace_id = ? ORDER BY path", [workspaceId]);
-      return rows.map((r) => ProjectSettingsSchema.parse(JSON.parse(r.config)));
+      return rows.map((r) => parseStoredProject(r.config));
     },
 
     /**
@@ -89,7 +101,7 @@ export function createSettingsStore(db: Db, workspaceId: number) {
      */
     async getProject(source: ForgeKind, projectId: number): Promise<ProjectSettings | null> {
       const row = await db.get<{ config: string }>("SELECT config FROM projects WHERE workspace_id = ? AND source = ? AND project_id = ?", [workspaceId, source, projectId]);
-      return row ? ProjectSettingsSchema.parse({ ...JSON.parse(row.config), source }) : null;
+      return row ? parseStoredProject(row.config, source) : null;
     },
 
     /**
@@ -97,13 +109,18 @@ export function createSettingsStore(db: Db, workspaceId: number) {
      * @param input Réglages du projet.
      * @returns Le projet validé.
      * @throws ZodError Si les réglages sont invalides.
-     * @throws Error Si l'agent dev est activé sans branche de départ ou sans branche cible.
+     * @throws Error Si l'agent dev est activé sans branche de départ ou sans branche cible, ou si le type d'arme d'un projet existant change.
      */
     async saveProject(input: unknown): Promise<ProjectSettings> {
-      const project = ProjectSettingsSchema.parse(input);
-      if (project.devEnabled && (!project.baseBranch || !project.targetBranch)) {
+      const parsed = ProjectSettingsSchema.parse(input);
+      if (parsed.devEnabled && (!parsed.baseBranch || !parsed.targetBranch)) {
         throw new Error("Branche de départ et branche cible obligatoires pour activer l'agent dev");
       }
+      // Le type d'arme est fixé à la création et ne change plus : un projet existant garde le sien, et un autre type est refusé
+      const row = await db.get<{ config: string }>("SELECT config FROM projects WHERE workspace_id = ? AND source = ? AND project_id = ?", [workspaceId, parsed.source, parsed.projectId]);
+      const kept = row ? parseStoredProject(row.config, parsed.source).weaponType : undefined;
+      if (kept && parsed.weaponType && parsed.weaponType !== kept) throw new Error("Le type d'arme d'un projet ne peut pas être modifié après sa création");
+      const project = { ...parsed, weaponType: kept ?? parsed.weaponType ?? defaultWeaponType(parsed.source, parsed.projectId) };
       await db.run(
         `INSERT INTO projects (workspace_id, source, project_id, path, config) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (workspace_id, source, project_id) DO UPDATE SET path = excluded.path, config = excluded.config`,

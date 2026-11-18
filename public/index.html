@@ -47,6 +47,15 @@
   button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   [hidden] { display: none !important; }
 
+  /* ---------- Terminal Claude ---------- */
+  .term-panel { margin-top: 12px; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: #0d1117; }
+  .term-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #161b22; color: #c9d1d9; font-size: 12.5px; }
+  .term-head .spacer { flex: 1; }
+  .term-hint { padding: 8px 12px; background: #161b22; color: #9da7b3; font-size: 12.5px; border-top: 1px solid #222a33; }
+  #term-host { padding: 8px; overflow-x: auto; }
+  .claude-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+  #claude-block { margin-top: 18px; }
+
   /* ---------- Structure : sidebar + contenu ---------- */
   body { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: 100vh; overflow: hidden; }
   .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 18px 12px 14px; min-height: 0; overflow-y: auto; z-index: 5; }
@@ -275,6 +284,21 @@
   .tags button:hover { border-style: solid; color: var(--accent-text); }
 
   /* ---------- Dialogue + toasts ---------- */
+  /* Pièces jointes (captures, maquettes, données) */
+  .att-zone { margin-top: 10px; border: 1.5px dashed var(--border-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--text-2); font-size: 12.5px; text-align: left; }
+  .att-zone.drag { border-color: #7c6cf0; background: var(--hover); }
+  .att-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .att-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; }
+  .att-chip .att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+  .att-chip small { color: var(--muted); }
+  .att-chip.busy { opacity: .6; }
+  .att-chip button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 6px; }
+  .att-chip button:hover { color: var(--text); }
+  .att-add { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 8px; padding: 4px 10px; font: inherit; font-weight: 600; cursor: pointer; margin-right: 8px; }
+  .att-add:hover { background: var(--hover); }
+  .att-err { color: #e0553a; margin-top: 6px; }
+  .att-saved { display: flex; flex-wrap: wrap; gap: 6px; }
+
   dialog { border: 1px solid var(--border); border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px)); background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
   dialog::backdrop { background: rgba(10, 12, 18, .45); }
   .dlg-body { padding: 20px 22px 8px; }
@@ -360,6 +384,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-4M13 4.5 10.5 7 13 9.5"/></svg>
       <span class="lbl">Reviews</span><span class="badge" id="badge-reviews" hidden></span>
     </button>
+    <button class="tab" data-tab="forge" title="La forge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9h14a4 4 0 0 1-4 4h-1v3h3v3H7v-3h3v-3H8a5 5 0 0 1-5-4zM17 9l4-2"/></svg>
+      <span class="lbl">La forge</span>
+    </button>
     <div class="nav-label">Configuration</div>
     <button class="tab" data-tab="settings" title="Paramètres">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
@@ -399,6 +427,7 @@
     <main class="pane detail-pane" id="rev-detail"></main>
   </div>
 </div>
+<div class="view" id="view-forge" hidden></div>
 <div class="view" id="view-settings" hidden><div class="page" id="settings-page"><div class="page-inner"><div class="settings" id="settings"></div></div></div></div>
 </div>
 
@@ -555,20 +584,155 @@ function toast(message, isError = false) {
   setTimeout(() => el.remove(), isError ? 8000 : 3500);
 }
 
-/** Dialogue de confirmation. `html` doit être construit avec esc() pour tout contenu externe. */
-function ask({ title, html = "", okLabel = "Confirmer", input = false, placeholder = "" }) {
+/* =====================================================================
+   Pièces jointes : captures d'écran, maquettes et données, pour l'agent dev et pour les tickets du Scribe.
+   Un fichier envoyé reste « en attente » côté serveur jusqu'à ce qu'on le rattache à une tâche ou à un ticket.
+   ===================================================================== */
+const ATT = { maxBytes: 8 * 1024 * 1024, maxFiles: 8, accept: ".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.xml" };
+const attBoxes = new Map();
+let attSeq = 0;
+
+const fmtSize = (n) => (n < 1024 ? `${n} o` : n < 1048576 ? `${Math.round(n / 1024)} Ko` : `${(n / 1048576).toFixed(1).replace(".", ",")} Mo`);
+
+/** Envoie un fichier au serveur : il est contrôlé là-bas (type, taille, contenu réel). @returns { id, name, size, kind } */
+async function sendAttachment(file) {
+  const res = await fetch(`/api/attachments?name=${encodeURIComponent(file.name)}`, {
+    method: "POST", headers: { "Content-Type": "application/octet-stream", "x-review-agent": "1" }, body: file,
+  });
+  if (res.status === 401) { location.href = "/login"; throw new Error("Connexion requise"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+  return data;
+}
+
+/**
+ * Zone de pièces jointes : bouton, glisser-déposer et collage d'une capture (Ctrl+V). `html()` donne le rendu, `onChange` est appelé à chaque
+ * changement pour le redessiner. Les fichiers d'une capture collée reçoivent un nom daté.
+ * @param onChange Appelé quand la liste, l'envoi ou l'erreur changent.
+ * @returns { id, ids(), busy, files, add(list), remove(id), discardAll(), reset(), dispose(), html() }
+ */
+function createAttachments(onChange = () => {}) {
+  const id = `att${++attSeq}`;
+  const box = { id, files: [], pending: [], error: "" };
+  const changed = () => { try { onChange(); } catch { /* la zone n'est plus affichée */ } };
+  const stamp = () => new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+
+  box.add = async (list) => {
+    box.error = "";
+    for (const original of list) {
+      // Une capture collée s'appelle « image.png » : on lui donne un nom daté, unique
+      const file = !original.name || /^image\.(png|jpe?g|gif|webp)$/i.test(original.name)
+        ? new File([original], `capture-${stamp()}-${box.files.length + box.pending.length + 1}.${(original.type.split("/")[1] || "png").replace("jpeg", "jpg")}`, { type: original.type })
+        : original;
+      if (box.files.length + box.pending.length >= ATT.maxFiles) { box.error = `${ATT.maxFiles} fichiers au plus.`; break; }
+      if (file.size > ATT.maxBytes) { box.error = `« ${file.name} » est trop gros (${fmtSize(file.size)} ; ${fmtSize(ATT.maxBytes)} au plus).`; continue; }
+      const pending = { key: `${id}-${box.pending.length}-${Date.now()}`, name: file.name };
+      box.pending.push(pending);
+      changed();
+      try { box.files.push(await sendAttachment(file)); }
+      catch (err) { box.error = err.message; }
+      box.pending = box.pending.filter((p) => p !== pending);
+      changed();
+    }
+  };
+  box.remove = (fileId) => {
+    box.files = box.files.filter((f) => f.id !== fileId);
+    api(`/api/attachments/${fileId}/discard`, {}).catch(() => undefined);
+    changed();
+  };
+  /** Retire du serveur les fichiers en attente (la personne a annulé). */
+  box.discardAll = () => { for (const f of box.files) api(`/api/attachments/${f.id}/discard`, {}).catch(() => undefined); box.files = []; };
+  /** Vide la liste sans rien supprimer : les fichiers ont été rattachés à une tâche ou à un ticket. */
+  box.reset = () => { box.files = []; box.error = ""; changed(); };
+  box.dispose = () => attBoxes.delete(id);
+  box.ids = () => box.files.map((f) => f.id);
+  Object.defineProperty(box, "busy", { get: () => box.pending.length > 0 });
+  box.html = () => {
+    const chips = [
+      ...box.files.map((f) => `<span class="att-chip" title="${esc(f.name)}"><span class="att-name">${esc(f.name)}</span> <small>${fmtSize(f.size)}</small><button type="button" data-att-del="${esc(f.id)}" data-att-box="${id}" aria-label="Retirer ${esc(f.name)}">×</button></span>`),
+      ...box.pending.map((p) => `<span class="att-chip busy"><span class="att-name">${esc(p.name)}</span> <small>envoi…</small></span>`),
+    ].join("");
+    return `<div class="att-zone" data-att-box="${id}">${chips ? `<div class="att-list">${chips}</div>` : ""}<button type="button" class="att-add" data-att-add data-att-box="${id}">＋ Joindre des fichiers</button>
+      <span class="att-hint">ou glisse-les ici, ou colle une capture (Ctrl+V). Images, PDF, texte, CSV, JSON : ${fmtSize(ATT.maxBytes)} au plus chacun.</span>${box.error ? `<div class="att-err" role="alert">${esc(box.error)}</div>` : ""}</div>`;
+  };
+  attBoxes.set(id, box);
+  return box;
+}
+
+// Écouteurs communs à toutes les zones (le tableau de bord, la forge et le Scribe redessinent leur HTML : on délègue au document)
+document.addEventListener("click", (ev) => {
+  const add = ev.target.closest?.("[data-att-add]");
+  if (add) {
+    const box = attBoxes.get(add.dataset.attBox);
+    if (!box) return;
+    const input = document.createElement("input");
+    input.type = "file"; input.multiple = true; input.accept = ATT.accept;
+    input.addEventListener("change", () => box.add([...input.files]));
+    input.click();
+    return;
+  }
+  const del = ev.target.closest?.("[data-att-del]");
+  if (del) attBoxes.get(del.dataset.attBox)?.remove(del.dataset.attDel);
+});
+for (const type of ["dragenter", "dragover"]) {
+  document.addEventListener(type, (ev) => {
+    const zone = ev.target.closest?.(".att-zone");
+    if (!zone || !ev.dataTransfer?.types?.includes("Files")) return;
+    ev.preventDefault();
+    zone.classList.add("drag");
+  });
+}
+document.addEventListener("dragleave", (ev) => ev.target.closest?.(".att-zone")?.classList.remove("drag"));
+document.addEventListener("drop", (ev) => {
+  const zone = ev.target.closest?.(".att-zone");
+  if (!zone) return;
+  ev.preventDefault();
+  zone.classList.remove("drag");
+  attBoxes.get(zone.dataset.attBox)?.add([...ev.dataTransfer.files]);
+});
+// Une capture collée (Ctrl+V) va dans la zone du dialogue ouvert, sinon dans la dernière zone visible
+document.addEventListener("paste", (ev) => {
+  const files = [...(ev.clipboardData?.files ?? [])];
+  if (!files.length) return;
+  const zone = document.querySelector("dialog[open] .att-zone") ?? [...document.querySelectorAll(".att-zone")].filter((z) => z.offsetParent !== null).pop();
+  if (!zone) return;
+  ev.preventDefault();
+  attBoxes.get(zone.dataset.attBox)?.add(files);
+});
+
+/**
+ * Dialogue de confirmation. `html` doit être construit avec esc() pour tout contenu externe. Avec `attach`, le dialogue propose de joindre des
+ * fichiers (captures, maquettes, données) : le résultat porte alors `attachments`, la liste des identifiants envoyés.
+ */
+function ask({ title, html = "", okLabel = "Confirmer", input = false, placeholder = "", attach = false }) {
   const dlg = document.getElementById("dialog");
   document.getElementById("dlg-title").textContent = title;
-  document.getElementById("dlg-text").innerHTML = html;
-  document.getElementById("dlg-ok").textContent = okLabel;
+  document.getElementById("dlg-text").innerHTML = html + (attach ? '<div id="dlg-attach"></div>' : "");
+  const ok = document.getElementById("dlg-ok");
+  ok.textContent = okLabel;
+  ok.disabled = false;
   const area = document.getElementById("dlg-input");
   area.hidden = !input;
   area.value = "";
   area.placeholder = placeholder;
+  let box = null;
+  if (attach) {
+    const paint = () => {
+      const holder = document.getElementById("dlg-attach");
+      if (holder) holder.innerHTML = box.html();
+      ok.disabled = box.busy; // pas de validation pendant un envoi : le fichier serait oublié
+    };
+    box = createAttachments(paint);
+    paint();
+  }
   dlg.showModal();
   if (input) area.focus();
   return new Promise((resolve) => {
-    dlg.addEventListener("close", () => resolve(dlg.returnValue === "ok" ? { value: area.value.trim() } : null), { once: true });
+    dlg.addEventListener("close", () => {
+      const accepted = dlg.returnValue === "ok";
+      if (box) { if (!accepted) box.discardAll(); box.dispose(); }
+      resolve(accepted ? { value: area.value.trim(), attachments: box ? box.ids() : [] } : null);
+    }, { once: true });
   });
 }
 
@@ -584,14 +748,16 @@ try { state.ticketSource = localStorage.getItem("ra.ticketSource") || ""; } catc
 
 function route() {
   const [tab = "tickets", id] = location.hash.replace(/^#/, "").split("/");
-  state.tab = ["tickets", "dev", "reviews", "settings"].includes(tab) ? tab : "tickets";
+  state.tab = ["tickets", "dev", "reviews", "forge", "settings"].includes(tab) ? tab : "tickets";
   for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t.dataset.tab === state.tab);
   for (const v of document.querySelectorAll(".view")) v.hidden = v.id !== `view-${state.tab}`;
   document.getElementById("settings-toc").hidden = state.tab !== "settings";
-  document.getElementById("crumb").textContent = { tickets: "Mes tickets", dev: "Agent dev", reviews: "Reviews", settings: "Paramètres" }[state.tab];
+  document.getElementById("crumb").textContent = { tickets: "Mes tickets", dev: "Agent dev", reviews: "Reviews", forge: "La forge", settings: "Paramètres" }[state.tab];
   if (state.tab === "tickets") loadTickets(false);
   if (state.tab === "dev") { if (id) showTask(Number(id)); else { state.taskId = null; renderTaskEmpty(); refreshTasks(); } }
   if (state.tab === "reviews") { if (id) showReview(Number(id)); else { state.reviewId = null; renderReviewEmpty(); refreshReviews(); } }
+  if (state.tab !== "forge") stopForge();
+  if (state.tab === "forge") loadForge();
   if (state.tab === "settings") loadSettings();
 }
 const go = (hash) => { if (location.hash === hash) route(); else location.hash = hash; };
@@ -710,6 +876,7 @@ async function launchAgent(source, projectId, iid) {
     title: `Lancer l'agent sur #${i.iid}`,
     okLabel: "Lancer l'agent",
     input: true,
+    attach: true,
     placeholder: "Consignes supplémentaires (optionnel) : piste à explorer, fichiers concernés, contraintes...",
     html: `<p><b>${esc(i.title)}</b></p>
       <dl class="kv">
@@ -722,7 +889,7 @@ async function launchAgent(source, projectId, iid) {
   });
   if (!answer) return;
   try {
-    const { id } = await api("/api/tasks", { source, projectId, issueIid: iid, extraInstructions: answer.value });
+    const { id } = await api("/api/tasks", { source, projectId, issueIid: iid, extraInstructions: answer.value, attachments: answer.attachments });
     toast("Agent lancé.");
     state.issues = null;
     go(`#dev/${id}`);
@@ -772,7 +939,7 @@ function taskCallout(t) {
       return `<div class="callout warn">${ICON.warn}<h3>L'agent a besoin d'informations</h3><p>Rien n'a été poussé. Complète le ticket (ou donne des consignes) puis relance.</p>
         ${res?.questions?.length ? `<ul>${res.questions.map((q) => `<li>${rich(q)}</li>`).join("")}</ul>` : ""}</div>`;
     case "error":
-      return `<div class="callout err">${ICON.err}<h3>La tâche a échoué</h3><pre>${esc(t.error)}</pre></div>`;
+      return `<div class="callout err">${ICON.err}<h3>La tâche a échoué</h3><pre>${esc(t.error)}</pre><p class="note">Tu peux <b>relancer l'agent</b> (si une branche d'un essai précédent existe encore sans MR, l'outil en prend une nouvelle) ou <b>supprimer cette tâche</b>, avec les boutons en bas de la page.</p></div>`;
     case "cancelled":
       return `<div class="callout info">${ICON.info}<h3>Tâche arrêtée</h3><p>Rien n'a été poussé.</p></div>`;
   }
@@ -814,6 +981,8 @@ async function showTask(id) {
 
       ${taskCallout(t)}
 
+      <div id="task-attachments"></div>
+
       ${t.extra_instructions ? `<section class="block"><h2>${t.mode === "followup" ? "Consignes de la reprise" : "Tes consignes"}</h2><div class="panel md">${md(t.extra_instructions)}</div></section>` : ""}
 
       ${res && res.status === "done" ? `
@@ -824,9 +993,12 @@ async function showTask(id) {
       ` : ""}
       ${res && res.status === "blocked" ? `<section class="block"><h2>Ce que l'agent a compris</h2><div class="panel md">${md(res.summary)}</div></section>` : ""}
 
+      ${t.mr_iid && ["mr_created", "mr_updated"].includes(t.status) && !live ? `<section class="block"><h2>Relecture et fusion</h2><div class="panel" id="piece-box"><div class="note">Chargement…</div></div></section>` : ""}
+
       ${t.mr_iid && t.branch && !live ? `<section class="block"><h2>Reprendre avec des consignes</h2><div class="panel">
         <p>L'agent repart de la branche <code>${esc(t.branch)}</code> telle qu'elle est sur la forge (tes commits manuels compris), lit les commentaires de la MR, applique tes consignes, puis l'outil pousse <b>un nouveau commit</b> sur la même MR (jamais de --force) et y ajoute son rapport en commentaire. S'il se bloque, rien n'est poussé.</p>
         <textarea class="area" id="followup-text" placeholder="Ex. : ajoute les docblocks complets sur toutes les méthodes créées, aligne le style des accolades sur Model_Price_Rule, et contrôle réellement les plages annoncées dans la feuille Aide (adultes 0-99, stock max ≥ stock min)."></textarea>
+        <div id="followup-attach"></div>
         <div class="actions-inline" style="margin-top:10px"><button class="btn primary" data-act="task-followup">Lancer la reprise</button></div></div></section>` : ""}
 
       <section class="block"><h2>Journal ${live ? '<span class="pill accent"><span class="pulse"></span>en direct</span>' : ""}</h2>
@@ -836,6 +1008,8 @@ async function showTask(id) {
       <a class="btn" href="${esc(t.issue_url)}" target="_blank" rel="noopener">Ouvrir le ticket ${ICON.ext}</a>
       ${live ? `<button class="btn danger" data-act="task-cancel">Arrêter l'agent</button>` : ""}
       <span class="spacer"></span>
+      ${!live && ["error", "cancelled", "blocked"].includes(t.status) ? `<button class="btn primary" data-act="task-relaunch" title="Crée une nouvelle tâche sur le même ticket, avec les mêmes consignes">Relancer l'agent</button>` : ""}
+      ${!live ? `<button class="btn danger" data-act="task-delete" title="Supprime la tâche et son journal de l'outil. La branche et la MR sur la forge ne sont pas touchées.">Supprimer cette tâche</button>` : ""}
       ${t.worktree_path && !live ? `<button class="btn ghost" data-act="task-cleanup" title="Supprime le dossier de travail local. La branche poussée sur la forge n'est pas touchée.">Nettoyer le dossier local</button>` : ""}
     </div>`;
 
@@ -844,6 +1018,84 @@ async function showTask(id) {
   await pollEvents(true);
   refreshTasks();
   if (live) taskTimer = setTimeout(() => tickTask(id), 2500);
+  loadPiece(id);
+  loadTaskAttachments(id);
+  mountFollowupAttachments(id);
+}
+
+/** Fichiers joints à la tâche (captures, maquettes, données que l'agent a reçus), sous le titre. */
+async function loadTaskAttachments(id) {
+  const holder = document.getElementById("task-attachments");
+  if (!holder) return;
+  const { attachments } = await api(`/api/tasks/${id}/attachments`).catch(() => ({ attachments: [] }));
+  if (state.taskId !== id || !attachments.length) return;
+  holder.innerHTML = `<section class="block"><h2>Pièces jointes de l'agent</h2><div class="panel"><div class="att-saved">${attachments.map((f) => `<span class="att-chip" title="${esc(f.name)}"><span class="att-name">${esc(f.name)}</span> <small>${fmtSize(f.size)}</small></span>`).join("")}</div>
+    <p class="note" style="margin-top:8px">L'agent les ouvre pour comprendre le besoin, puis elles sont retirées de son dossier de travail : elles ne partent jamais dans la MR.</p></div></section>`;
+}
+
+/** Zone de pièces jointes de la reprise : la même tant qu'on reste sur la même tâche, pour ne pas perdre les fichiers déjà envoyés. */
+function mountFollowupAttachments(id) {
+  const holder = document.getElementById("followup-attach");
+  if (!holder) return;
+  if (state.followupFor !== id || !state.followupBox) {
+    state.followupBox?.dispose();
+    state.followupFor = id;
+    state.followupBox = createAttachments(() => {
+      const el = document.getElementById("followup-attach");
+      if (el && state.followupFor === state.taskId) el.innerHTML = state.followupBox.html();
+    });
+  }
+  holder.innerHTML = state.followupBox.html();
+}
+
+/* La pièce (la MR de l'agent) : relecture par le Maître juré, état de la CI, fusion dans la branche cible du projet. */
+let pieceTimer = null;
+function pieceHtml(p, taskId) {
+  const rv = p.review;
+  const running = rv && ["queued", "running", "detected"].includes(rv.status);
+  const stale = rv && !rv.current && !running;
+  const stateTag = p.mr.state === "merged" ? pill("green", "Fusionnée") : p.mr.state === "closed" ? pill("orange", "Fermée") : p.mr.draft ? pill("gray", "Brouillon") : pill("green", "Prête");
+  const reviewTag = !rv ? pill("gray", "Pas encore relue")
+    : running ? pill("accent", "Le Maître juré relit…")
+      : rv.status === "needs_human" ? pill("orange", "Des points à analyser")
+        : rv.status === "error" ? pill("red", "La relecture a échoué")
+          : rv.status === "dismissed" ? pill("orange", "Relecture ignorée") : pill("green", "Relecture OK");
+  const counts = rv && rv.verdict ? ` · ${rv.blocking} bloquant${rv.blocking > 1 ? "s" : ""}, ${rv.important} important${rv.important > 1 ? "s" : ""}, ${rv.suggestion} suggestion${rv.suggestion > 1 ? "s" : ""}` : "";
+  const reviewBtn = p.mr.state !== "opened" || running || p.followup ? ""
+    : !rv || stale ? `<button class="btn primary" data-act="piece-review">Faire relire par le Maître juré</button>`
+      : `<button class="btn ghost" data-act="piece-review" data-again="1">Relire à nouveau</button>`;
+  const sev = { blocking: ["red", "Bloquant"], important: ["orange", "Important"], suggestion: ["gray", "Suggestion"] };
+  const findings = rv && rv.findings && rv.findings.length && !running
+    ? `<div style="display:grid;gap:8px;margin:8px 0">${rv.findings.map((f) => `<div class="note" style="border-left:4px solid var(--border-strong);padding:6px 10px"><p>${pill(sev[f.severity]?.[0] ?? "gray", (sev[f.severity]?.[1] ?? f.severity) + (f.confirmed ? "" : " · à vérifier"))} <b>${esc(f.title)}</b> <code>${esc(f.location)}</code></p><p>${esc(f.explanation)}</p>${f.suggestion ? `<p>Suggestion : ${esc(f.suggestion)}</p>` : ""}</div>`).join("")}</div>`
+    : "";
+  const questions = rv && rv.questions && rv.questions.length && !running ? `<p class="note"><b>Questions de la relecture</b></p><ul class="note" style="margin:0 0 8px 18px">${rv.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul>` : "";
+  const fixBtn = p.followup ? `<p class="note">Un agent reprend la pièce avec la relecture (tâche <a href="#dev/${esc(p.followup.id)}">#${esc(p.followup.id)}</a>).</p>`
+    : p.canFix ? `<button class="btn primary" data-act="piece-fix">Corriger avec la relecture</button>` : "";
+  const ci = p.checks.total === 0 ? "aucune intégration continue" : p.checks.failed ? `${p.checks.failed} en échec` : p.checks.pending ? `${p.checks.pending} en cours` : "verte";
+  const merge = p.mr.state === "merged" ? `<div class="callout ok">${ICON.ok}<h3>Fusionnée dans <code>${esc(p.mr.targetBranch)}</code></h3><p>Le code est sur la branche principale du projet. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p></div>`
+    : p.mr.state === "closed" ? `<p class="note">La MR est fermée : elle ne peut plus être fusionnée.</p>`
+      : `<button class="btn primary" data-act="piece-merge" data-target="${esc(p.mr.targetBranch)}" ${p.readiness.ok ? "" : "disabled"}>Fusionner dans ${esc(p.mr.targetBranch)}</button>
+         ${p.readiness.ok ? "" : `<ul class="note" style="margin:8px 0 0 18px">${p.readiness.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`}`;
+  return `<p>${stateTag} <code>${esc(p.mr.sourceBranch)}</code> vers <code>${esc(p.mr.targetBranch)}</code></p>
+    <p><b>1. Relecture</b> ${reviewTag}${esc(counts)} ${stale ? '<span class="note">La MR a changé depuis la dernière relecture.</span>' : ""}</p>
+    ${rv && rv.summary && !running ? `<p class="note">${esc(rv.summary)}</p>` : ""}${findings}${questions}
+    <div class="actions-inline">${fixBtn}${reviewBtn}${rv ? `<a class="btn ghost" href="#reviews/${rv.id}">Lire la revue complète</a>` : ""}</div>
+    <p class="note">La relecture ne publie rien sur la MR : c'est un contrôle avant fusion.</p>
+    <p><b>2. Intégration continue</b> : ${ci}</p>
+    <p><b>3. Fusion</b></p>${merge}`;
+}
+async function loadPiece(taskId) {
+  clearTimeout(pieceTimer);
+  const box = document.getElementById("piece-box");
+  if (!box || state.taskId !== taskId) return;
+  try {
+    const p = await api(`/api/tasks/${taskId}/piece`);
+    box.innerHTML = pieceHtml(p, taskId);
+    // Statut en direct tant que la MR est ouverte : 3 s pendant une relecture, 6 s sinon
+    if (p.mr.state === "opened") pieceTimer = setTimeout(() => loadPiece(taskId), p.review && ["queued", "running", "detected"].includes(p.review.status) ? 3000 : 6000);
+  } catch (err) {
+    box.innerHTML = `<p class="note">${esc(err.message)}</p>`;
+  }
 }
 
 async function pollEvents(reset) {
@@ -1008,6 +1260,194 @@ let settingsData = null;
 let projectsData = [];
 let editingProject = null;
 
+/* =====================================================================
+   La forge : un petit monde 2D jouable (public/forge/), chargé à la première visite
+   ===================================================================== */
+let forgeAssets = null;
+
+function loadForgeAssets() {
+  forgeAssets ??= (async () => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/forge/forge.css";
+    document.head.append(css);
+    for (const file of ["sprites", "audio", "scribe", "architect", "items", "popups", "engine", "gameplay", "combat", "arena", "game"]) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = `/forge/${file}.js`;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Impossible de charger ${file}.js`));
+        document.head.append(script);
+      });
+    }
+  })().catch((err) => { forgeAssets = null; throw err; });
+  return forgeAssets;
+}
+
+async function loadForge() {
+  const root = document.getElementById("view-forge");
+  try {
+    await loadForgeAssets();
+  } catch (err) {
+    root.innerHTML = `<div class="page"><div class="page-inner"><div class="callout err">${ICON.err}<h3>La forge est éteinte</h3><pre>${esc(err.message)}</pre></div></div></div>`;
+    return;
+  }
+  if (state.tab === "forge") window.ForgeGame.mount(root);
+}
+
+/** On quitte la forge : le monde se met en pause et le son s'arrête. */
+function stopForge() { window.ForgeGame?.pause(); }
+
+/* =====================================================================
+   Terminal Claude : connexion de l'abonnement depuis le navigateur
+   ===================================================================== */
+const term = { xterm: null, source: null, buf: "", timer: null, chain: Promise.resolve(), loading: null, poll: null };
+
+/** Pastille et détail de la connexion de la CLI Claude. */
+function claudeStatusRow() {
+  const c = state.claude;
+  const badge = !c ? pill("gray", "état inconnu") : !c.installed ? pill("red", "CLI Claude introuvable") : c.connected ? pill("green", "connecté") : pill("orange", "non connecté");
+  return `<div class="claude-row">${badge}${c?.detail ? `<small>${esc(c.detail)}</small>` : ""}</div>`;
+}
+
+function claudeBlock() {
+  return `<div id="claude-block"><div class="sub-title">Abonnement Claude</div>
+    <p class="note">Les agents utilisent la CLI Claude Code de cette machine. Connecte ton abonnement ici, sans passer par SSH : le terminal ouvre la CLI.</p>
+    <div id="claude-status">${claudeStatusRow()}</div>
+    <div class="actions-inline">
+      <button type="button" class="btn sm primary" data-act="term-open">Ouvrir le terminal Claude</button>
+      <button type="button" class="btn sm ghost" data-act="claude-check">Vérifier la connexion</button>
+    </div>
+    <div id="term-panel" class="term-panel" hidden>
+      <div class="term-head"><b>Terminal Claude</b><span class="spacer"></span>
+        <button type="button" class="btn sm ghost" data-act="term-hide" title="Cache le terminal, la session continue">Masquer</button>
+        <button type="button" class="btn sm danger" data-act="term-stop">Arrêter la session</button></div>
+      <div id="term-host"></div>
+      <div class="term-hint">Dans la CLI, choisis la connexion avec ton compte Claude (abonnement), ouvre le lien affiché dans ton navigateur, puis colle ici le code qu'il te donne (Ctrl+Maj+V ou clic droit). Si rien ne la propose, tape <code>/login</code>. La pastille passe à « connecté » toute seule.</div>
+    </div>
+  </div>`;
+}
+
+async function refreshClaudeStatus(force) {
+  try {
+    const before = state.claude?.connected;
+    state.claude = await api(`/api/claude/status${force ? "?force=1" : ""}`);
+    const row = document.getElementById("claude-status");
+    if (row) row.innerHTML = claudeStatusRow();
+    if (state.claude.connected && before === false) {
+      toast("Claude est connecté : l'apprenti est réveillé.");
+      document.dispatchEvent(new Event("ra:changed"));
+    }
+  } catch (err) {
+    if (force) toast(err.message, true);
+  }
+}
+
+/** Charge xterm.js (servi par l'outil, version figée) la première fois qu'on ouvre le terminal. */
+function loadXterm() {
+  term.loading ??= new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/vendor/xterm/xterm.css";
+    document.head.append(css);
+    const js = document.createElement("script");
+    js.src = "/vendor/xterm/xterm.js";
+    js.onload = () => resolve();
+    js.onerror = () => { term.loading = null; reject(new Error("Impossible de charger le terminal")); };
+    document.head.append(js);
+  });
+  return term.loading;
+}
+
+/** Détache le terminal de la page (la session continue sur le serveur). */
+function disposeTermView() {
+  term.source?.close();
+  term.source = null;
+  term.xterm?.dispose();
+  term.xterm = null;
+  clearInterval(term.poll);
+  term.poll = null;
+}
+
+const base64ToBytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+function showTermMessage(text) {
+  document.getElementById("term-host").innerHTML = `<p class="note" style="color:#c9d1d9;padding:6px 4px;margin:0">${esc(text)}</p>`;
+}
+
+async function openTerminal() {
+  const panel = document.getElementById("term-panel");
+  if (!panel) return;
+  panel.hidden = false;
+  try {
+    const info = await api("/api/terminal");
+    if (!info.available) return showTermMessage(info.reason || "Le terminal n'est pas disponible sur cette machine.");
+    await loadXterm();
+    disposeTermView();
+    const host = document.getElementById("term-host");
+    host.innerHTML = "";
+    term.xterm = new Terminal({ cols: info.cols, rows: info.rows, cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, "Cascadia Code", Consolas, monospace', theme: { background: "#0d1117" } });
+    term.xterm.open(host);
+    term.xterm.onData(queueTermInput);
+    if (!info.active) await api("/api/terminal/start", {});
+    attachTermStream();
+    term.xterm.focus();
+    term.poll = setInterval(() => refreshClaudeStatus(true), 8000);
+  } catch (err) {
+    showTermMessage(err.message);
+    toast(err.message, true);
+  }
+}
+
+/** Branche le flux de sortie. Pas de reconnexion automatique : elle rejouerait la sortie déjà affichée. */
+function attachTermStream() {
+  const source = new EventSource("/api/terminal/stream");
+  term.source = source;
+  source.addEventListener("data", (ev) => term.xterm?.write(base64ToBytes(ev.data)));
+  source.addEventListener("exit", () => {
+    source.close();
+    term.source = null;
+    term.xterm?.write("\r\n\x1b[33m[Session terminée]\x1b[0m\r\n");
+    refreshClaudeStatus(true);
+  });
+  source.onerror = () => {
+    source.close();
+    term.source = null;
+    term.xterm?.write("\r\n\x1b[31m[Connexion au terminal perdue : rouvre-le]\x1b[0m\r\n");
+  };
+}
+
+/** Regroupe les touches tapées sur quelques millisecondes et les envoie dans l'ordre (une requête à la fois). */
+function queueTermInput(data) {
+  term.buf += data;
+  if (term.timer) return;
+  term.timer = setTimeout(() => {
+    term.timer = null;
+    const text = term.buf;
+    term.buf = "";
+    for (let i = 0; i < text.length;) {
+      let end = Math.min(i + 3000, text.length);
+      const last = text.charCodeAt(end - 1);
+      if (end < text.length && last >= 0xd800 && last <= 0xdbff) end--; // ne coupe pas une paire de substitution
+      const part = text.slice(i, end);
+      term.chain = term.chain.then(() => api("/api/terminal/input", { data: part })).catch((err) => toast(err.message, true));
+      i = end;
+    }
+  }, 8);
+}
+
+function hideTerminal() {
+  disposeTermView();
+  document.getElementById("term-panel").hidden = true;
+}
+
+async function stopTerminal() {
+  disposeTermView();
+  document.getElementById("term-panel").hidden = true;
+  await api("/api/terminal/stop", {}).catch((err) => toast(err.message, true));
+  refreshClaudeStatus(true);
+}
+
 async function loadSettings() {
   const prefillSearch = state.prefillProject;
   const prefillSource = state.prefillSource;
@@ -1024,6 +1464,12 @@ async function loadSettings() {
     state.costs = costs;
     projectsData = projects;
     renderSettings();
+    refreshClaudeStatus(false);
+    if (state.autoTerminal) {
+      state.autoTerminal = false;
+      document.getElementById("claude-block")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      openTerminal();
+    }
     if (prefillSearch) openProjectEditor(null, prefillSearch, prefillSource);
   } catch (err) {
     document.getElementById("settings").innerHTML = `<div class="callout err">${ICON.err}<h3>Impossible de charger les paramètres</h3><pre>${esc(err.message)}</pre></div>`;
@@ -1083,10 +1529,13 @@ function secretsBlock() {
   const origin = (x) => x.source === "env" ? pill("gray", "défini dans le .env (prioritaire)")
     : x.source === "vault" ? pill("green", `enregistré, chiffré${x.updatedAt ? ` le ${esc(x.updatedAt.slice(0, 10))}` : ""}`)
     : pill("orange", "non défini");
-  return `<div class="sub-title">Jetons enregistrés dans l'outil</div>
+  const input = (x) => x.secret === false
+    ? `<input type="text" autocomplete="off" spellcheck="false" placeholder="https://gitlab.exemple.com" value="${esc(x.value || "")}" data-secret-input="${esc(x.name)}">`
+    : `<input type="password" autocomplete="new-password" placeholder="${x.source === "vault" ? "Nouvelle valeur (remplace l'actuelle)" : "Coller la valeur"}" data-secret-input="${esc(x.name)}">`;
+  return `<div class="sub-title">Adresse et jetons enregistrés dans l'outil</div>
     <div class="secret-list">${list.map((x) => `
       <div class="field"><span>${esc(x.label)} ${origin(x)}</span>
-        ${x.source === "env" ? "" : `<div class="secret-form"><input type="password" autocomplete="new-password" placeholder="${x.source === "vault" ? "Nouvelle valeur (remplace l'actuelle)" : "Coller la valeur"}" data-secret-input="${esc(x.name)}"><button type="button" class="btn sm primary" data-act="secret-save" data-name="${esc(x.name)}">Enregistrer</button>${x.source === "vault" ? `<button type="button" class="btn sm ghost" data-act="secret-delete" data-name="${esc(x.name)}">Supprimer</button>` : ""}</div>`}
+        ${x.source === "env" ? (x.secret === false && x.value ? `<small>${esc(x.value)}</small>` : "") : `<div class="secret-form">${input(x)}<button type="button" class="btn sm primary" data-act="secret-save" data-name="${esc(x.name)}">Enregistrer</button>${x.source === "vault" ? `<button type="button" class="btn sm ghost" data-act="secret-delete" data-name="${esc(x.name)}">Supprimer</button>` : ""}</div>`}
         <small>Appliqué tout de suite.</small></div>`).join("")}</div>`;
 }
 
@@ -1101,15 +1550,15 @@ async function secretAction(act, name) {
       toast(res.restartRequired ? "Enregistré, chiffré. Redémarre l'outil pour le prendre en compte." : "Enregistré, chiffré et appliqué.");
       state.issues = null; // les tickets viennent des forges : ils sont rechargés avec les nouvelles connexions
     } else {
-      if (!(await ask({ title: "Supprimer ce jeton ?", html: "<p>Il est effacé de la base de l'outil. Rien n'est révoqué chez GitLab, GitHub ou Anthropic : fais-le là-bas si le jeton a fuité.</p>", okLabel: "Supprimer" }))) return;
+      if (!(await ask({ title: "Supprimer ce réglage ?", html: "<p>Il est effacé de la base de l'outil. Pour un jeton, rien n'est révoqué chez GitLab, GitHub ou Anthropic : fais-le là-bas si le jeton a fuité.</p>", okLabel: "Supprimer" }))) return;
       const res = await api(`/api/secrets/${encodeURIComponent(name)}/delete`, {});
       toast(res.restartRequired ? "Supprimé. Redémarre l'outil pour que la forge cesse de l'utiliser." : "Supprimé.");
     }
     await refreshHeader();
     state.secrets = (await api("/api/secrets")).secrets;
-    document.getElementById("forges-block").innerHTML = forgesBlock();
-    document.getElementById("secrets-block").innerHTML = secretsBlock();
-    document.getElementById("api-key-state").innerHTML = apiKeyPill();
+    const blocks = { "forges-block": forgesBlock, "secrets-block": secretsBlock, "api-key-state": apiKeyPill };
+    for (const [id, render] of Object.entries(blocks)) { const el = document.getElementById(id); if (el) el.innerHTML = render(); }
+    document.dispatchEvent(new Event("ra:changed"));
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1119,8 +1568,8 @@ function forgesBlock() {
   const forges = st.forges || [];
   const has = (kind) => forges.some((f) => f.kind === kind);
   return `<dl class="kv">${forges.map((f) => `<dt>${forgeName(f.kind)}</dt><dd>@${esc(f.username)}${f.kind === "gitlab" && st.gitlabUrl ? ` · ${esc(st.gitlabUrl)}` : ""}</dd>`).join("")}
-    ${has("github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : enregistre un jeton ci-dessous, ou ajoute <code>GITHUB_TOKEN</code> dans le .env.</dd>`}
-    ${has("gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : ajoute <code>GITLAB_URL</code> dans le .env, puis enregistre un jeton ci-dessous (ou ajoute <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env).</dd>`}</dl>`;
+    ${has("github") ? "" : `<dt>GitHub</dt><dd class="note">Non configuré : enregistre un jeton ci-dessous, ou ajoute <code>GITHUB_TOKEN</code> dans le .env. Utilise un jeton à portée fine créé pour le compte ou l'organisation qui possède les dépôts.</dd>`}
+    ${has("gitlab") ? "" : `<dt>GitLab</dt><dd class="note">Non configuré : enregistre l'adresse de ton GitLab puis un jeton ci-dessous (ou ajoute <code>GITLAB_URL</code>, <code>GITLAB_TOKEN</code> et <code>GITLAB_USERNAME</code> dans le .env). Utilise le jeton d'un compte qui a accès aux projets concernés.</dd>`}</dl>`;
 }
 
 /** Section « Agents dans des conteneurs » : où tournent les agents et, en mode conteneur, le bouton qui vérifie que tout est prêt. */
@@ -1162,6 +1611,7 @@ async function runRuntimeCheck(button) {
 }
 
 function renderSettings() {
+  disposeTermView(); // la page est reconstruite : le terminal affiché disparaît, la session reste ouverte côté serveur
   const s = settingsData.settings;
   const st = state.stats || {};
   const costs = state.costs;
@@ -1178,6 +1628,7 @@ function renderSettings() {
         <p class="desc">Les comptes GitLab et GitHub se configurent de deux façons : un jeton enregistré ci-dessous (chiffré en base, à toi seul, pris en compte tout de suite), ou les variables du fichier <code>.env</code> (prioritaires : à modifier là-bas, puis redémarrer l'outil). GitLab et GitHub peuvent être configurés ensemble. Ta clé API Anthropic s'enregistre aussi ci-dessous.</p>
         <div id="forges-block">${forgesBlock()}</div>
         <div id="secrets-block">${secretsBlock()}</div>
+        ${claudeBlock()}
         ${sessionBlock()}
       </section>
 
@@ -1428,11 +1879,23 @@ function agentImageField(p) {
     <small>Les outils du projet (PHP, composer, node...) doivent être dans l'image. Dans un conteneur il n'y a pas de Docker : les commandes autorisées appellent directement les outils (ex. <code>vendor/bin/phpunit</code>), pas <code>docker run</code>. Images proposées : celles de <code>AGENT_IMAGE</code> et <code>AGENT_IMAGES</code> du .env.</small></label>`;
 }
 
+/** Types d'armes de la forge (même liste que le serveur, `WEAPON_TYPE_IDS`). */
+const WEAPON_TYPE_NAMES = { sword: "Épée", axe: "Hache", hammer: "Marteau", dagger: "Dague", spear: "Lance", bow: "Arc", staff: "Bâton" };
+
+/** Type d'arme du projet : choisi à la création (nouveau projet), puis affiché sans pouvoir être modifié. */
+function weaponTypeField(p) {
+  if (!p.isNew) return `<div class="field"><span>Type d'arme</span><div>${esc(WEAPON_TYPE_NAMES[p.weaponType] || "")}</div><small>Choisi à la création du projet : il ne peut plus être modifié.</small></div>`;
+  return `<label class="field"><span>Type d'arme</span>
+    <select name="weaponType">${Object.entries(WEAPON_TYPE_NAMES).map(([id, name]) => `<option value="${id}">${name}</option>`).join("")}</select>
+    <small>Les armes de ce projet dans la forge (râtelier, butin) seront de ce type. Impossible à modifier une fois le projet créé.</small></label>`;
+}
+
 async function renderProjectForm() {
   const p = editingProject;
   const box = document.getElementById("project-editor");
   box.innerHTML = `<form class="panel" id="project-form" style="margin-top:12px">
     <div class="sub-title">${forgePill(p.source)} ${esc(p.path)}</div>
+    ${weaponTypeField(p)}
     <label class="check"><input type="checkbox" name="devEnabled" ${p.devEnabled ? "checked" : ""}> Autoriser l'agent dev sur ce projet</label>
     <div class="grid2" style="margin-top:14px">
       <label class="field"><span>Branche de départ</span><input name="baseBranch" list="branch-list" value="${esc(p.baseBranch)}" placeholder="ex. develop"><small>La branche du ticket est créée depuis celle-ci.</small></label>
@@ -1466,6 +1929,8 @@ async function saveProject() {
     allowedCommands: lines(f.allowedCommands.value),
     instructions: f.instructions.value,
     agentImage: f.agentImage.value,
+    // Choisi seulement à la création : un projet existant renvoie son type tel quel (le serveur refuse tout changement)
+    weaponType: editingProject.isNew ? f.weaponType.value : editingProject.weaponType,
   };
   try {
     await api("/api/projects", data);
@@ -1473,6 +1938,7 @@ async function saveProject() {
     editingProject = null;
     state.issues = null;
     await loadSettings();
+    document.dispatchEvent(new Event("ra:changed"));
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1519,7 +1985,7 @@ document.addEventListener("click", async (e) => {
   if ((t = el("[data-pickproject]"))) {
     const picked = JSON.parse(t.dataset.pickproject);
     const existing = projectsData.find((p) => p.source === picked.source && p.projectId === picked.id);
-    editingProject = existing ? { ...existing } : { source: picked.source, projectId: picked.id, path: picked.path, devEnabled: true, baseBranch: "", targetBranch: "", allowedCommands: [], instructions: "" };
+    editingProject = existing ? { ...existing } : { source: picked.source, projectId: picked.id, path: picked.path, devEnabled: true, baseBranch: "", targetBranch: "", allowedCommands: [], instructions: "", isNew: true };
     return renderProjectForm();
   }
 
@@ -1537,6 +2003,10 @@ document.addEventListener("click", async (e) => {
     area.value = act === "prompt-load-default" ? settingsData.defaultSystemPrompts[t.dataset.kind] : "";
     return toast(act === "prompt-load-default" ? "Prompt d'origine affiché : modifie-le puis enregistre." : "Champ vidé : le prompt d'origine sera utilisé après enregistrement.");
   }
+  if (act === "term-open") return openTerminal();
+  if (act === "term-hide") return hideTerminal();
+  if (act === "term-stop") return stopTerminal();
+  if (act === "claude-check") return refreshClaudeStatus(true);
   if (act === "secret-save" || act === "secret-delete") return secretAction(act, t.dataset.name);
   if (act === "runtime-check") return runRuntimeCheck(t);
   if (act === "logout") {
@@ -1558,12 +2028,62 @@ document.addEventListener("click", async (e) => {
   if (act === "task-followup") {
     const instructions = document.getElementById("followup-text").value.trim();
     if (!instructions) return toast("Écris d'abord les consignes de la reprise.", true);
+    if (state.followupBox?.busy) return toast("Un fichier est encore en cours d'envoi : attends quelques secondes.", true);
     if (!(await ask({ title: "Lancer la reprise ?", html: "<p>L'agent repart de la branche telle qu'elle est sur la forge. Si tout est bon, l'outil pousse un nouveau commit sur la MR et y ajoute un commentaire. S'il se bloque, rien n'est poussé.</p>", okLabel: "Lancer" }))) return;
-    const res = await api(`/api/tasks/${state.taskId}/followup`, { instructions }).catch((err) => { toast(err.message, true); return null; });
+    const res = await api(`/api/tasks/${state.taskId}/followup`, { instructions, attachments: state.followupBox?.ids() ?? [] }).catch((err) => { toast(err.message, true); return null; });
     if (!res) return;
+    state.followupBox?.reset();
     toast("Reprise lancée.");
     refreshHeader();
     return go(`#dev/${res.id}`);
+  }
+  if (act === "piece-fix") {
+    try {
+      await api(`/api/tasks/${state.taskId}/fix-review`, {});
+      toast("Un agent reprend la pièce avec la relecture…");
+      loadPiece(state.taskId);
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (act === "piece-review") {
+    try {
+      await api(`/api/tasks/${state.taskId}/review`, t.dataset.again === "1" ? { again: true } : {});
+      toast("Le Maître juré relit la pièce…");
+    } catch (err) { toast(err.message, true); }
+    return loadPiece(state.taskId);
+  }
+  if (act === "piece-merge") {
+    const target = t.dataset.target;
+    if (!(await ask({ title: `Fusionner dans ${target} ?`, html: `<p>La MR de l'agent est <b>fusionnée dans la branche <code>${esc(target)}</code></b> chez ta forge, avec le code que le Maître juré a relu. La branche de l'agent n'est pas supprimée.</p><p class="note">Pour revenir en arrière, il faudra annuler la fusion chez ta forge. L'outil ne déploie rien : la mise en ligne se fait comme d'habitude pour ce projet.</p>`, okLabel: "Fusionner" }))) return;
+    try {
+      await api(`/api/tasks/${state.taskId}/merge`, {});
+      toast("Pièce fusionnée.");
+      state.issues = null;
+    } catch (err) { toast(err.message, true); }
+    return loadPiece(state.taskId);
+  }
+  if (act === "task-relaunch") {
+    const task = await api(`/api/tasks/${state.taskId}`).catch((err) => { toast(err.message, true); return null; });
+    if (!task) return;
+    const again = await ask({ title: `Relancer l'agent sur #${task.issue_iid} ?`, html: "<p>Une nouvelle tâche démarre sur le même ticket, avec les mêmes consignes et les mêmes pièces jointes. Si la branche d'un essai précédent existe encore chez la forge sans MR, l'outil crée une nouvelle branche (suffixe -2, -3...) sans toucher à l'ancienne.</p>", okLabel: "Relancer", attach: true });
+    if (!again) return;
+    try {
+      const { id } = await api("/api/tasks", { source: task.source, projectId: task.project_id, issueIid: task.issue_iid, extraInstructions: task.extra_instructions || "", retryOf: task.id, attachments: again.attachments });
+      toast("Agent relancé.");
+      state.issues = null;
+      refreshHeader();
+      return go(`#dev/${id}`);
+    } catch (err) { return toast(err.message, true); }
+  }
+  if (act === "task-delete") {
+    if (!(await ask({ title: "Supprimer cette tâche ?", html: "<p>La tâche, son journal et le dossier de travail local sont supprimés de l'outil. <b>Rien n'est touché chez la forge</b> : si l'agent a poussé une branche ou ouvert une MR, ils restent là-bas, à supprimer chez la forge si tu n'en veux plus.</p>", okLabel: "Supprimer" }))) return;
+    try {
+      await api(`/api/tasks/${state.taskId}/delete`, {});
+      toast("Tâche supprimée.");
+      state.issues = null;
+      refreshHeader();
+      return go("#dev");
+    } catch (err) { return toast(err.message, true); }
   }
   if (act === "task-cleanup") {
     if (!(await ask({ title: "Nettoyer le dossier local ?", html: "<p>Le dossier de travail de l'agent est supprimé de ta machine. La branche et la MR sur la forge ne sont pas touchées, mais tu ne pourras plus reprendre la session de l'agent.</p>", okLabel: "Nettoyer" }))) return;

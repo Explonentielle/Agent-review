@@ -6,6 +6,7 @@ import type {
   GitlabDiff,
   GitlabIssue,
   GitlabMergeRequest,
+  GitlabNamespace,
   GitlabNote,
   GitlabProject,
   GitlabProtectedBranch,
@@ -76,6 +77,21 @@ export class GitlabClient {
     }
   }
 
+  /** Tickets ouverts d'un projet, les plus récemment modifiés d'abord (100 au plus). */
+  listProjectIssues(projectId: number): Promise<GitlabIssue[]> {
+    return this.request("GET", `/projects/${projectId}/issues?state=opened&order_by=updated_at&per_page=100`);
+  }
+
+  /** Groupes où la personne a au moins le rôle Developer (c'est là qu'on peut en général créer un projet). */
+  listCreatableGroups(): Promise<GitlabNamespace[]> {
+    return this.request("GET", "/groups?min_access_level=30&order_by=path&per_page=100");
+  }
+
+  /** Espace de noms personnel (« moi/ »), retrouvé par le nom d'utilisateur. */
+  getNamespace(path: string): Promise<GitlabNamespace> {
+    return this.request("GET", `/namespaces/${encodeURIComponent(path)}`);
+  }
+
   getCurrentUser(): Promise<GitlabCurrentUser> {
     return this.request("GET", "/user");
   }
@@ -128,6 +144,16 @@ export class GitlabClient {
     return this.request("PUT", `/projects/${projectId}/issues/${issueIid}`, { add_labels: labels.join(",") });
   }
 
+  /** Change le titre d'une MR (c'est ainsi que GitLab sort une MR du brouillon : le préfixe « Draft: » disparaît). */
+  updateMergeRequestTitle(projectId: number, mrIid: number, title: string): Promise<GitlabMergeRequest> {
+    return this.request("PUT", `/projects/${projectId}/merge_requests/${mrIid}`, { title });
+  }
+
+  /** Fusionne la MR seulement si sa tête est toujours `sha` (GitLab répond 409 sinon) ; la branche source est conservée. */
+  mergeMergeRequest(projectId: number, mrIid: number, sha: string): Promise<GitlabMergeRequest> {
+    return this.request("PUT", `/projects/${projectId}/merge_requests/${mrIid}/merge`, { sha, should_remove_source_branch: false });
+  }
+
   /** Commentaires de la MR (généraux et sur le diff), dans l'ordre chronologique. */
   getMergeRequestNotes(projectId: number, mrIid: number): Promise<GitlabNote[]> {
     return this.getAll(`/projects/${projectId}/merge_requests/${mrIid}/notes?sort=asc&order_by=created_at`);
@@ -149,13 +175,48 @@ export class GitlabClient {
     return this.request("POST", `/projects/${projectId}/merge_requests/${mrIid}/approve`, { sha });
   }
 
-  /** Phase 4 : création d'une issue à partir d'un ticket support validé. */
-  createIssue(projectId: number, issue: { title: string; description: string; labels?: string[] }): Promise<GitlabIssue> {
+  /** Crée un projet. Sans `namespace_id`, GitLab le met dans l'espace personnel. */
+  createProject(project: { name: string; description: string; namespace_id?: number; visibility: "private" | "internal" | "public"; initialize_with_readme: boolean }): Promise<GitlabProject> {
+    return this.request("POST", "/projects", project);
+  }
+
+  /**
+   * Création d'un ticket (Scribe). Par défaut il est assigné à l'utilisateur du jeton : un ticket dicté au Scribe est le sien et apparaît dans
+   * « Mes tickets ». L'assignation est un confort : si l'utilisateur n'est pas lisible, le ticket est créé sans assigné plutôt que de ne pas l'être.
+   */
+  async createIssue(projectId: number, issue: { title: string; description: string; labels?: string[] }, assignToMe = true): Promise<GitlabIssue> {
+    const meId = assignToMe ? await this.tokenUserId() : null;
     return this.request("POST", `/projects/${projectId}/issues`, {
       title: issue.title,
       description: issue.description,
       labels: issue.labels?.join(","),
+      ...(meId !== null ? { assignee_ids: [meId] } : {}),
     });
+  }
+
+  /**
+   * Envoie un fichier au projet (`POST /projects/:id/uploads`, formulaire multipart). GitLab répond avec le Markdown à coller dans un ticket.
+   * @param projectId Projet.
+   * @param name Nom du fichier (déjà assaini).
+   * @param bytes Contenu.
+   * @returns Le Markdown du fichier envoyé (par exemple `![capture](/uploads/ab12.../capture.png)`).
+   */
+  async uploadFile(projectId: number, name: string, bytes: Uint8Array): Promise<{ markdown: string }> {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(bytes)]), name);
+    const path = `/projects/${projectId}/uploads`;
+    const res = await fetch(`${this.baseUrl}/api/v4${path}`, { method: "POST", headers: { "PRIVATE-TOKEN": this.token }, body: form });
+    if (!res.ok) throw new GitlabError("POST", path, res.status, await res.text());
+    const data = (await res.json()) as { markdown?: unknown };
+    if (typeof data.markdown !== "string") throw new Error("GitLab n'a pas renvoyé le lien du fichier envoyé");
+    return { markdown: data.markdown };
+  }
+
+  private meId: number | null | undefined;
+  /** Identifiant de l'utilisateur du jeton (lu une fois), ou null s'il ne peut pas être lu. */
+  private async tokenUserId(): Promise<number | null> {
+    if (this.meId === undefined) this.meId = await this.getCurrentUser().then((u) => u.id, () => null);
+    return this.meId;
   }
 
   // --- Transport -------------------------------------------------------------

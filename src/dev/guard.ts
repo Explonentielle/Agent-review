@@ -3,6 +3,7 @@
  * de créer pour le ticket. Jamais sur une branche de base, cible, protégée ou partagée.
  * Ces vérifications sont faites dans le code avant tout push, indépendamment du modèle.
  */
+import { ATTACHMENTS_DIRNAME } from "../attachments/rules.js";
 
 /** Noms de branches partagées refusés quoi qu'il arrive (en plus des réglages et des protections GitLab). */
 const ALWAYS_FORBIDDEN = ["master", "main", "develop", "development", "global", "intermediaire", "intermédiaire", "staging", "preprod", "production", "prod"];
@@ -44,6 +45,16 @@ export function isSecretFile(filePath: string): boolean {
   const name = filePath.split("/").pop() ?? filePath;
   if (/^\.env(\..+)?$/.test(name) && !/^\.env\.(example|sample|dist|template)$/.test(name)) return true;
   return /\.(pem|key|p12|pfx|keystore)$/i.test(name) || /^id_(rsa|ed25519|ecdsa)(\.pub)?$/.test(name) || name === "auth.json";
+}
+
+/**
+ * Fichier du dossier des pièces jointes (captures, maquettes, données de l'utilisateur) : il ne doit jamais être committé.
+ * @param filePath Chemin relatif au dépôt, tel que `git status` le donne.
+ * @returns Vrai si le chemin est dans le dossier des pièces jointes.
+ */
+export function isAttachmentFile(filePath: string): boolean {
+  const normalized = filePath.replaceAll("\\", "/").replace(/^\.\//, "");
+  return normalized === ATTACHMENTS_DIRNAME || normalized.startsWith(`${ATTACHMENTS_DIRNAME}/`);
 }
 
 /** Fichiers sensibles : autorisés, mais signalés en tête de MR pour une relecture attentive. */

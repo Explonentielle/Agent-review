@@ -3,6 +3,7 @@ import { agentRunConfig } from "../claude/process.js";
 import type { Config } from "../config.js";
 import { assertBudgetAvailable } from "../budget.js";
 import type { CostRepo } from "../db/costs.js";
+import type { DevTaskRepo } from "../db/devTasks.js";
 import type { ReviewRepo, ReviewRow } from "../db/reviews.js";
 import type { ForgeRegistry } from "../connectors/registry.js";
 import type { Ticket } from "../connectors/types.js";
@@ -22,6 +23,11 @@ export interface PipelineDeps {
   costs: CostRepo;
   reviews: ReviewRepo;
   settings: SettingsStore;
+  /**
+   * Tâches de l'agent dev : quand la MR relue a été faite par l'agent, son ticket est connu exactement (la tâche l'enregistre) et la review
+   * l'utilise au lieu de deviner les « #N » du titre. Absent : la review devine toujours d'après le texte.
+   */
+  tasks?: Pick<DevTaskRepo, "findByMergeRequest">;
   /** Force le mode ombre quel que soit le réglage (review manuelle en ligne de commande). */
   forceShadow?: boolean;
   /** Exécuteur d'agent imposé (tests). Par défaut : celui qui correspond aux réglages. */
@@ -34,7 +40,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
   if (!row) return;
   // Relus à chaque review : une modification dans le dashboard s'applique sans redémarrer
   const settings = await deps.settings.get();
-  const actionMode = deps.forceShadow ? "shadow" : settings.actionMode;
+  let actionMode = deps.forceShadow ? "shadow" : settings.actionMode;
 
   await reviews.setStatus(reviewId, "running");
   log.info("review.start", { reviewId, project: row.project_path, mr: row.mr_iid });
@@ -44,6 +50,8 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
     await assertBudgetAvailable(settings, deps.costs);
     const { connector, workspace } = deps.forges.get(row.source);
     const [project, mr] = await Promise.all([connector.getProject(row.project_id), connector.getChangeRequest(row.project_id, row.mr_iid)]);
+    // La MR de l'agent dev est la tienne : la relire est un contrôle avant fusion, jamais un commentaire ni une approbation automatiques
+    if (mr.author.username === deps.forges.get(row.source).username) actionMode = "shadow";
 
     if (mr.headSha !== row.head_sha) {
       // Nouveau commit poussé depuis la détection : le poller créera une review pour le nouveau sha
@@ -54,10 +62,22 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
 
     const allDiffs = await connector.getChangeRequestDiffs(row.project_id, row.mr_iid);
     const diffs = filterDiffs(allDiffs);
+    // Ticket de la MR : le lien exact quand c'est l'agent dev qui l'a faite, sinon les « #N » du titre et de la description (une MR de collègue)
+    const ownTask = await deps.tasks?.findByMergeRequest(row.source, row.project_id, row.mr_iid);
+    const linkedIids = ownTask ? [ownTask.issue_iid] : findLinkedIssueIids(mr);
     const [commits, statuses, issues] = await Promise.all([
       connector.getChangeRequestCommits(row.project_id, row.mr_iid),
       connector.getCheckStatuses(row.project_id, mr.headSha),
-      Promise.all(findLinkedIssueIids(mr).map((iid) => connector.getTicket(row.project_id, iid))),
+      // Les tickets cités dans le titre ou la description (tout « #N », même dans une phrase) ne sont qu'un contexte facultatif : un ticket
+      // supprimé, illisible ou qui n'est pas un ticket ne doit jamais faire échouer la review
+      Promise.all(
+        linkedIids.map((iid) =>
+          connector.getTicket(row.project_id, iid).catch((err: unknown) => {
+            log.warn("review.linked_issue_unreadable", { reviewId, issue: iid, error: errorMessage(err) });
+            return null;
+          }),
+        ),
+      ),
     ]);
 
     const checkout = await workspace.checkoutChangeRequest(row.project_id, project.cloneUrl, row.mr_iid, mr.headSha, connector.changeRequestHeadRef(row.mr_iid));

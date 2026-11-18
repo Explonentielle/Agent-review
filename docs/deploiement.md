@@ -42,6 +42,18 @@ Dans le dossier du projet sur le serveur, crée le fichier `.env` (`chmod 600 .e
 
 `openssl rand -base64 N` tire N octets au hasard et les écrit en base64. **Sauvegarde `SECRETS_MASTER_KEY` à part** (gestionnaire de mots de passe) : sans elle les jetons enregistrés sont perdus, et elle ne doit jamais être dans la même archive que les sauvegardes de la base.
 
+### Droits des jetons, et le Scribe
+
+Les jetons se saisissent dans la forge (fourneau GitHub ou GitLab) ou dans Paramètres > Connexion. Deux niveaux de droits :
+
+| | Agents seuls (le minimum) | Avec le Scribe (créer tickets et projets) |
+|---|---|---|
+| GitLab | scopes `api`, `read_repository`, `write_repository` ; rôle Developer dans les projets où l'agent code | même jeton. Tickets : rôle Reporter au moins dans le projet. Projets : dans le groupe visé, un rôle qui autorise la création de projets (Developer, Maintainer ou Owner selon les réglages du groupe) ; sans groupe, le projet va dans ton espace personnel |
+| GitHub (portée fine) | Contents, Pull requests, Issues en lecture et écriture ; Checks et Commit statuses en lecture | Tickets : rien de plus. Dépôts : « Administration » ou « Repository creation » en lecture et écriture, avec pour « Resource owner » ton compte ou l'organisation visée |
+| GitHub (classique) | scope `repo` | scope `repo` |
+
+Le Scribe vérifie ces droits à l'usage : un refus de la forge devient un message qui dit quel droit ajouter. Chaque ticket ou projet créé est tracé au journal d'audit (jamais le texte du ticket). Plafonds par personne et par heure : 30 brouillons, 40 tickets, 5 projets.
+
 ## 5. Lancer
 
 ```
@@ -74,6 +86,21 @@ Depuis ton poste, un tunnel SSH vers le serveur :
 ssh -N -L 4321:127.0.0.1:4321 review@<adresse-du-vps>
 ```
 `-N` n'ouvre pas de shell, `-L 4321:127.0.0.1:4321` relie le port 4321 de ton poste au port 4321 de la boucle locale du serveur. Laisse la fenêtre ouverte et ouvre http://localhost:4321. Il n'y a pas de TLS : le tunnel SSH chiffre le trajet. Un nom de domaine et un certificat ne sont nécessaires que pour ouvrir à d'autres personnes sans tunnel, et **pas avant** que les conteneurs d'agents (lot D) existent.
+
+## 6 bis. Connecter ton abonnement Claude depuis le navigateur
+
+Les agents utilisent la CLI Claude Code du conteneur, connectée une fois à ton abonnement. Sans SSH : **Paramètres > Connexion > Abonnement Claude > Ouvrir le terminal Claude**.
+
+1. Le terminal ouvre la CLI. Choisis la connexion avec ton compte Claude (abonnement), ouvre le lien affiché dans ton navigateur, connecte-toi, puis colle le code qu'il te donne dans le terminal (Ctrl+Maj+V ou clic droit). Si rien ne la propose, tape `/login`.
+2. La pastille passe à « connecté » toute seule (contrôle toutes les 8 s tant que le terminal est ouvert). Elle vient de `claude auth status` : tu peux aussi cliquer sur « Vérifier la connexion ».
+3. La session est enregistrée dans le volume de données (`/app/data/home`), elle survit aux redémarrages et aux mises à jour, pas à `docker compose down -v`.
+
+Ce que le terminal est, et n'est pas :
+- **La CLI `claude` seule**, jamais un shell : le conteneur contient dans son environnement le mot de passe de la base et la clé maître, un shell les montrerait. La CLI reçoit l'environnement filtré des agents.
+- **Une session à la fois**, fermée après 15 min sans saisie ou 1 h au plus. Taille fixe (100 colonnes sur 30 lignes) : l'outil `script` ne transmet pas les changements de taille.
+- **Réservé au propriétaire de l'installation.** Sans connexion par compte (`AUTH_*`), il est aussi **refusé dès que la requête passe par un reverse proxy** (en-têtes `X-Forwarded-*`) : il ne doit jamais être ouvert à Internet sans authentification. Le tunnel SSH de la section 6 n'ajoute aucun de ces en-têtes.
+- **Linux seulement** : il s'appuie sur l'outil `script` (paquet `bsdutils`, présent dans l'image Debian de l'outil ; vérifier avec `docker compose exec app which script`). Ailleurs, l'écran l'explique et le terminal est indisponible.
+- Si le terminal échoue, le repli est `docker compose exec -it app claude` en SSH, puis `/login`.
 
 ## 7. Sauvegardes
 

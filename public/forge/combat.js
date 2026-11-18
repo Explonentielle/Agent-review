@@ -1,0 +1,701 @@
+/* Arène de la forge : caractéristiques du forgeron et combat en temps réel contre des bots.
+   Logique pure (aucun DOM, aucun code d'utilisateur) : le navigateur la joue (public/forge/arena.js), les tests la font jouer sans écran.
+   Tout est déterministe : un tirage de départ (`seed`) et un pas de temps fixe donnent toujours le même combat. Règles : docs/arene.md. */
+(() => {
+  "use strict";
+
+  const T = 16, W = 24, H = 15;
+  const STEP = 1 / 60;
+
+  /* ---------- caractéristiques ---------- */
+  const STATS = [
+    { id: "force", name: "Force", hint: "Dégâts de tes coups" },
+    { id: "agilite", name: "Agilité", hint: "Vitesse de déplacement et d'attaque, roulade plus fréquente" },
+    { id: "vitalite", name: "Vitalité", hint: "Points de vie" },
+    { id: "chance", name: "Chance", hint: "Coups critiques et or gagné" },
+  ];
+  const STAT_IDS = STATS.map((s) => s.id);
+  const RARITIES = ["common", "rare", "epic", "legendary"];
+  /** Points de caractéristique donnés par un objet porté, selon sa rareté. Chaque emplacement nourrit sa caractéristique. */
+  const RARITY_STAT = { common: 1, rare: 2, epic: 4, legendary: 7 };
+  const SLOT_STAT = { weapon: "force", cape: "agilite", apron: "vitalite", hat: "chance" };
+  const SLOT_NAME = { weapon: "Arme", cape: "Cape", apron: "Tablier", hat: "Couvre-chef" };
+  const RARITY_DMG = { common: 1, rare: 1.15, epic: 1.35, legendary: 1.6 };
+
+  /* ---------- armes : chacune a sa façon de se battre ---------- */
+  const WEAPONS = {
+    // `perk` : l'effet qui la distingue, tel qu'on l'affiche. Les champs `critBonus`, `critMult`, `maxHits`, `shock` et `slow` le font réellement.
+    sword: { name: "Épée", blurb: "Équilibrée : portée moyenne, bonne cadence, aucun point faible.", perk: "Équilibrée : la référence.", dmg: 12, cd: 0.45, windup: 0.08, reach: 22, arc: 110, knock: 50 },
+    axe: { name: "Hache", blurb: "Lente mais large : touche tout ce qui est devant toi.", perk: "Balayage : touche tous les ennemis devant toi.", dmg: 18, cd: 0.8, windup: 0.15, reach: 20, arc: 170, knock: 60 },
+    hammer: { name: "Marteau", blurb: "Très lent et énorme : assomme, et l'impact secoue le sol autour.", perk: "Assomme 0,6 s et onde de choc : 40 % des dégâts autour de l'impact.", dmg: 28, cd: 1.15, windup: 0.25, reach: 20, arc: 120, knock: 110, stun: 0.6, shock: { radius: 30, mult: 0.4 } },
+    dagger: { name: "Dague", blurb: "Très rapide, très courte : il faut coller l'ennemi, mais elle frappe souvent en critique.", perk: "Critique : +20 points de chance, dégâts critiques x2,2.", dmg: 6, cd: 0.26, windup: 0.04, reach: 15, arc: 100, knock: 20, critBonus: 0.2, critMult: 2.2 },
+    spear: { name: "Lance", blurb: "Portée et dégâts moyens, pointe étroite : la poussée transperce les ennemis alignés.", perk: "Transperce : touche les 2 premiers ennemis alignés.", dmg: 13, cd: 0.55, windup: 0.12, reach: 32, arc: 36, knock: 60, maxHits: 2 },
+    bow: { name: "Arc", blurb: "Flèches rapides à longue portée, mais peu de dégâts : garde tes distances.", perk: "Longue portée : tire sur le plus proche, même loin.", dmg: 7, cd: 0.38, windup: 0.06, ranged: true, range: 260, projSpeed: 300, knock: 15 },
+    staff: { name: "Bâton", blurb: "Un trait magique lent qui traverse tout et ralentit ceux qu'il touche.", perk: "Traverse tout et ralentit de 40 % pendant 1,5 s.", dmg: 13, cd: 0.85, windup: 0.12, ranged: true, range: 200, projSpeed: 130, pierce: true, knock: 10, slow: { mult: 0.6, time: 1.5 } },
+  };
+  const TRAINING_WEAPON = { type: "sword", rarity: "common" };
+
+  /* ---------- armes uniques : chaque exemplaire a ses propres valeurs, tirées dans la fourchette de sa rareté ---------- */
+  /**
+   * Fourchettes par rareté. `dmg` : multiplicateur des dégâts. `cd` : multiplicateur du délai entre deux coups, de la pire valeur (lente) à la
+   * meilleure (rapide). `force` : points de Force de l'arme. `extra` : nombre de lignes de bonus sur d'autres caractéristiques, et `extraPts` leurs points.
+   * Les fourchettes se chevauchent d'une rareté à l'autre : un bon rare vaut mieux qu'un mauvais épique, et un jet parfait existe à chaque rareté.
+   */
+  const ROLL_RANGES = {
+    common: { dmg: [0.9, 1.1], cd: [1.06, 0.94], force: [1, 2], extra: [0, 0], extraPts: [1, 2] },
+    rare: { dmg: [1.0, 1.3], cd: [1.04, 0.92], force: [2, 4], extra: [0, 1], extraPts: [1, 3] },
+    epic: { dmg: [1.2, 1.5], cd: [1.0, 0.88], force: [4, 7], extra: [1, 2], extraPts: [2, 5] },
+    legendary: { dmg: [1.4, 1.8], cd: [0.96, 0.82], force: [7, 12], extra: [2, 3], extraPts: [3, 7] },
+  };
+  /**
+   * Effets spéciaux d'une arme (affixes) : le nombre dépend de la rareté (commun aucun, rare 1, épique 2, légendaire 3), le type et la valeur sont tirés.
+   * `range` : valeur au plus faible et au plus fort (multipliée par `AFFIX_TIER` selon la rareté). Ils s'appliquent à chaque coup de l'arme (voir `hitBot`).
+   */
+  const pc = (v) => `${Math.round(v * 100)} %`;
+  const AFFIXES = {
+    burn: { name: "Brûlure", epithet: "des braises", range: [0.12, 0.26], text: (v) => `Brûle l'ennemi : ${pc(v)} des dégâts du coup par seconde pendant 3 s` },
+    knockback: { name: "Recul", epithet: "du titan", range: [0.5, 1.4], text: (v) => `Recul des ennemis +${pc(v)}` },
+    lifesteal: { name: "Vol de vie", epithet: "du vampire", range: [0.03, 0.08], text: (v) => `Rend ${pc(v)} des dégâts infligés en points de vie` },
+    freeze: { name: "Givre", epithet: "du givre", range: [0.25, 0.45], text: (v) => `Ralentit l'ennemi de ${pc(v)} pendant 1,2 s` },
+    stun: { name: "Étourdissement", epithet: "du tonnerre", range: [0.1, 0.22], text: (v) => `${pc(v)} de chances d'étourdir l'ennemi 0,5 s` },
+    lightning: { name: "Foudre", epithet: "de l'orage", range: [0.18, 0.35], text: (v) => `${pc(v)} de chances d'un éclair : 50 % des dégâts à l'ennemi le plus proche` },
+    precision: { name: "Précision", epithet: "de l'aigle", range: [0.04, 0.1], text: (v) => `Critique +${pc(v)}` },
+  };
+  const AFFIX_COUNT = { common: 0, rare: 1, epic: 2, legendary: 3 };
+  const AFFIX_TIER = { common: 1, rare: 0.85, epic: 1, legendary: 1.2 };
+  /** Sans graine (arme du catalogue, ancienne sauvegarde) : la valeur moyenne de la rareté, comme avant les tirages. */
+  const standardRoll = (type, rarity) => ({
+    type, rarity, seed: "", dmgMult: RARITY_DMG[rarity], cdMult: 1, bonus: { ...zeroStats(), force: RARITY_STAT[rarity] }, lines: [{ stat: "force", points: RARITY_STAT[rarity] }], affixes: [], epithet: "", quality: 0.5, label: "valeur moyenne", standard: true,
+  });
+  const TRAINING_ROLL = { type: "sword", rarity: "common", seed: "", dmgMult: 1, cdMult: 1, bonus: null, lines: [], affixes: [], epithet: "", quality: 0.5, label: "", standard: true };
+  /** Graine de texte (FNV-1a) : de quoi tirer toujours les mêmes valeurs pour une même arme. */
+  function hashSeed(text) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return h >>> 0;
+  }
+  /** La qualité est un rang : « meilleur que X % des tirages possibles de cette arme ». */
+  const qualityLabel = (q) => (q < 0.2 ? "jet faible" : q < 0.5 ? "jet moyen" : q < 0.8 ? "bon jet" : q < 0.95 ? "très bon jet" : "jet exceptionnel");
+  function erf(x) {
+    const s = Math.sign(x), a = Math.abs(x), t = 1 / (1 + 0.3275911 * a);
+    return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-a * a));
+  }
+  /**
+   * Rang d'un tirage parmi tous les tirages possibles de la même arme, de 0 (le pire) à 1 (le meilleur). Chaque valeur tirée est ramenée à 0..1
+   * (`t`, avec `k` valeurs possibles : Infinity pour un nombre continu) ; leur somme, centrée et réduite, suit à peu près une loi normale.
+   * Une simple moyenne se tasserait autour de 50 % dès qu'il y a beaucoup de valeurs : un jet parfait deviendrait impossible.
+   */
+  function percentile(parts) {
+    let sum = 0, variance = 0;
+    for (const [t, k] of parts) {
+      if (k < 2) continue;
+      sum += t - 0.5;
+      variance += k === Infinity ? 1 / 12 : (k + 1) / (12 * (k - 1));
+    }
+    if (!variance) return 0.5;
+    return Math.round(0.5 * (1 + erf(sum / Math.sqrt(variance) / Math.SQRT2)) * 1000) / 1000;
+  }
+  /**
+   * Les valeurs d'une arme : le même (type, rareté, graine) donne toujours le même résultat, sur le navigateur comme sur un futur serveur de PvP.
+   * @param type Type d'arme (sword, axe...).
+   * @param rarity common, rare, epic ou legendary.
+   * @param seed Graine de l'exemplaire (l'identifiant de l'événement de butin) ; absente : valeur moyenne.
+   * @returns { dmgMult, cdMult, bonus (points par caractéristique), lines, quality (0 à 1), label }, ou null si le type ou la rareté est inconnu.
+   */
+  function rollWeapon(type, rarity, seed) {
+    if (!Object.hasOwn(WEAPONS, type) || !RARITIES.includes(rarity)) return null;
+    if (typeof seed !== "string" || !seed) return standardRoll(type, rarity);
+    const rg = ROLL_RANGES[rarity], rnd = mulberry32(hashSeed(`${type}|${rarity}|${seed}`));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const pick = ([lo, hi]) => { const v = lo + Math.min(hi - lo, Math.floor(rnd() * (hi - lo + 1))); return { v, t: hi > lo ? (v - lo) / (hi - lo) : 0.5, k: hi - lo + 1 }; };
+    const tDmg = rnd(), tCd = rnd(), force = pick(rg.force), count = pick(rg.extra).v;
+    const ts = [[tDmg, Infinity], [tCd, Infinity], [force.t, force.k]];
+    const bonus = { ...zeroStats(), force: force.v }, lines = [{ stat: "force", points: force.v }];
+    const others = STAT_IDS.filter((id) => id !== "force");
+    for (let i = 0; i < count; i++) {
+      const stat = others.splice(Math.floor(rnd() * others.length), 1)[0], pts = pick(rg.extraPts);
+      bonus[stat] += pts.v; lines.push({ stat, points: pts.v }); ts.push([pts.t, pts.k]);
+    }
+    // Les effets spéciaux sont tirés après le reste : les valeurs ci-dessus ne dépendent pas d'eux
+    const affixes = [], pool = Object.keys(AFFIXES);
+    for (let i = 0; i < AFFIX_COUNT[rarity]; i++) {
+      const id = pool.splice(Math.floor(rnd() * pool.length), 1)[0], t = rnd(), a = AFFIXES[id];
+      const value = Math.round(lerp(a.range[0], a.range[1], t) * AFFIX_TIER[rarity] * 1000) / 1000;
+      affixes.push({ id, name: a.name, value, text: a.text(value) });
+      ts.push([t, Infinity]);
+    }
+    const quality = percentile(ts);
+    return {
+      type, rarity, seed, dmgMult: Math.round(lerp(rg.dmg[0], rg.dmg[1], tDmg) * 1000) / 1000, cdMult: Math.round(lerp(rg.cd[0], rg.cd[1], tCd) * 1000) / 1000,
+      bonus, lines, affixes, epithet: affixes.length && rarity !== "rare" ? AFFIXES[affixes[0].id].epithet : "", quality, label: qualityLabel(quality), standard: false,
+    };
+  }
+  /** Fiche d'une arme pour l'afficher et la comparer : valeurs propres à l'arme, sans la Force ni l'Agilité du forgeron. */
+  function weaponCard(type, rarity, seed) {
+    const roll = rollWeapon(type, rarity, seed);
+    if (!roll) return null;
+    const spec = WEAPONS[type];
+    const damage = round1(spec.dmg * roll.dmgMult), cooldown = Math.round(spec.cd * roll.cdMult * 1000) / 1000;
+    return { type, rarity, name: spec.name, perk: spec.perk, damage, cooldown, dps: round1(damage / cooldown), reach: spec.ranged ? spec.range : spec.reach, ranged: Boolean(spec.ranged), lines: roll.lines, affixes: roll.affixes, epithet: roll.epithet, quality: roll.quality, label: roll.label, standard: roll.standard };
+  }
+
+  /* ---------- l'arène : 24 x 15 tuiles, quatre piliers ---------- */
+  const BOUNDS = { x0: 1 * T, x1: 23 * T, y0: 2 * T, y1: 14 * T };
+  const PILLARS = [[6, 5], [17, 5], [6, 10], [17, 10]];
+  const OBSTACLES = PILLARS.map(([tx, ty]) => ({ x: tx * T, y: ty * T, w: T, h: T }));
+  const HERO_START = { x: 12 * T, y: 11.5 * T };
+  const SPAWNS = [[3 * T, 3.5 * T], [21 * T, 3.5 * T], [12 * T, 3 * T], [3 * T, 12.5 * T], [21 * T, 12.5 * T], [8 * T, 3 * T], [16 * T, 3 * T]];
+
+  /* ---------- les bots ---------- */
+  const BOTS = {
+    gobelin: { name: "Gobelin", weapon: "dagger", rarity: "common", hp: 22, dmg: 4, speed: 56, reach: 14, windup: 0.3, cd: 0.9, r: 5 },
+    soldat: { name: "Soldat", weapon: "sword", rarity: "rare", hp: 36, dmg: 6, speed: 46, reach: 21, windup: 0.38, cd: 1.1, r: 5 },
+    brute: { name: "Brute", weapon: "hammer", rarity: "epic", hp: 75, dmg: 12, speed: 32, reach: 21, windup: 0.65, cd: 1.9, knock: 70, r: 6 },
+    archer: { name: "Archer", weapon: "bow", rarity: "common", hp: 22, dmg: 5, speed: 42, ranged: true, pref: 95, windup: 0.45, cd: 1.7, projSpeed: 140, range: 220, r: 5 },
+    mage: { name: "Mage", weapon: "staff", rarity: "rare", hp: 26, dmg: 7, speed: 38, ranged: true, pref: 110, windup: 0.6, cd: 2.3, projSpeed: 95, range: 220, r: 5 },
+    seigneur: { name: "Seigneur des braises", weapon: "axe", rarity: "legendary", hp: 200, dmg: 11, speed: 42, reach: 26, windup: 0.5, cd: 1.4, boss: true, r: 8 },
+    // Vagues sans fin : un assassin très rapide (on ne le fuit pas : on le tue vite ou on roule) et deux boss de plus
+    assassin: { name: "Assassin", weapon: "dagger", rarity: "rare", hp: 20, dmg: 6, speed: 90, reach: 14, windup: 0.24, cd: 1.0, r: 5 },
+    colosse: { name: "Colosse de pierre", weapon: "hammer", rarity: "legendary", hp: 330, dmg: 15, speed: 30, reach: 30, windup: 0.85, cd: 2.2, knock: 120, boss: true, chargeSpeed: 150, minions: ["brute"], r: 9 },
+    archimage: { name: "Archimage", weapon: "staff", rarity: "legendary", hp: 250, dmg: 12, speed: 40, ranged: true, pref: 125, windup: 0.5, cd: 1.25, projSpeed: 125, range: 270, boss: true, minions: ["archer", "archer"], r: 8 },
+  };
+  const WAVES = [
+    { name: "Les rôdeurs", bots: ["gobelin", "gobelin"] },
+    { name: "La garde", bots: ["gobelin", "gobelin", "soldat"] },
+    { name: "Tirs croisés", bots: ["soldat", "soldat", "archer"] },
+    { name: "Les brutes", bots: ["brute", "mage", "gobelin", "gobelin"] },
+    { name: "Le Seigneur des braises", bots: ["seigneur"], boss: true },
+  ];
+  /* ---------- vagues sans fin : après la 5e, des vagues calculées (sans hasard), et un boss toutes les 5 vagues ---------- */
+  const BOSS_ORDER = ["seigneur", "colosse", "archimage"];
+  const WAVE_NAMES = ["Les maraudeurs", "Pluie de flèches", "Ruée des lames", "Les mercenaires", "La horde", "Sorciers et brutes", "Embuscade", "Les vétérans"];
+  /** Coût de chaque bot dans le « budget » d'une vague : plus la vague est haute, plus le budget et le nombre d'ennemis montent. */
+  const WAVE_POOL = [["gobelin", 1], ["soldat", 1.6], ["archer", 1.8], ["assassin", 1.5], ["mage", 2.2], ["brute", 3]];
+  const MAX_WAVE_BOTS = 10;
+  /**
+   * Composition d'une vague. Les cinq premières sont celles de la campagne ; ensuite, une vague sur cinq est un boss (Seigneur, Colosse, Archimage, et on recommence),
+   * les autres tirent dans un budget qui grandit avec le numéro, de façon déterministe (le même numéro donne toujours la même vague).
+   * @param n Numéro de la vague (à partir de 1).
+   * @returns { name, bots, boss? }
+   */
+  function waveFor(n) {
+    if (n >= 1 && n <= WAVES.length) return WAVES[n - 1];
+    if (n % 5 === 0) { const type = BOSS_ORDER[(n / 5 - 1) % BOSS_ORDER.length]; return { name: BOTS[type].name, bots: [type], boss: true }; }
+    const bots = [];
+    let budget = 3 + 1.5 * n, i = n * 7;
+    for (let tries = 0; tries < 60 && bots.length < MAX_WAVE_BOTS && budget >= 1; tries++, i += 5) {
+      const [type, cost] = WAVE_POOL[i % WAVE_POOL.length];
+      if (cost <= budget) { bots.push(type); budget -= cost; }
+    }
+    return { name: WAVE_NAMES[n % WAVE_NAMES.length], bots };
+  }
+
+  const HERO_R = 5;
+  const DASH_SPEED = 230, DASH_TIME = 0.17, DASH_INV = 0.24, HIT_INV = 0.5;
+  const BETWEEN_TIME = 2.4, SPAWN_TIME = 0.7, TIME_LIMIT = 600;
+
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const clampInt = (v, lo, hi) => clamp(Math.trunc(Number(v)) || 0, lo, hi);
+  const round1 = (v) => Math.round(v * 10) / 10;
+  const dist = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay);
+  /** Petit générateur à graine : le même combat se rejoue à l'identique. */
+  function mulberry32(a) {
+    let s = a >>> 0;
+    return () => { s = (s + 0x6d2b79f5) >>> 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+
+  /* ---------- caractéristiques : points, équipement, valeurs de combat ---------- */
+  /** Un point de caractéristique par niveau du forgeron (le niveau vient du serveur : il se gagne en travaillant). */
+  const pointsFor = (level) => clampInt(level, 1, 99);
+  const zeroStats = () => Object.fromEntries(STAT_IDS.map((id) => [id, 0]));
+  const spent = (stats) => STAT_IDS.reduce((n, id) => n + (stats?.[id] || 0), 0);
+
+  /** Nettoie des points répartis venant du navigateur : entiers positifs, jamais plus que le niveau ne donne. */
+  function normalizeStats(raw, level) {
+    const out = zeroStats();
+    let left = pointsFor(level);
+    for (const id of STAT_IDS) {
+      const own = raw && typeof raw === "object" && Object.hasOwn(raw, id) ? raw[id] : 0; // seulement ses propres champs, jamais ceux hérités
+      const v = Math.min(clampInt(own, 0, 99), left);
+      out[id] = v;
+      left -= v;
+    }
+    return out;
+  }
+
+  /** Points maximum qu'un équipement (hors arme) peut donner à une caractéristique : celui d'une arme légendaire. */
+  const GEAR_MAX_POINTS = ROLL_RANGES.legendary.force[1];
+  /**
+   * Bonus propres à un équipement hors arme, en plus du point de son emplacement : des points de caractéristique (`stats`) et des bonus d'attaque
+   * (`affixes`, les mêmes effets que ceux d'une arme). Les valeurs viennent du navigateur : tout est nettoyé (entiers bornés, effets connus, valeur plafonnée
+   * à la plus forte d'une arme). Un équipement sans bonus donne des listes vides.
+   * @param item { stats: { force: 2 ... }, affixes: [{ id: "burn", value: 0.15 }] }
+   * @returns { bonus (points par caractéristique), lines ({ stat, points }), affixes ({ id, name, value, text }) }
+   */
+  function gearExtras(item) {
+    const bonus = zeroStats(), lines = [], affixes = [];
+    const raw = item?.stats;
+    if (raw && typeof raw === "object") {
+      for (const id of STAT_IDS) {
+        const points = Object.hasOwn(raw, id) ? clampInt(raw[id], 0, GEAR_MAX_POINTS) : 0;
+        if (points > 0) { bonus[id] = points; lines.push({ stat: id, points }); }
+      }
+    }
+    if (Array.isArray(item?.affixes)) {
+      const seen = new Set();
+      for (const a of item.affixes) {
+        if (!a || typeof a !== "object" || typeof a.id !== "string" || !Object.hasOwn(AFFIXES, a.id) || seen.has(a.id)) continue;
+        const def = AFFIXES[a.id], v = Number(a.value);
+        if (!Number.isFinite(v) || v <= 0) continue;
+        const value = Math.round(Math.min(v, def.range[1] * AFFIX_TIER.legendary) * 1000) / 1000;
+        seen.add(a.id);
+        affixes.push({ id: a.id, name: def.name, value, text: def.text(value) });
+      }
+    }
+    return { bonus, lines, affixes };
+  }
+
+  /**
+   * Tout ce que le combat lit du forgeron.
+   * @param opts { level, stats (points répartis), equipment: { weapon: { type, rarity, seed }, cape|apron|hat: { rarity, stats?, affixes? } } }
+   * @returns { level, base, bonus, total, slots, weapon, affixes (effets de l'arme et des équipements), derived }
+   */
+  function build(opts = {}) {
+    const level = clampInt(opts.level ?? 1, 1, 99);
+    const base = normalizeStats(opts.stats, level);
+    const eq = opts.equipment || {};
+    const bonus = zeroStats();
+    const slots = {};
+    const gearAffixes = [];
+    let roll = null;
+    for (const slot of Object.keys(SLOT_STAT)) {
+      const item = eq[slot];
+      if (!item || !RARITIES.includes(item.rarity)) continue;
+      if (slot === "weapon") {
+        // L'arme est unique : ses points se répartissent sur plusieurs caractéristiques selon son tirage
+        roll = rollWeapon(item.type, item.rarity, item.seed);
+        if (!roll) continue;
+        for (const id of STAT_IDS) bonus[id] += roll.bonus[id];
+        slots.weapon = { rarity: item.rarity, stat: "force", points: roll.bonus.force, lines: roll.lines, quality: roll.quality, label: roll.label, standard: roll.standard };
+        continue;
+      }
+      // Une tenue donne le point de son emplacement, plus ses propres statistiques et bonus d'attaque si elle en a (comme une arme)
+      const extras = gearExtras(item);
+      bonus[SLOT_STAT[slot]] += RARITY_STAT[item.rarity];
+      for (const id of STAT_IDS) bonus[id] += extras.bonus[id];
+      gearAffixes.push(...extras.affixes);
+      slots[slot] = { rarity: item.rarity, stat: SLOT_STAT[slot], points: RARITY_STAT[item.rarity] };
+      if (extras.lines.length || extras.affixes.length) {
+        slots[slot].lines = [{ stat: SLOT_STAT[slot], points: RARITY_STAT[item.rarity] }, ...extras.lines];
+        slots[slot].affixes = extras.affixes;
+      }
+    }
+    const total = Object.fromEntries(STAT_IDS.map((id) => [id, base[id] + bonus[id]]));
+    const w = roll ? eq.weapon : TRAINING_WEAPON;
+    const wroll = roll ?? TRAINING_ROLL;
+    const spec = WEAPONS[w.type];
+    const agi = total.agilite;
+    // Les effets de l'arme et ceux des équipements s'ajoutent, effet par effet
+    const affixValues = {};
+    for (const a of [...(wroll.affixes || []), ...gearAffixes]) affixValues[a.id] = (affixValues[a.id] || 0) + a.value;
+    // Le cumul d'un même effet ne dépasse jamais la valeur d'une arme légendaire (sinon le givre pourrait inverser la vitesse des ennemis)
+    for (const id of Object.keys(affixValues)) {
+      if (Object.hasOwn(AFFIXES, id)) affixValues[id] = Math.round(Math.min(affixValues[id], AFFIXES[id].range[1] * AFFIX_TIER.legendary) * 1000) / 1000;
+    }
+    const critBase = (spec.critBonus || 0) + (affixValues.precision || 0);
+    const derived = {
+      maxHp: Math.round(50 + 2 * level + 8 * total.vitalite),
+      speed: round1(62 * (1 + 0.012 * Math.min(agi, 50))),
+      damage: round1(spec.dmg * wroll.dmgMult * (1 + 0.06 * total.force)),
+      cooldown: Math.round((spec.cd * wroll.cdMult / (1 + 0.01 * Math.min(agi, 60))) * 1000) / 1000,
+      // Le critique de base de l'arme (dague) et l'effet Précision s'ajoutent à celui de la Chance et relèvent le plafond d'autant
+      crit: Math.round(Math.min(0.5 + critBase, 0.05 + 0.012 * total.chance + critBase) * 1000) / 1000,
+      critMult: spec.critMult || 1.6,
+      dashCd: round1(Math.max(0.7, 1.6 - 0.02 * agi)),
+      goldMult: Math.round((1 + Math.min(0.5, 0.01 * total.chance)) * 100) / 100,
+    };
+    return { level, base, bonus, total, slots, weapon: { type: w.type, rarity: w.rarity, training: w === TRAINING_WEAPON, spec, roll: wroll }, affixValues, derived };
+  }
+
+  /**
+   * Or gagné pour un combat : par vague terminée, plus une prime de victoire, majoré par la Chance.
+   * Sans fin (`result.endless`) : pas de victoire finale, mais une prime de 25 pour chaque boss vaincu (une vague sur cinq).
+   */
+  function reward(result, built) {
+    let gold = 0;
+    for (let w = 1; w <= result.cleared; w++) gold += 3 + 2 * w + (result.endless && w % 5 === 0 ? 25 : 0);
+    if (result.state === "won") gold += 25;
+    return Math.round(gold * (built?.derived.goldMult ?? 1));
+  }
+
+  /* ---------- le combat ---------- */
+  /**
+   * @param opts { level, stats, equipment, seed } (voir `build`)
+   * @returns Un combat : `step(input, dt?)`, `hud()`, `result()`, `drain()` ; l'état à dessiner est dans `hero`, `bots`, `shots`, `fx`.
+   */
+  function create(opts = {}) {
+    const built = build(opts);
+    const d = built.derived, wp = built.weapon.spec;
+    const rng = mulberry32(opts.seed ?? 1);
+    const level = built.level;
+    /** Sans fin : les vagues continuent après le seigneur, un boss toutes les 5 vagues, jusqu'à la défaite. Sinon : la campagne de 5 vagues. */
+    const endless = Boolean(opts.endless);
+    /** Les effets spéciaux de l'arme portée et des équipements, par identifiant : { burn: 0.2, lifesteal: 0.05 ... } */
+    const aff = built.affixValues;
+    const hero = {
+      x: HERO_START.x, y: HERO_START.y, r: HERO_R, hp: d.maxHp, maxHp: d.maxHp, face: [0, -1], moving: false,
+      cd: 0, windup: 0, dashT: 0, dashCd: 0, dash: [0, -1], inv: 0, hurt: 0, swing: 0, stun: 0, kb: null,
+    };
+    const fight = {
+      built, hero, bots: [], shots: [], fx: [], t: 0, state: "between", timer: 1.2, wave: 0, waves: endless ? 0 : WAVES.length, endless, kills: 0, cleared: 0, damageDealt: 0, ending: "", events: [],
+    };
+    const emit = (name) => fight.events.push(name);
+
+    function blocked(x, y, r) {
+      if (x - r < BOUNDS.x0 || x + r > BOUNDS.x1 || y - r < BOUNDS.y0 || y + r > BOUNDS.y1) return true;
+      for (const o of OBSTACLES) if (x + r > o.x && x - r < o.x + o.w && y + r > o.y && y - r < o.y + o.h) return true;
+      return false;
+    }
+    /** Déplace une entité axe par axe : elle glisse le long des murs et des piliers. @returns Vrai si elle a bougé. */
+    function move(e, dx, dy) {
+      let moved = false;
+      if (dx && !blocked(e.x + dx, e.y, e.r)) { e.x += dx; moved = true; }
+      if (dy && !blocked(e.x, e.y + dy, e.r)) { e.y += dy; moved = true; }
+      return moved;
+    }
+    const norm = (dx, dy) => { const l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; };
+    const aliveBots = () => fight.bots.filter((b) => b.alive);
+    const nearestBot = () => {
+      let best = null, bd = Infinity;
+      for (const b of fight.bots) { if (!b.alive) continue; const dd = dist(hero.x, hero.y, b.x, b.y); if (dd < bd) { bd = dd; best = b; } }
+      return best ? { bot: best, dist: bd } : null;
+    };
+
+    /* ----- bots ----- */
+    function spawnBot(type, wave, at) {
+      const spec = BOTS[type];
+      // Au-delà de la 5e vague, la hausse s'accélère un peu (jusqu'à la 5e : exactement comme la campagne)
+      const late = 0.004 * Math.max(0, wave - 5) ** 2;
+      const hpScale = (1 + 0.04 * (level - 1)) * (1 + 0.06 * (wave - 1) + late);
+      const dmgScale = (1 + 0.025 * (level - 1)) * (1 + 0.06 * (wave - 1) + late);
+      const hp = Math.round(spec.hp * hpScale);
+      const bot = {
+        type, spec, x: at[0], y: at[1], r: spec.r, hp, maxHp: hp, dmg: round1(spec.dmg * dmgScale), alive: true, dying: 0, face: [0, 1],
+        cd: 0.6 + rng() * 0.8, windup: 0, spawnT: SPAWN_TIME, stun: 0, slowT: 0, slowMult: 1, burn: null, burnTick: 0.5, flash: 0, kb: null, side: rng() < 0.5 ? -1 : 1, rush: null, chargeCd: 3.5, summoned: false, tell: null,
+      };
+      fight.bots.push(bot);
+      return bot;
+    }
+    function startWave(n) {
+      fight.wave = n;
+      fight.state = "fighting";
+      const list = waveFor(n).bots;
+      list.forEach((type, i) => spawnBot(type, n, SPAWNS[(i * 2 + n) % SPAWNS.length]));
+      emit("wave");
+    }
+
+    function hurtHero(dmg, fx, fy, knock = 40) {
+      if (fight.state !== "fighting" || hero.inv > 0 || hero.hp <= 0) return false;
+      hero.hp = Math.max(0, hero.hp - Math.max(1, Math.round(dmg)));
+      hero.inv = HIT_INV; hero.hurt = 0.22;
+      const [ux, uy] = norm(hero.x - fx, hero.y - fy);
+      hero.kb = [ux * knock * 3, uy * knock * 3];
+      fight.fx.push({ kind: "num", x: hero.x, y: hero.y - 8, text: `-${Math.max(1, Math.round(dmg))}`, hero: true, t: 0, life: 0.7 });
+      emit("hurt");
+      if (hero.hp <= 0) { fight.state = "lost"; fight.ending = "Tu es à terre."; emit("lose"); }
+      return true;
+    }
+
+    function killBot(b) {
+      b.alive = false; b.dying = 0.35; fight.kills++;
+      fight.fx.push({ kind: "puff", x: b.x, y: b.y, t: 0, life: 0.4 });
+      emit("kill");
+    }
+    /** Dégâts qui ne viennent pas d'un coup (brûlure, éclair) : ni recul ni effet en chaîne. */
+    function plainDamage(b, dmg, kind) {
+      if (!b.alive) return;
+      b.hp -= dmg; fight.damageDealt += dmg;
+      fight.fx.push({ kind: "num", x: b.x, y: b.y - 8, text: String(Math.max(1, Math.round(dmg))), burn: kind === "burn", bolt: kind === "bolt", t: 0, life: 0.6 });
+      if (b.hp <= 0) killBot(b);
+    }
+    /** Les effets de l'arme qui se déclenchent à chaque coup du forgeron : vol de vie, brûlure, éclair. */
+    function procEffects(b, dmg) {
+      if (aff.lifesteal) {
+        hero.lifeAcc = (hero.lifeAcc || 0) + dmg * aff.lifesteal;
+        const whole = Math.floor(hero.lifeAcc);
+        if (whole >= 1 && hero.hp > 0) {
+          hero.lifeAcc -= whole;
+          hero.hp = Math.min(hero.maxHp, hero.hp + whole);
+          fight.fx.push({ kind: "num", x: hero.x, y: hero.y - 8, text: `+${whole}`, heal: true, t: 0, life: 0.6 });
+        }
+      }
+      if (b.alive && aff.burn) b.burn = { dps: Math.max(b.burn?.dps || 0, round1(dmg * aff.burn)), t: 3 };
+      if (aff.lightning && rng() < aff.lightning) {
+        let near = null, nd = 70;
+        for (const o of fight.bots) { if (o === b || !o.alive) continue; const dd = dist(b.x, b.y, o.x, o.y); if (dd < nd) { nd = dd; near = o; } }
+        if (near) {
+          fight.fx.push({ kind: "bolt", x: b.x, y: b.y - 4, x2: near.x, y2: near.y - 4, t: 0, life: 0.22 });
+          plainDamage(near, round1(dmg * 0.5), "bolt");
+          emit("shock");
+        }
+      }
+    }
+    /** Un coup du forgeron sur un bot. `proc` : vrai pour un coup de l'arme (ses effets spéciaux s'appliquent), faux pour l'onde de choc du marteau. */
+    function hitBot(b, dmg, crit, ux, uy, stun, knock, slow, proc = false) {
+      if (!b.alive) return;
+      b.hp -= dmg; b.flash = 0.12;
+      fight.damageDealt += dmg;
+      if (knock) { const k = knock * (proc ? 1 + (aff.knockback || 0) : 1) * (b.spec.boss ? 0.3 : 1) * 3; b.kb = [ux * k, uy * k]; }
+      let st = stun;
+      if (proc && aff.stun && rng() < aff.stun) st = Math.max(st || 0, 0.5);
+      if (st) b.stun = Math.max(b.stun, b.spec.boss ? Math.min(st, 0.15) : st);
+      let sl = slow;
+      if (proc && aff.freeze) { const f = { mult: Math.round((1 - aff.freeze) * 100) / 100, time: 1.2 }; sl = sl ? { mult: Math.min(sl.mult, f.mult), time: Math.max(sl.time, f.time) } : f; }
+      // Le ralentissement s'use contre le seigneur : moitié moins long et au plus 15 %
+      if (sl) { b.slowT = Math.max(b.slowT, b.spec.boss ? sl.time / 2 : sl.time); b.slowMult = b.spec.boss ? Math.max(sl.mult, 0.85) : sl.mult; }
+      fight.fx.push({ kind: "num", x: b.x, y: b.y - 8, text: String(Math.round(dmg)), crit, t: 0, life: 0.6 });
+      emit(crit ? "crit" : "hit");
+      if (b.hp <= 0) killBot(b);
+      if (proc) procEffects(b, dmg);
+    }
+    const rollDamage = () => { const crit = rng() < d.crit; return { crit, dmg: round1(d.damage * (crit ? d.critMult : 1)) }; };
+
+    /* ----- le forgeron ----- */
+    function heroStrike() {
+      if (wp.ranged) {
+        const near = nearestBot();
+        let dir = hero.face;
+        if (near && near.dist <= wp.range) dir = norm(near.bot.x - hero.x, near.bot.y - hero.y);
+        hero.face = dir;
+        const roll = rollDamage();
+        fight.shots.push({ x: hero.x + dir[0] * 8, y: hero.y + dir[1] * 8, vx: dir[0] * wp.projSpeed, vy: dir[1] * wp.projSpeed, dmg: roll.dmg, crit: roll.crit, mine: true, pierce: Boolean(wp.pierce), hit: new Set(), life: wp.range / wp.projSpeed, kind: built.weapon.type === "bow" ? "arrow" : "bolt", stun: 0, knock: wp.knock, slow: wp.slow });
+        emit("shoot");
+        return;
+      }
+      const cosHalf = Math.cos((wp.arc / 2) * Math.PI / 180);
+      fight.fx.push({ kind: "slash", x: hero.x, y: hero.y, dir: hero.face.slice(), reach: wp.reach, arc: wp.arc, t: 0, life: 0.14 });
+      hero.swing = 0.14;
+      let targets = [];
+      for (const b of fight.bots) {
+        if (!b.alive) continue;
+        const dd = dist(hero.x, hero.y, b.x, b.y);
+        if (dd - b.r - hero.r > wp.reach) continue;
+        const [ux, uy] = norm(b.x - hero.x, b.y - hero.y);
+        if (dd > hero.r + b.r + 2 && ux * hero.face[0] + uy * hero.face[1] < cosHalf) continue;
+        targets.push({ b, dd, ux, uy });
+      }
+      // La lance transperce un nombre limité d'ennemis : les plus proches d'abord
+      if (wp.maxHits && targets.length > wp.maxHits) targets = targets.sort((a, c) => a.dd - c.dd).slice(0, wp.maxHits);
+      const touched = new Set();
+      for (const { b, ux, uy } of targets) {
+        const roll = rollDamage();
+        hitBot(b, roll.dmg, roll.crit, ux, uy, wp.stun, wp.knock, wp.slow, true);
+        touched.add(b);
+      }
+      // L'onde de choc du marteau : le sol encaisse au point d'impact et secoue ce qui est autour, sans critique
+      if (wp.shock) {
+        const ix = hero.x + hero.face[0] * wp.reach, iy = hero.y + hero.face[1] * wp.reach;
+        fight.fx.push({ kind: "shock", x: ix, y: iy, r: wp.shock.radius, t: 0, life: 0.3 });
+        for (const b of fight.bots) {
+          if (!b.alive || touched.has(b) || dist(ix, iy, b.x, b.y) - b.r > wp.shock.radius) continue;
+          const [ux, uy] = norm(b.x - ix, b.y - iy);
+          hitBot(b, round1(d.damage * wp.shock.mult), false, ux, uy, 0, 40);
+          touched.add(b);
+        }
+      }
+      emit(touched.size ? "swing-hit" : "swing");
+    }
+
+    function updateHero(input) {
+      const h = hero;
+      h.inv = Math.max(0, h.inv - STEP); h.cd -= STEP; h.dashCd -= STEP; h.hurt = Math.max(0, h.hurt - STEP); h.swing = Math.max(0, h.swing - STEP);
+      if (h.kb) { move(h, h.kb[0] * STEP, h.kb[1] * STEP); h.kb = Math.hypot(h.kb[0], h.kb[1]) < 6 ? null : [h.kb[0] * (1 - 9 * STEP), h.kb[1] * (1 - 9 * STEP)]; }
+      let mx = (input.right ? 1 : 0) - (input.left ? 1 : 0), my = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+      const len = Math.hypot(mx, my);
+      if (len) { mx /= len; my /= len; }
+      h.moving = false;
+      if (h.dashT > 0) {
+        h.dashT -= STEP;
+        move(h, h.dash[0] * DASH_SPEED * STEP, h.dash[1] * DASH_SPEED * STEP);
+      } else {
+        if (len) {
+          h.face = [mx, my]; h.moving = true;
+          move(h, mx * d.speed * (h.windup > 0 ? 0.5 : 1) * STEP, my * d.speed * (h.windup > 0 ? 0.5 : 1) * STEP);
+        }
+        if (input.dash && h.dashCd <= 0) {
+          h.dash = len ? [mx, my] : h.face.slice(); h.dashT = DASH_TIME; h.dashCd = d.dashCd; h.inv = Math.max(h.inv, DASH_INV); h.windup = 0;
+          emit("dash");
+        }
+      }
+      if (h.windup > 0) {
+        h.windup -= STEP;
+        if (h.windup <= 0) heroStrike();
+      } else if (input.attack && h.cd <= 0 && h.dashT <= 0) {
+        // Visée assistée : le coup part vers l'ennemi le plus proche à portée (le clavier n'a pas de souris)
+        const near = nearestBot();
+        const range = wp.ranged ? wp.range : wp.reach + hero.r + 14;
+        if (near && near.dist <= range + near.bot.r) {
+          const dir = norm(near.bot.x - h.x, near.bot.y - h.y);
+          // Au corps à corps, on ne se retourne pas tout seul : seul ce qui est devant (à 100° près) est visé. À distance, on tire sur le plus proche, où qu'il soit (on peut fuir et tirer).
+          if (wp.ranged || dir[0] * h.face[0] + dir[1] * h.face[1] >= -0.17) h.face = dir;
+        }
+        h.windup = wp.windup; h.cd = d.cooldown;
+      }
+    }
+
+    /* ----- bots : intelligence simple, lisible, avec un signal avant chaque coup ----- */
+    function botStrike(b) {
+      b.tell = null;
+      if (b.spec.ranged) {
+        const dir = norm(hero.x - b.x, hero.y - b.y);
+        fight.shots.push({ x: b.x + dir[0] * 8, y: b.y + dir[1] * 8, vx: dir[0] * b.spec.projSpeed, vy: dir[1] * b.spec.projSpeed, dmg: b.dmg, mine: false, pierce: false, hit: new Set(), life: b.spec.range / b.spec.projSpeed, kind: b.type === "archer" ? "arrow" : "bolt", stun: 0, knock: 20 });
+        emit("bot-shoot");
+        return;
+      }
+      const dd = dist(b.x, b.y, hero.x, hero.y);
+      fight.fx.push({ kind: "slash", x: b.x, y: b.y, dir: b.face.slice(), reach: b.spec.reach, arc: 110, t: 0, life: 0.14, bot: true });
+      if (dd - b.r - hero.r <= b.spec.reach) hurtHero(b.dmg, b.x, b.y, b.spec.knock || 40);
+    }
+    /** Avance vers (ux, uy) ; si un pilier bloque, longe-le. */
+    function chase(b, ux, uy, speed) {
+      const dx = ux * speed * STEP, dy = uy * speed * STEP;
+      if (!move(b, dx, dy)) move(b, -uy * b.side * speed * STEP, ux * b.side * speed * STEP);
+    }
+    function updateBots() {
+      const h = hero;
+      for (const b of fight.bots) {
+        if (!b.alive) { b.dying -= STEP; continue; }
+        // La brûlure : des dégâts toutes les demi-secondes, quoi que fasse le bot (même assommé)
+        if (b.burn) {
+          b.burn.t -= STEP; b.burnTick -= STEP;
+          if (b.burnTick <= 0) { b.burnTick += 0.5; plainDamage(b, round1(b.burn.dps * 0.5), "burn"); }
+          if (b.burn.t <= 0) b.burn = null;
+          if (!b.alive) continue;
+        }
+        b.flash = Math.max(0, b.flash - STEP); b.cd -= STEP; b.chargeCd -= STEP; b.slowT = Math.max(0, b.slowT - STEP);
+        if (b.spawnT > 0) { b.spawnT -= STEP; continue; }
+        if (b.kb) { move(b, b.kb[0] * STEP, b.kb[1] * STEP); b.kb = Math.hypot(b.kb[0], b.kb[1]) < 6 ? null : [b.kb[0] * (1 - 9 * STEP), b.kb[1] * (1 - 9 * STEP)]; }
+        if (b.stun > 0) { b.stun -= STEP; continue; }
+        const dd = dist(b.x, b.y, h.x, h.y) || 1;
+        const [ux, uy] = norm(h.x - b.x, h.y - b.y);
+        if (b.rush) {
+          b.rush.t -= STEP;
+          move(b, b.rush.dir[0] * (b.spec.chargeSpeed || 210) * STEP, b.rush.dir[1] * (b.spec.chargeSpeed || 210) * STEP);
+          if (!b.rush.done && dd <= b.r + h.r + 2) { b.rush.done = true; hurtHero(b.dmg * 1.6, b.x, b.y, 90); }
+          if (b.rush.t <= 0) { b.rush = null; b.stun = 0.7; b.chargeCd = 4.5; }
+          continue;
+        }
+        if (b.windup > 0) {
+          b.windup -= STEP;
+          if (b.windup <= 0) {
+            if (b.pending === "charge") { b.pending = null; b.tell = null; b.rush = { dir: b.chargeDir, t: 0.45, done: false }; emit("charge"); }
+            else botStrike(b);
+          }
+          continue;
+        }
+        b.face = [ux, uy];
+        // Le seigneur : une charge annoncée, puis il appelle du renfort quand il faiblit
+        if (b.spec.boss) {
+          if (!b.summoned && b.hp < b.maxHp / 2) {
+            b.summoned = true;
+            (b.spec.minions || ["gobelin", "gobelin"]).forEach((type, i) => spawnBot(type, fight.wave, SPAWNS[3 + (i % 2)]));
+            emit("summon");
+          }
+          // L'Archimage tire de loin au lieu de charger
+          if (!b.spec.ranged && b.chargeCd <= 0 && dd > 50 && dd < 190) {
+            b.pending = "charge"; b.chargeDir = [ux, uy]; b.windup = 0.6; b.tell = { kind: "charge", dir: [ux, uy] };
+            emit("tell");
+            continue;
+          }
+        }
+        const speed = b.spec.speed * (b.spec.boss && b.hp < b.maxHp / 2 ? 1.25 : 1) * (b.slowT > 0 ? b.slowMult : 1);
+        if (b.spec.ranged) {
+          const pref = b.spec.pref;
+          if (dd < pref - 18) chase(b, -ux, -uy, speed);
+          else if (dd > pref + 25) chase(b, ux, uy, speed);
+          else move(b, -uy * b.side * speed * 0.5 * STEP, ux * b.side * speed * 0.5 * STEP);
+          if (b.cd <= 0 && dd <= b.spec.range) { b.windup = b.spec.windup; b.cd = b.spec.cd; b.tell = { kind: "shot" }; emit("tell"); }
+        } else {
+          if (dd - b.r - h.r > b.spec.reach * 0.75) chase(b, ux, uy, speed);
+          if (b.cd <= 0 && dd - b.r - h.r <= b.spec.reach) { b.windup = b.spec.windup; b.cd = b.spec.cd; b.tell = { kind: "melee" }; emit("tell"); }
+        }
+      }
+      // Les bots ne s'empilent pas
+      const live = aliveBots();
+      for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
+        const a = live[i], c = live[j], dd = dist(a.x, a.y, c.x, c.y), min = a.r + c.r + 1;
+        if (dd < min && dd > 0) { const [ux, uy] = norm(c.x - a.x, c.y - a.y), push = (min - dd) / 2; move(a, -ux * push, -uy * push); move(c, ux * push, uy * push); }
+      }
+      fight.bots = fight.bots.filter((b) => b.alive || b.dying > 0);
+    }
+
+    /* ----- projectiles et effets ----- */
+    function updateShots() {
+      for (const s of fight.shots) {
+        s.x += s.vx * STEP; s.y += s.vy * STEP; s.life -= STEP;
+        if (s.life <= 0 || blocked(s.x, s.y, 1)) { s.dead = true; continue; }
+        if (s.mine) {
+          for (const b of fight.bots) {
+            if (!b.alive || s.hit.has(b) || dist(s.x, s.y, b.x, b.y) > b.r + 3) continue;
+            s.hit.add(b);
+            const [ux, uy] = norm(s.vx, s.vy);
+            hitBot(b, s.dmg, s.crit, ux, uy, s.stun, s.knock, s.slow, true);
+            if (!s.pierce) { s.dead = true; break; }
+          }
+        } else if (dist(s.x, s.y, hero.x, hero.y) <= hero.r + 3) {
+          hurtHero(s.dmg, s.x - s.vx * 0.05, s.y - s.vy * 0.05, s.knock);
+          s.dead = true;
+        }
+      }
+      fight.shots = fight.shots.filter((s) => !s.dead);
+    }
+    function updateFx() {
+      for (const f of fight.fx) f.t += STEP;
+      fight.fx = fight.fx.filter((f) => f.t < f.life);
+    }
+
+    /* ----- déroulement des vagues ----- */
+    function updateFlow() {
+      if (fight.state === "between") {
+        fight.timer -= STEP;
+        if (fight.timer <= 0) startWave(fight.wave + 1);
+      } else if (fight.state === "fighting" && aliveBots().length === 0 && fight.bots.every((b) => b.spawnT <= 0)) {
+        fight.cleared = fight.wave;
+        if (!endless && fight.wave >= WAVES.length) { fight.state = "won"; fight.ending = "L'arène est à toi !"; emit("win"); return; }
+        fight.state = "between"; fight.timer = BETWEEN_TIME;
+        hero.hp = Math.min(hero.maxHp, hero.hp + Math.round(hero.maxHp * 0.35));
+        emit("clear");
+      }
+    }
+
+    fight.step = (input = {}, dt = STEP) => {
+      if (fight.state === "won" || fight.state === "lost") return;
+      // Un pas fixe : le même combat se rejoue à l'identique (un grand dt est découpé)
+      let left = dt;
+      while (left > 1e-9 && fight.state !== "won" && fight.state !== "lost") {
+        left -= STEP;
+        fight.t += STEP;
+        updateHero(input);
+        updateBots();
+        updateShots();
+        updateFx();
+        updateFlow();
+        if (fight.t > (endless ? 3 * TIME_LIMIT : TIME_LIMIT) && fight.state !== "won") { fight.state = "lost"; fight.ending = "Le temps est écoulé."; emit("lose"); }
+      }
+    };
+    fight.hud = () => ({
+      state: fight.state, hp: hero.hp, maxHp: hero.maxHp, wave: fight.wave, waves: fight.waves, endless, waveName: waveFor(Math.max(1, endless ? fight.wave : Math.min(fight.wave, fight.waves))).name, boss: fight.wave >= 1 && Boolean(waveFor(fight.wave).boss),
+      botsLeft: aliveBots().length, kills: fight.kills, time: fight.t, dashReady: hero.dashCd <= 0, dashPct: clamp(1 - hero.dashCd / d.dashCd, 0, 1), ending: fight.ending,
+      next: fight.state === "between" ? (endless ? fight.wave + 1 : Math.min(fight.wave + 1, fight.waves)) : 0,
+    });
+    fight.result = () => ({ state: fight.state, cleared: fight.cleared, wave: fight.wave, kills: fight.kills, time: round1(fight.t), damage: Math.round(fight.damageDealt), endless, gold: reward({ state: fight.state, cleared: fight.cleared, endless }, built) });
+    /** Les événements sonores survenus depuis le dernier appel (touche, critique, vague...). */
+    fight.drain = () => fight.events.splice(0);
+    return fight;
+  }
+
+  globalThis.ForgeCombat = {
+    T, W, H, STEP, STATS, STAT_IDS, RARITIES, RARITY_STAT, SLOT_STAT, SLOT_NAME, RARITY_DMG, WEAPONS, TRAINING_WEAPON, BOTS, WAVES, BOUNDS, OBSTACLES, HERO_START, SPAWNS,
+    BOSS_ORDER, waveFor, ROLL_RANGES, AFFIXES, rollWeapon, weaponCard, gearExtras, GEAR_MAX_POINTS, pointsFor, spent, normalizeStats, build, reward, create,
+  };
+})();

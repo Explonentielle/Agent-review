@@ -6,6 +6,7 @@ import type {
   GithubFile,
   GithubIssue,
   GithubIssueComment,
+  GithubOrg,
   GithubPull,
   GithubRepo,
   GithubReview,
@@ -28,6 +29,9 @@ export class GithubError extends Error {
 
 /** Nom complet d'un dépôt : proprietaire/depot, sans rien qui puisse sortir du chemin d'API. */
 const FULL_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/** Identifiant d'organisation : lettres, chiffres et tirets, rien qui puisse sortir du chemin d'API. */
+const ORG_LOGIN = /^[A-Za-z0-9-]+$/;
 
 /** Garde-fou contre une pagination qui ne finirait pas : 100 éléments par page. */
 const MAX_PAGES = 30;
@@ -73,6 +77,16 @@ export class GithubClient {
   /** Tickets ouverts assignés à l'utilisateur du jeton, tous dépôts confondus (les PR y figurent aussi). */
   listAssignedIssues(): Promise<GithubIssue[]> {
     return this.getAll("/issues?filter=assigned&state=open&sort=updated");
+  }
+
+  /** Tickets ouverts d'un dépôt, les plus récemment modifiés d'abord (100 au plus ; les PR y figurent aussi). */
+  listRepoIssues(fullName: string): Promise<GithubIssue[]> {
+    return this.getAll(`/repos/${repoPath(fullName)}/issues?state=open&sort=updated`, 1);
+  }
+
+  /** Organisations dont la personne est membre. */
+  listOrgs(): Promise<GithubOrg[]> {
+    return this.getAll("/user/orgs");
   }
 
   getIssue(fullName: string, number: number): Promise<GithubIssue | null> {
@@ -125,6 +139,47 @@ export class GithubClient {
     return this.request("POST", `/repos/${repoPath(fullName)}/pulls`, pull);
   }
 
+  /**
+   * Crée un ticket. Par défaut il est assigné à l'utilisateur du jeton : un ticket dicté au Scribe est le sien et apparaît dans « Mes tickets ».
+   * L'assignation est un confort : GitHub l'ignore sans erreur si le jeton n'a pas le droit d'écriture sur le dépôt, et si l'utilisateur n'est pas
+   * lisible le ticket est créé sans assigné.
+   */
+  async createIssue(fullName: string, issue: { title: string; body: string; labels?: string[] }, assignToMe = true): Promise<GithubIssue> {
+    const login = assignToMe ? await this.tokenLogin() : null;
+    return this.request("POST", `/repos/${repoPath(fullName)}/issues`, { ...issue, ...(login ? { assignees: [login] } : {}) });
+  }
+
+  private login: string | null | undefined;
+  /** Identifiant GitHub de l'utilisateur du jeton (lu une fois), ou null s'il ne peut pas être lu. */
+  private async tokenLogin(): Promise<string | null> {
+    if (this.login === undefined) this.login = await this.getCurrentUser().then((u) => u.login, () => null);
+    return this.login;
+  }
+
+  /** Crée un dépôt dans le compte de la personne, ou dans une organisation si `org` est donné. */
+  createRepo(repo: { name: string; description: string; private: boolean; auto_init: boolean }, org?: string): Promise<GithubRepo> {
+    if (org !== undefined && !ORG_LOGIN.test(org)) throw new Error(`Nom d'organisation invalide : ${org}`);
+    return this.request("POST", org !== undefined ? `/orgs/${org}/repos` : "/user/repos", repo);
+  }
+
+  /** Fusionne la PR seulement si sa tête est toujours `sha` (GitHub répond 409 sinon). Fusion normale ; la branche source est conservée. */
+  mergePull(fullName: string, number: number, sha: string): Promise<unknown> {
+    return this.request("PUT", `/repos/${repoPath(fullName)}/pulls/${number}/merge`, { sha, merge_method: "merge" });
+  }
+
+  /** Sort une PR du brouillon : seule l'API GraphQL le permet. */
+  async markPullReady(nodeId: string): Promise<void> {
+    const url = this.baseUrl.endsWith("/api/v3") ? this.baseUrl.replace(/\/v3$/, "/graphql") : `${this.baseUrl}/graphql`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({ query: "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }", variables: { id: nodeId } }),
+    });
+    if (!res.ok) throw new GithubError("POST", "/graphql", res.status, await res.text());
+    const out = (await res.json()) as { errors?: Array<{ message: string }> };
+    if (out.errors?.length) throw new GithubError("POST", "/graphql", 422, out.errors.map((e) => e.message).join(" ; "));
+  }
+
   addAssignees(fullName: string, number: number, logins: string[]): Promise<unknown> {
     return this.request("POST", `/repos/${repoPath(fullName)}/issues/${number}/assignees`, { assignees: logins });
   }
@@ -172,12 +227,12 @@ export class GithubClient {
     return (await res.json()) as T;
   }
 
-  /** Comme `request`, mais renvoie null quand la ressource n'existe pas (404). */
+  /** Comme `request`, mais renvoie null quand la ressource n'existe pas : 404, ou 410 (supprimée : GitHub répond ainsi pour un ticket effacé). */
   private async requestOrNull<T>(path: string, method = "GET"): Promise<T | null> {
     try {
       return await this.request<T>(method, path);
     } catch (err) {
-      if (err instanceof GithubError && err.status === 404) return null;
+      if (err instanceof GithubError && (err.status === 404 || err.status === 410)) return null;
       throw err;
     }
   }
