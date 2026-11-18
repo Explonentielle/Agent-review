@@ -9,6 +9,7 @@ import { diagnoseAgentRuntime, type RuntimeDiagnostic } from "../agent/dockerDia
 import { allowedImages, imageFor } from "../agent/imageName.js";
 import { attachmentIds, failAttachment, giveAttachments, planAttachments, registerAttachments } from "../attachments/routes.js";
 import type { AttachmentOwner } from "../attachments/store.js";
+import { allows, levelOf, refusalMessage } from "../auth/permissions.js";
 import { registerAuth, type AuthRuntime } from "../auth/routes.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
 import { currentMonth } from "../db/costs.js";
@@ -32,6 +33,13 @@ import { ReviewResultSchema } from "../review/schema.js";
 import { registerScribe } from "../scribe/routes.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
 import type { AgentRunner } from "../agent/runner.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** Routes déclarées, `MÉTHODE /chemin` (pour vérifier qu'aucune n'échappe au contrôle des droits). */
+    registeredRoutes: string[];
+  }
+}
 
 /** Ce que le serveur reçoit : les dépôts et connexions de l'utilisateur local (servis sans connexion), et de quoi servir les autres personnes. */
 export interface ServerDeps extends TenantDeps {
@@ -99,6 +107,13 @@ function forgeOf(value: unknown): ForgeKind {
 export function buildServer(base: ServerDeps) {
   const app = Fastify({ logger: false });
 
+  // Toutes les routes déclarées, `MÉTHODE /chemin` : le test des droits vérifie que chacune est classée dans `auth/permissions.ts`
+  const registered: string[] = [];
+  app.addHook("onRoute", (route) => {
+    for (const method of [route.method].flat()) registered.push(`${method} ${route.url}`);
+  });
+  app.decorate("registeredRoutes", registered);
+
   // Chaque requête d'une personne connectée est servie avec SES dépôts, SES connexions aux forges et SES files : `deps` redirige les propriétés
   // qui dépendent de la personne vers celles de la requête en cours (contexte asynchrone), le reste vient de `base`.
   const requestDeps = new AsyncLocalStorage<TenantDeps>();
@@ -143,6 +158,17 @@ export function buildServer(base: ServerDeps) {
       }
     });
   }
+
+  // Droits par rôle : chaque route de l'API demande un niveau (lire, agir, régler l'espace), voir `auth/permissions.ts`. Une route non classée est refusée.
+  app.addHook("onRequest", async (req, reply) => {
+    const pattern = req.routeOptions?.url;
+    if (!pattern || !pattern.startsWith("/api/")) return;
+    const role = (req.session ?? (deps.auth ? null : deps.local))?.role;
+    if (!role) return; // sans session, la connexion a déjà répondu 401
+    const level = levelOf(req.method, pattern);
+    if (!level) return reply.code(403).send({ error: "Route non classée dans les droits : refusée par précaution." });
+    if (!allows(role, level)) return reply.code(403).send({ error: refusalMessage(role, level) });
+  });
 
   // --- Général ---------------------------------------------------------------
 
