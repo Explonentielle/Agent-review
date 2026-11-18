@@ -183,24 +183,41 @@ describe.each(backends)("base de données : $name", ({ open }) => {
     expect(await settings.getProject("gitlab", 99)).toBeNull();
     await expect(settings.saveProject({ ...project, baseBranch: "" })).rejects.toThrow(/Branche de départ/);
 
-    // Le type d'arme est fixé à la création : sans choix il est tiré du projet, puis il ne change plus
-    const firstType = (await settings.getProject("gitlab", 5))?.weaponType;
-    expect(firstType).toBeTruthy();
-    await settings.saveProject({ ...project, projectId: 8, path: "g/c", weaponType: "bow" });
-    expect((await settings.getProject("gitlab", 8))?.weaponType).toBe("bow");
-    await settings.saveProject({ ...project, projectId: 8, path: "g/c", weaponType: "bow", instructions: "ok" }); // même type : accepté
-    await settings.saveProject({ ...project, projectId: 8, path: "g/c", instructions: "sans type" }); // type omis : l'existant est gardé
-    expect((await settings.getProject("gitlab", 8))?.weaponType).toBe("bow");
-    await expect(settings.saveProject({ ...project, projectId: 8, path: "g/c", weaponType: "axe" })).rejects.toThrow(/type d'arme/);
-    await expect(settings.saveProject({ ...project, projectId: 9, path: "g/d", weaponType: "canon" })).rejects.toThrow();
-    expect((await settings.getProject("gitlab", 8))?.weaponType).toBe("bow");
-    expect(await settings.getProject("gitlab", 9)).toBeNull();
-    await db.run("UPDATE projects SET config = ? WHERE project_id = 5", [JSON.stringify(project)]); // projet d'avant le type d'arme
-    expect((await settings.getProject("gitlab", 5))?.weaponType).toBe(firstType);
-    expect((await settings.listProjects()).find((p) => p.projectId === 5)?.weaponType).toBe(firstType);
+    // Un projet enregistré quand le type d'arme du jeu vivait dans ses réglages reste lisible : la clé en trop est ignorée, le noyau n'en sait rien
+    await db.run("UPDATE projects SET config = ? WHERE project_id = 5", [JSON.stringify({ ...project, weaponType: "bow" })]);
+    expect(await settings.getProject("gitlab", 5)).not.toHaveProperty("weaponType");
+    expect((await settings.listProjects()).find((p) => p.projectId === 5)).not.toHaveProperty("weaponType");
+    await settings.saveProject({ ...project, weaponType: "bow" } as typeof project); // un champ inconnu envoyé par un vieux navigateur n'est pas gardé
+    expect(await settings.getProject("gitlab", 5)).not.toHaveProperty("weaponType");
 
     await settings.deleteProject("gitlab", 5);
     expect(await settings.getProject("gitlab", 5)).toBeNull();
+  });
+
+  it("sections de données d'une fonctionnalité : propres à l'espace, noms contrôlés, réglages intacts", async () => {
+    const settings = createSettingsStore(db, ws);
+    const accounts = createAccountRepo(db);
+    const other = createSettingsStore(db, await accounts.createWorkspace({ name: "Autre espace", kind: "team", adminUserId: await accounts.createUser({ name: "Autre" }) }));
+    expect(await settings.getSection("game")).toBeNull();
+
+    await settings.saveSection("game", { enabled: false });
+    await settings.saveSection("game", { enabled: true, nested: { a: [1, 2] } }); // même section : remplacée
+    expect(await settings.getSection("game")).toEqual({ enabled: true, nested: { a: [1, 2] } });
+    expect(await other.getSection("game")).toBeNull(); // un autre espace ne voit rien
+    await other.saveSection("game", { enabled: false });
+    expect(await settings.getSection("game")).toEqual({ enabled: true, nested: { a: [1, 2] } });
+
+    // Les réglages eux-mêmes ne sont pas touchés, et leur clé est réservée
+    const before = await settings.get();
+    await settings.saveSection("game", { actionMode: "auto" });
+    expect(await settings.get()).toEqual(before);
+    for (const bad of ["settings", "", "Game", "a-b", "x".repeat(40), "1abc", "../x"]) {
+      await expect(settings.saveSection(bad, {})).rejects.toThrow(/Nom de section invalide/);
+      await expect(settings.getSection(bad)).rejects.toThrow(/Nom de section invalide/);
+    }
+
+    await db.run("UPDATE settings SET value = ? WHERE workspace_id = ? AND key = 'game'", ["{pas du json", ws]);
+    expect(await settings.getSection("game")).toBeNull(); // section illisible : traitée comme absente, sans planter
   });
 
   it("deux forges, même numéro de projet : tout reste séparé", async () => {

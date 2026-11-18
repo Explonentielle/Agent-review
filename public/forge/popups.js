@@ -12,6 +12,39 @@
   const weaponImg = (type, grade, cls = "") => `<img class="fg-wicon ${cls}" src="${S.icon(type, grade)}" alt="">`;
   const fmtKind = (k) => (k === "github" ? "GitHub" : "GitLab");
 
+  /**
+   * Ligne « type d'arme » d'un projet : le type choisi (définitif), ou les sept types à choisir une seule fois (le type par défaut est coché).
+   * @param w Arme (un projet) de l'armurerie.
+   * @param type Type d'arme actuel du projet.
+   * @returns Le HTML de la ligne.
+   */
+  function typeRow(w, type) {
+    const name = S.TYPES.find((t) => t.id === type)?.name ?? "";
+    if ((game.data.armory.chosen ?? []).includes(w.key)) return `<div class="fg-types"><span>Type d'arme (choisi, il ne change plus)</span><span class="fg-type on" title="${esc(name)}">${weaponImg(type, w.grade)}</span></div>`;
+    const picks = S.TYPES.map((t) => `<button type="button" class="fg-type ${t.id === type ? "on" : ""}" data-fg-wtype="${t.id}" data-fg-wkey="${esc(w.key)}" title="${esc(t.name)}">${weaponImg(t.id, w.grade)}</button>`).join("");
+    return `<div class="fg-types"><span>Type d'arme (à choisir une seule fois)</span>${picks}</div><p class="fg-note">Pour l'instant : ${esc(name)}, tiré de ton projet. Un clic le fixe pour de bon : il décide des armes qui tombent en butin.</p>`;
+  }
+
+  /**
+   * Fixe le type d'arme d'un projet après confirmation, puis redessine le râtelier.
+   * @param key Clé `source:projectId` du projet.
+   * @param type Type d'arme choisi.
+   * @returns Rien.
+   */
+  async function chooseWeapon(key, type) {
+    const w = game.data.armory.weapons.find((x) => x.key === key);
+    if (!w) return;
+    const name = S.TYPES.find((t) => t.id === type)?.name ?? type;
+    const ok = await ask({ title: `Fixer le type d'arme : ${name} ?`, okLabel: "Fixer", html: `<p>Le projet <b>${esc(w.path)}</b> aura pour arme : <b>${esc(name)}</b>. Une fois fixé, le type ne change plus.</p>` });
+    if (!ok) return;
+    try {
+      await api("/api/forge/weapon-type", { source: w.source, projectId: w.projectId, weaponType: type });
+      A.sfx.select();
+      await game.refresh();
+      render();
+    } catch (err) { game.banner(err.message); A.sfx.error(); }
+  }
+
   /** Quêtes de départ, hauts faits et règles de l'XP : le tableau et la page du profil les affichent de la même façon. */
   function questsBody(source = game) {
     const h = source.data.hero;
@@ -50,7 +83,7 @@
         return {
           title: `Forge ${fmtKind(kind)}`,
           html: `<p class="fg-status">${isLit ? `<span class="fg-tag ok">Forge allumée</span>${user ? ` compte <b>@${esc(user)}</b>` : ""}` : `<span class="fg-tag warn">Forge éteinte</span> le four chauffe dès qu'un jeton valide est enregistré`}</p>
-            ${rows.map(field).join("")}<p class="fg-note">${esc(help)}</p>${window.ForgeScribe.rightsHtml(kind)}
+            ${rows.map(field).join("")}<p class="fg-note">${esc(help)}</p>${window.Scribe.rightsHtml(kind, false, "fg-rights")}
             <p class="fg-note">Les jetons sont chiffrés dans la base de l'outil, jamais renvoyés au navigateur. Rien n'est révoqué chez ${fmtKind(kind)} quand tu éteins le four : fais-le là-bas si un jeton a fuité.</p>`,
         };
       },
@@ -69,7 +102,7 @@
       },
     },
 
-    /** Le râtelier : un projet = une arme. Niveau et qualité viennent du travail réel ; le type d'arme est choisi à la création du projet. */
+    /** Le râtelier : un projet = une arme. Niveau et qualité viennent du travail réel ; le type d'arme se choisit une seule fois, ici. */
     rack: {
       rerender: true,
       live: true,
@@ -91,7 +124,7 @@
             <h4>${esc(chosen.path)}</h4><div>${gradeTag(chosen.grade)} · Niveau ${chosen.level} · ${chosen.xp} XP</div>${pct(((chosen.xp - lo) * 100) / (hi - lo))}
             <div class="fg-stats"><span><b>${chosen.forged}</b> pièce${chosen.forged > 1 ? "s" : ""} forgée${chosen.forged > 1 ? "s" : ""}</span><span><b>${chosen.reviews}</b> revue${chosen.reviews > 1 ? "s" : ""}</span><span><b>${chosen.failures}</b> échec${chosen.failures > 1 ? "s" : ""}</span><span><b>${chosen.blocked}</b> question${chosen.blocked > 1 ? "s" : ""}</span></div>
             <p class="fg-note">${chosen.devEnabled ? "L'agent dev est autorisé sur ce projet." : "L'agent dev n'est pas encore autorisé sur ce projet : règle-le pour qu'on puisse y forger."}</p></div></div>
-            <div class="fg-types"><span>Type d'arme (fixé à la création du projet)</span><span class="fg-type on" title="${esc(S.TYPES.find((t) => t.id === type)?.name ?? "")}">${weaponImg(type, chosen.grade)}</span></div>
+            ${typeRow(chosen, type)}
             <div class="fg-inline"><button type="button" class="fg-btn" data-fg-edit="${esc(chosen.key)}">Régler le projet</button></div>`;
         })() : `<p class="fg-note">Aucune arme pour l'instant. Chaque projet que tu ajoutes devient une arme à forger.</p>`;
         return {
@@ -500,18 +533,13 @@
     } catch (err) { game.banner(err.message); A.sfx.error(); }
   }
 
-  /* ---------- le Scribe ---------- */
-  const scribe = window.ForgeScribe.create({
-    game: () => game,
-    rerender: () => render(),
-    sel: () => current?.sel,
-    isOpen: () => current?.id === "scribe",
-    sfx: A.sfx,
-    open: (id, params) => open(id, params ?? {}, game),
-    invalidateTickets: () => ticketCache.clear(),
-    launch: (info) => launchTicket(info),
-  });
-  defs.scribe = scribe.def;
+  /** Le Scribe est une page du tableau de bord (`#tickets/new`, public/scribe.js) : la forge y emmène la personne. */
+  function openScribe() {
+    close(true);
+    game?.setPopup(false);
+    ticketCache.clear();
+    go("#tickets/new");
+  }
 
   /* ---------- ouverture, fermeture ---------- */
   async function render() {
@@ -543,7 +571,6 @@
     back.innerHTML = `<div class="fg-popup ${def.wide ? "wide" : ""}" role="dialog" aria-modal="true"><button type="button" class="fg-x" aria-label="Fermer"></button><h3>…</h3><div class="fg-pbody"><p class="fg-note">Un instant…</p></div></div>`;
     back.addEventListener("click", onClick);
     back.addEventListener("input", (ev) => { if (ev.target.matches?.("[data-fg-fixnote]")) fixNote = ev.target.value; });
-    back.addEventListener("input", (ev) => { if (current?.id === "scribe") scribe.handleInput(ev); });
     document.querySelector(".fg-popups").append(back);
     current = { id, params, def, el: back, sel: undefined };
     game.setPopup(true);
@@ -594,7 +621,7 @@
     if (t === current?.el || t.closest(".fg-x")) return close();
     const by = (attr) => t.closest(`[${attr}]`);
     let el;
-    if (current?.id === "scribe" && scribe.handleClick(ev)) return;
+    if ((el = by("data-fg-wtype"))) return chooseWeapon(el.dataset.fgWkey, el.dataset.fgWtype);
     if ((el = by("data-fg-deltask"))) return deleteTask(el.dataset.fgDeltask);
     if ((el = by("data-fg-relaunch"))) return relaunchWorker(el.dataset.fgRelaunch, el);
     if ((el = by("data-fg-unpin"))) return unpinWorker(el.dataset.fgUnpin);
@@ -602,7 +629,7 @@
     if ((el = by("data-fg-piece-fix"))) return fixPiece(el.dataset.fgPieceFix);
     if ((el = by("data-fg-piece-merge"))) return el.disabled ? undefined : mergePiece(el.dataset.fgPieceMerge, el.dataset.target);
     if ((el = by("data-fg-piece"))) { open("piece", { taskId: el.dataset.fgPiece }, game); return; }
-    if ((el = by("data-fg-scribe"))) { if (el.dataset.fgScribe) scribe.focus(el.dataset.fgScribe); open("scribe", {}, game); return; }
+    if (by("data-fg-scribe")) return openScribe();
     if ((el = by("data-fg-launchraw"))) {
       const [source, projectId, iid] = el.dataset.fgLaunchraw.split(":");
       const w = game.data.armory.weapons.find((x) => x.source === source && String(x.projectId) === projectId);

@@ -283,6 +283,24 @@
   .tags button { border: 1px dashed var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
   .tags button:hover { border-style: solid; color: var(--accent-text); }
 
+  /* ---------- Le Scribe (page #tickets/new) et droits du jeton ---------- */
+  .tab[hidden] { display: none; }
+  .sc-tabs { margin: 0 0 16px; }
+  .sc-panel { display: grid; gap: 14px; }
+  .sc-panel .callout { margin: 0; }
+  .sc-card-head { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+  .sc-card h3 { margin: 8px 0 6px; font-size: 17px; }
+  .sc-labels { display: flex; gap: 6px 16px; flex-wrap: wrap; }
+  .sc-ft { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; margin: 6px 0; }
+  .sc-ft input[type="text"] { width: 100%; height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; }
+  .sc-ft-prev { border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; margin: 5px 0; }
+  .sc-ft-prev summary { cursor: pointer; font-weight: 600; }
+  .sc-err { color: var(--red); }
+  .rights { margin: 14px 0 0; border-top: 1px solid var(--border); padding-top: 10px; font-size: 13px; }
+  .rights summary { cursor: pointer; font-weight: 600; color: var(--text-2); }
+  .rights h5 { margin: 10px 0 2px; font-size: 13px; }
+  .rights ul { margin: 4px 0 4px 18px; padding: 0; color: var(--text-2); }
+
   /* ---------- Dialogue + toasts ---------- */
   /* Pièces jointes (captures, maquettes, données) */
   .att-zone { margin-top: 10px; border: 1.5px dashed var(--border-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--text-2); font-size: 12.5px; text-align: left; }
@@ -384,7 +402,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-4M13 4.5 10.5 7 13 9.5"/></svg>
       <span class="lbl">Reviews</span><span class="badge" id="badge-reviews" hidden></span>
     </button>
-    <button class="tab" data-tab="forge" title="La forge">
+    <button class="tab" data-tab="forge" title="La forge" hidden>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9h14a4 4 0 0 1-4 4h-1v3h3v3H7v-3h3v-3H8a5 5 0 0 1-5-4zM17 9l4-2"/></svg>
       <span class="lbl">La forge</span>
     </button>
@@ -445,6 +463,7 @@
   </form>
 </dialog>
 <div class="toasts" id="toasts" aria-live="polite"></div>
+<script src="/scribe.js"></script>
 
 <script>
 /* =====================================================================
@@ -743,17 +762,19 @@ async function copy(text) {
 /* =====================================================================
    Navigation
    ===================================================================== */
-const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewId: null, taskId: null, ticketSearch: "", ticketSource: "", issues: null, issuesAt: null };
+const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewId: null, taskId: null, ticketSearch: "", ticketSource: "", issues: null, issuesAt: null, game: { enabled: false } };
 try { state.ticketSource = localStorage.getItem("ra.ticketSource") || ""; } catch { /* stockage indisponible */ }
 
 function route() {
   const [tab = "tickets", id] = location.hash.replace(/^#/, "").split("/");
-  state.tab = ["tickets", "dev", "reviews", "forge", "settings"].includes(tab) ? tab : "tickets";
+  // La forge (jeu) éteinte n'est pas une destination : son adresse ramène aux tickets
+  state.tab = ["tickets", "dev", "reviews", "forge", "settings"].includes(tab) && !(tab === "forge" && !state.game.enabled) ? tab : "tickets";
   for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t.dataset.tab === state.tab);
   for (const v of document.querySelectorAll(".view")) v.hidden = v.id !== `view-${state.tab}`;
   document.getElementById("settings-toc").hidden = state.tab !== "settings";
-  document.getElementById("crumb").textContent = { tickets: "Mes tickets", dev: "Agent dev", reviews: "Reviews", forge: "La forge", settings: "Paramètres" }[state.tab];
-  if (state.tab === "tickets") loadTickets(false);
+  const scribePage = state.tab === "tickets" && id === "new";
+  document.getElementById("crumb").textContent = scribePage ? "Le Scribe" : { tickets: "Mes tickets", dev: "Agent dev", reviews: "Reviews", forge: "La forge", settings: "Paramètres" }[state.tab];
+  if (state.tab === "tickets") { if (scribePage) window.Scribe.show(); else loadTickets(false); }
   if (state.tab === "dev") { if (id) showTask(Number(id)); else { state.taskId = null; renderTaskEmpty(); refreshTasks(); } }
   if (state.tab === "reviews") { if (id) showReview(Number(id)); else { state.reviewId = null; renderReviewEmpty(); refreshReviews(); } }
   if (state.tab !== "forge") stopForge();
@@ -855,6 +876,7 @@ function renderTickets() {
       <span class="spacer"></span>
       <input class="search" id="ticket-search" placeholder="Filtrer (titre, projet, #numéro)" value="${esc(state.ticketSearch)}">
       <button class="btn" data-act="refresh-tickets">Actualiser</button>
+      <a class="btn primary" href="#tickets/new" title="Le Scribe rédige un ticket (ou un projet) à partir de ton idée, tu relis avant qu'il soit créé">Nouveau ticket</a>
     </div>
     ${sourceChips}
     ${notConfigured ? `<div class="callout info">${ICON.info}<h3>Range tes tickets par statut</h3><p>Indique les labels de ton workflow (« à traiter », « en cours ») dans <a href="#settings">Paramètres</a> : en attendant, ils sont tous dans « Autres ».</p></div>` : ""}
@@ -1271,7 +1293,7 @@ function loadForgeAssets() {
     css.rel = "stylesheet";
     css.href = "/forge/forge.css";
     document.head.append(css);
-    for (const file of ["sprites", "audio", "scribe", "items", "popups", "combat", "arena", "game"]) {
+    for (const file of ["sprites", "audio", "items", "popups", "combat", "arena", "game"]) {
       await new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = `/forge/${file}.js`;
@@ -1610,6 +1632,45 @@ async function runRuntimeCheck(button) {
   }
 }
 
+/** Montre ou cache l'onglet de la forge (jeu) selon le drapeau du serveur, et met le monde en pause quand il est éteint. */
+function applyGame() {
+  document.querySelector('[data-tab="forge"]').hidden = !state.game.enabled;
+  if (!state.game.enabled) stopForge();
+}
+
+/** Lit le drapeau de la forge (jeu) : en cas d'erreur, elle est considérée éteinte (rien du jeu n'est chargé). */
+async function refreshGame() {
+  state.game = await api("/api/game").catch(() => ({ enabled: false }));
+  applyGame();
+}
+
+/**
+ * Allume ou éteint la forge (jeu) pour l'espace : son onglet apparaît ou disparaît, et le serveur répond ou non à ses routes.
+ * @param {boolean} enabled Vrai pour l'allumer.
+ * @returns {Promise<void>}
+ */
+async function toggleGame(enabled) {
+  try {
+    state.game = await api("/api/game", { enabled });
+    toast(state.game.enabled ? "La forge est allumée." : "La forge est éteinte.");
+  } catch (err) {
+    toast(err.message, true);
+    await refreshGame();
+    const box = document.querySelector('[data-act="game-toggle"]');
+    if (box) box.checked = state.game.enabled;
+  }
+  applyGame();
+}
+
+/** Réglage « La forge (jeu) » : une case pour l'allumer ou l'éteindre. */
+function gameSection() {
+  return `<section class="card-section">
+    <h2>La forge (jeu)</h2>
+    <p class="desc">Une couche de jeu par-dessus l'activité réelle de l'outil : le monde 2D, les quêtes, l'arène. Éteinte, son onglet disparaît, le navigateur n'en charge plus rien et le serveur ne répond plus à ses routes. Les tickets, le Scribe, l'agent dev, les reviews et la fusion n'en dépendent pas : ils marchent pareil, allumée ou éteinte. Ce réglage vaut pour tout l'espace.</p>
+    <label class="check"><input type="checkbox" data-act="game-toggle" ${state.game.enabled ? "checked" : ""}> Activer la forge (jeu)</label>
+  </section>`;
+}
+
 function renderSettings() {
   disposeTermView(); // la page est reconstruite : le terminal affiché disparaît, la session reste ouverte côté serveur
   const s = settingsData.settings;
@@ -1665,6 +1726,8 @@ function renderSettings() {
       </section>
 
       ${runtimeSection()}
+
+      ${gameSection()}
 
       <section class="card-section">
         <h2>Règles de décision des reviews</h2>
@@ -1879,23 +1942,11 @@ function agentImageField(p) {
     <small>Les outils du projet (PHP, composer, node...) doivent être dans l'image. Dans un conteneur il n'y a pas de Docker : les commandes autorisées appellent directement les outils (ex. <code>vendor/bin/phpunit</code>), pas <code>docker run</code>. Images proposées : celles de <code>AGENT_IMAGE</code> et <code>AGENT_IMAGES</code> du .env.</small></label>`;
 }
 
-/** Types d'armes de la forge (même liste que le serveur, `WEAPON_TYPE_IDS`). */
-const WEAPON_TYPE_NAMES = { sword: "Épée", axe: "Hache", hammer: "Marteau", dagger: "Dague", spear: "Lance", bow: "Arc", staff: "Bâton" };
-
-/** Type d'arme du projet : choisi à la création (nouveau projet), puis affiché sans pouvoir être modifié. */
-function weaponTypeField(p) {
-  if (!p.isNew) return `<div class="field"><span>Type d'arme</span><div>${esc(WEAPON_TYPE_NAMES[p.weaponType] || "")}</div><small>Choisi à la création du projet : il ne peut plus être modifié.</small></div>`;
-  return `<label class="field"><span>Type d'arme</span>
-    <select name="weaponType">${Object.entries(WEAPON_TYPE_NAMES).map(([id, name]) => `<option value="${id}">${name}</option>`).join("")}</select>
-    <small>Les armes de ce projet dans la forge (râtelier, butin) seront de ce type. Impossible à modifier une fois le projet créé.</small></label>`;
-}
-
 async function renderProjectForm() {
   const p = editingProject;
   const box = document.getElementById("project-editor");
   box.innerHTML = `<form class="panel" id="project-form" style="margin-top:12px">
     <div class="sub-title">${forgePill(p.source)} ${esc(p.path)}</div>
-    ${weaponTypeField(p)}
     <label class="check"><input type="checkbox" name="devEnabled" ${p.devEnabled ? "checked" : ""}> Autoriser l'agent dev sur ce projet</label>
     <div class="grid2" style="margin-top:14px">
       <label class="field"><span>Branche de départ</span><input name="baseBranch" list="branch-list" value="${esc(p.baseBranch)}" placeholder="ex. develop"><small>La branche du ticket est créée depuis celle-ci.</small></label>
@@ -1929,8 +1980,6 @@ async function saveProject() {
     allowedCommands: lines(f.allowedCommands.value),
     instructions: f.instructions.value,
     agentImage: f.agentImage.value,
-    // Choisi seulement à la création : un projet existant renvoie son type tel quel (le serveur refuse tout changement)
-    weaponType: editingProject.isNew ? f.weaponType.value : editingProject.weaponType,
   };
   try {
     await api("/api/projects", data);
@@ -2009,6 +2058,7 @@ document.addEventListener("click", async (e) => {
   if (act === "claude-check") return refreshClaudeStatus(true);
   if (act === "secret-save" || act === "secret-delete") return secretAction(act, t.dataset.name);
   if (act === "runtime-check") return runRuntimeCheck(t);
+  if (act === "game-toggle") return toggleGame(t.checked);
   if (act === "logout") {
     await api("/auth/logout", {}).catch(() => undefined);
     location.href = "/login";
@@ -2119,7 +2169,8 @@ window.addEventListener("hashchange", route);
    ===================================================================== */
 (async () => {
   await refreshHeader();
-  api("/api/settings").then((s) => { state.settingsCache = s.settings; if (state.tab === "tickets" && state.issues) renderTickets(); }).catch(() => undefined);
+  api("/api/settings").then((s) => { state.settingsCache = s.settings; if (state.tab === "tickets" && state.issues && location.hash !== "#tickets/new") renderTickets(); }).catch(() => undefined);
+  await refreshGame();
   route();
   setInterval(() => {
     refreshHeader();

@@ -405,8 +405,9 @@
     openPopup("reviews");
   }
   async function scribeTalk() {
-    await say("Scribe", ["Tu me dictes une idée, j'écris le ticket. Ou tout un projet, avec ses premiers tickets.", "Je ne pose rien sur la forge sans que tu aies relu, patron."]);
-    openPopup("scribe");
+    await say("Scribe", ["Tu me dictes une idée, j'écris le ticket. Ou tout un projet, avec ses premiers tickets.", "Je ne pose rien sur la forge sans que tu aies relu, patron.", "Mon bureau est dans « Mes tickets » : je t'y emmène."]);
+    window.ForgePopups.close(true);
+    go("#tickets/new");
   }
   async function merchantTalk() {
     const n = g.data.armory.loot.filter((i) => !g.save.sold.includes(i.id)).length;

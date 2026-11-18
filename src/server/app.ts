@@ -24,16 +24,11 @@ import { SecretError } from "../secrets/crypto.js";
 import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName, saveManagedSecret } from "../secrets/vault.js";
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
 import type { TenantContext, TenantDeps } from "../tenants/manager.js";
-import { computeArmory } from "../game/armory.js";
-import { LOOT_CATALOG, computeDrops } from "../game/loot.js";
-import { computeHero, REVIEW_DONE, TASK_FORGED } from "../game/hero.js";
-import { computePrestige, computeProgress } from "../game/progress.js";
-import { MAX_WORKERS, pickWorkers } from "../game/workers.js";
+import { registerGame } from "../game/routes.js";
 import { registerPiece, summarizePieces } from "../dev/pieceRoutes.js";
 import type { DevTaskRow } from "../db/devTasks.js";
 import { followupInstructions } from "../dev/reviewFeedback.js";
 import { ReviewResultSchema } from "../review/schema.js";
-import { registerRooms } from "../rooms/routes.js";
 import { registerScribe } from "../scribe/routes.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
 import type { AgentRunner } from "../agent/runner.js";
@@ -290,66 +285,8 @@ export function buildServer(base: ServerDeps) {
     registerTerminal(app, { feature: base.terminal, authEnabled: Boolean(base.auth), whoIs: (req) => req.session ?? base.local, ownerUserId: base.local.userId, fail });
   }
 
-  /** La forge : héros, quêtes et hauts faits déduits de l'état réel de l'outil. */
-  app.get<{ Querystring: { tz?: string } }>("/api/hero", async (req) => {
-    const who = req.session ?? base.local;
-    const [projects, reviews, tasks, recentReviews] = await Promise.all([deps.settings.listProjects(), deps.reviews.countByStatus(), deps.tasks.list(500), deps.reviews.list(undefined, 500)]);
-    const taskCounts: Record<string, number> = {};
-    for (const task of tasks) taskCounts[task.status] = (taskCounts[task.status] ?? 0) + 1;
-    // La connexion Claude est celle de la machine : elle ne compte que pour son propriétaire. Une CLI lente ne bloque pas la page (4 s au plus).
-    let claudeConnected = false;
-    if (base.terminal && who.userId === base.local.userId) {
-      const slow = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000).unref());
-      claudeConnected = (await Promise.race([base.terminal.status.get(), slow]))?.connected ?? false;
-    }
-    // Atelier animé : les agents actifs (ou terminés depuis peu) et ce qu'ils disent, d'après leur dernière étape connue
-    const activeTasks = tasks.filter((t) => t.status === "running").slice(0, MAX_WORKERS);
-    const steps: Record<number, string> = {};
-    for (const task of activeTasks) {
-      const events = await deps.tasks.events(task.id, 0);
-      const last = [...events].reverse().find((e) => e.kind === "step") ?? [...events].reverse().find((e) => e.kind === "tool");
-      if (last) steps[task.id] = last.text;
-    }
-    const activeReviews = [...(await deps.reviews.list("running", MAX_WORKERS)), ...(await deps.reviews.list("queued", MAX_WORKERS))];
-    const workers = pickWorkers({ tasks, reviews: activeReviews, steps, now: Date.now() });
-    const forgeKinds = deps.forges.all().map((f) => f.connector.kind);
-    // Progression qui donne envie de revenir : série, missions, maîtrises (le fuseau vient du navigateur, à défaut celui du serveur)
-    const tz = Number(req.query.tz);
-    const armory = computeArmory({ projects, tasks, reviews: recentReviews });
-    const progress = computeProgress({
-      now: Date.now(),
-      tzOffsetMin: req.query.tz !== undefined && Number.isFinite(tz) && Math.abs(tz) <= 840 ? Math.round(tz) : new Date().getTimezoneOffset(),
-      tasks,
-      reviews: recentReviews,
-      totals: { forged: TASK_FORGED.reduce((n, s) => n + (taskCounts[s] ?? 0), 0), reviews: REVIEW_DONE.reduce((n, s) => n + (reviews[s] ?? 0), 0) },
-      pieceGrades: armory.loot.map((i) => i.grade),
-      weaponLevels: armory.weapons.map((w) => w.level),
-    });
-    const hero = computeHero({
-      forges: forgeKinds,
-      claudeConnected,
-      projects: projects.length,
-      devProjects: projects.filter((p) => p.devEnabled).length,
-      reviews,
-      tasks: taskCounts,
-      bonusXp: progress.bonusXp,
-    });
-    return { forges: forgeKinds, ...hero, progress, prestige: computePrestige(hero.level, hero.xp), workers };
-  });
-
-  /** L'armurerie : un projet = une arme (niveau et qualité d'après le travail réel), une demande de fusion ouverte = une pièce à vendre. */
-  app.get("/api/forge/armory", async () => {
-    const [projects, tasks, reviews] = await Promise.all([deps.settings.listProjects(), deps.tasks.list(500), deps.reviews.list(undefined, 500)]);
-    return computeArmory({ projects, tasks, reviews });
-  });
-
-  /** Le butin : le catalogue d'objets et ceux que l'activité réelle (pièces forgées, reviews, fusions) a fait tomber, de façon déterministe. */
-  app.get("/api/forge/loot", async () => {
-    const [tasks, reviews, mergedTaskIds, journal, weaponProjects] = await Promise.all([deps.tasks.list(500), deps.reviews.list(undefined, 500), deps.tasks.listMergedTaskIds(), deps.audit.list(500), deps.settings.listProjects()]);
-    const projects = journal.filter((entry) => entry.action === "project_create" && entry.outcome === "ok").map((entry) => ({ id: entry.id, created_at: entry.created_at, source: entry.source, path: entry.target }));
-    // Une arme qui tombe est toujours du type d'arme du projet concerné
-    return { catalog: LOOT_CATALOG, drops: computeDrops({ tasks, reviews, mergedTaskIds, projects, weaponProjects }) };
-  });
+  // La forge (jeu) : une couche isolée, qu'un drapeau des Paramètres allume ou éteint (voir src/game/routes.ts)
+  registerGame(app, { deps, whoIs: (req) => req.session ?? base.local, ownerUserId: base.local.userId, terminal: base.terminal, fail });
 
   // --- Paramètres ------------------------------------------------------------
 
@@ -449,9 +386,6 @@ export function buildServer(base: ServerDeps) {
       return fail(reply, err);
     }
   });
-
-  // --- Salles du monde de la forge (données validées, lecture seule) -------------------------------
-  registerRooms(app);
 
   // --- Scribe : tickets d'un projet, brouillons, création de tickets et de projets ------------------
   registerScribe(app, { deps, whoIs: (req) => req.session ?? base.local, fail, forgeOf, classify: classifyIssue, runner: base.scribeRunner });

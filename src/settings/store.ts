@@ -1,6 +1,5 @@
 import type { ForgeKind } from "../connectors/types.js";
 import type { Db } from "../db/db.js";
-import { defaultWeaponType } from "../game/armory.js";
 import { log } from "../logger.js";
 import { DEFAULT_SETTINGS, ProjectSettingsSchema, SettingsSchema, type ProjectSettings, type Settings } from "./schema.js";
 
@@ -40,15 +39,17 @@ export function mergeWithDefaults(stored: unknown): Settings {
   return DEFAULT_SETTINGS;
 }
 
+/** Nom d'une section de données d'une fonctionnalité : minuscules, chiffres et tiret bas, et jamais `settings` (la clé des réglages eux-mêmes). */
+const SECTION_NAME = /^(?!settings$)[a-z][a-z0-9_]{0,31}$/;
+
 /**
- * Valide un projet stocké. Un projet enregistré avant le type d'arme en reçoit un fixe (`defaultWeaponType`), le même à chaque lecture.
+ * Valide un projet stocké.
  * @param config Réglages du projet tels que stockés (JSON).
  * @param source Forge de la ligne, pour les projets enregistrés avant la prise en charge de GitHub.
- * @returns Le projet, avec son type d'arme.
+ * @returns Le projet validé.
  */
 function parseStoredProject(config: string, source?: ForgeKind): ProjectSettings {
-  const project = ProjectSettingsSchema.parse(source ? { ...JSON.parse(config), source } : JSON.parse(config));
-  return { ...project, weaponType: project.weaponType ?? defaultWeaponType(project.source, project.projectId) };
+  return ProjectSettingsSchema.parse(source ? { ...JSON.parse(config), source } : JSON.parse(config));
 }
 
 /**
@@ -85,6 +86,36 @@ export function createSettingsStore(db: Db, workspaceId: number) {
     },
 
     /**
+     * Lit la section de données d'une fonctionnalité (ex. la forge), rangée à côté des réglages sous sa propre clé : le noyau n'en connaît pas le contenu.
+     * @param name Nom de la section (minuscules, chiffres, tiret bas ; jamais `settings`).
+     * @returns La valeur JSON enregistrée, ou null si la section n'existe pas encore (ou est illisible).
+     * @throws Error Si le nom de section est invalide.
+     */
+    async getSection(name: string): Promise<unknown> {
+      if (!SECTION_NAME.test(name)) throw new Error(`Nom de section invalide : ${name}`);
+      const row = await db.get<{ value: string }>("SELECT value FROM settings WHERE workspace_id = ? AND key = ?", [workspaceId, name]);
+      if (!row) return null;
+      try {
+        return JSON.parse(row.value) as unknown;
+      } catch {
+        log.warn("settings.invalid_section", { section: name });
+        return null;
+      }
+    },
+
+    /**
+     * Enregistre (ou remplace) la section de données d'une fonctionnalité pour l'espace.
+     * @param name Nom de la section (minuscules, chiffres, tiret bas ; jamais `settings`).
+     * @param value Valeur JSON à enregistrer (déjà validée par la fonctionnalité).
+     * @returns Rien.
+     * @throws Error Si le nom de section est invalide.
+     */
+    async saveSection(name: string, value: unknown): Promise<void> {
+      if (!SECTION_NAME.test(name)) throw new Error(`Nom de section invalide : ${name}`);
+      await db.run("INSERT INTO settings (workspace_id, key, value) VALUES (?, ?, ?) ON CONFLICT (workspace_id, key) DO UPDATE SET value = excluded.value", [workspaceId, name, JSON.stringify(value)]);
+    },
+
+    /**
      * Projets configurés dans l'espace.
      * @returns Les projets, classés par chemin.
      */
@@ -109,18 +140,13 @@ export function createSettingsStore(db: Db, workspaceId: number) {
      * @param input Réglages du projet.
      * @returns Le projet validé.
      * @throws ZodError Si les réglages sont invalides.
-     * @throws Error Si l'agent dev est activé sans branche de départ ou sans branche cible, ou si le type d'arme d'un projet existant change.
+     * @throws Error Si l'agent dev est activé sans branche de départ ou sans branche cible.
      */
     async saveProject(input: unknown): Promise<ProjectSettings> {
-      const parsed = ProjectSettingsSchema.parse(input);
-      if (parsed.devEnabled && (!parsed.baseBranch || !parsed.targetBranch)) {
+      const project = ProjectSettingsSchema.parse(input);
+      if (project.devEnabled && (!project.baseBranch || !project.targetBranch)) {
         throw new Error("Branche de départ et branche cible obligatoires pour activer l'agent dev");
       }
-      // Le type d'arme est fixé à la création et ne change plus : un projet existant garde le sien, et un autre type est refusé
-      const row = await db.get<{ config: string }>("SELECT config FROM projects WHERE workspace_id = ? AND source = ? AND project_id = ?", [workspaceId, parsed.source, parsed.projectId]);
-      const kept = row ? parseStoredProject(row.config, parsed.source).weaponType : undefined;
-      if (kept && parsed.weaponType && parsed.weaponType !== kept) throw new Error("Le type d'arme d'un projet ne peut pas être modifié après sa création");
-      const project = { ...parsed, weaponType: kept ?? parsed.weaponType ?? defaultWeaponType(parsed.source, parsed.projectId) };
       await db.run(
         `INSERT INTO projects (workspace_id, source, project_id, path, config) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (workspace_id, source, project_id) DO UPDATE SET path = excluded.path, config = excluded.config`,
