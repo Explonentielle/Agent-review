@@ -41,7 +41,7 @@ if (testUrl) {
   });
 }
 
-const TABLES_IN_DELETE_ORDER = ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "memberships", "workspaces", "users"];
+const TABLES_IN_DELETE_ORDER = ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "invitations", "memberships", "workspaces", "users"];
 const DATE_FORMAT = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 describe("conversion des paramètres", () => {

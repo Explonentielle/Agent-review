@@ -140,6 +140,28 @@ describe("exécution par personne", () => {
     expect((await owner.deps.reviews.list()).map((r) => r.id)).not.toContain(reviewsRun[0]);
   });
 
+  it("chaque review et chaque tâche créées pour une personne portent son identifiant : c'est ce qui sert à compter sa consommation", async () => {
+    const owner = await manager.get(h.local);
+    const other = await manager.get(bob);
+    const review = (await other.deps.reviews.insertIfNew(MR))!;
+    const ownerReview = (await owner.deps.reviews.insertIfNew({ ...MR, mrIid: 8 }))!;
+    const task = await other.deps.tasks.insert({ projectId: 1, projectPath: "g/p", issueIid: 1, issueTitle: "t", issueUrl: "u", extraInstructions: null });
+    const ownerTask = await owner.deps.tasks.insert({ projectId: 1, projectPath: "g/p", issueIid: 2, issueTitle: "t", issueUrl: "u", extraInstructions: null });
+    expect([(await other.deps.reviews.get(review))!.user_id, (await owner.deps.reviews.get(ownerReview))!.user_id]).toEqual([bob.userId, h.local.userId]);
+    expect([(await other.deps.tasks.get(task))!.user_id, (await owner.deps.tasks.get(ownerTask))!.user_id]).toEqual([bob.userId, h.local.userId]);
+  });
+
+  it("une personne retirée est oubliée : ses détecteurs s'arrêtent, et elle est reconstruite à son prochain passage", async () => {
+    await store.put({ workspaceId: bob.workspaceId, userId: bob.userId }, "gitlab.token", "glpat-DE-BOB-1234");
+    const first = await manager.get(bob);
+    expect(started.map((s) => s.username)).toContain("bob-gitlab");
+    await manager.drop(bob);
+    expect(stopped).toContain("bob-gitlab");
+    const again = await manager.get(bob);
+    expect(again).not.toBe(first); // une nouvelle exécution, pas l'ancienne
+    await manager.drop({ userId: 999, workspaceId: 999 }); // inconnue : sans effet, sans erreur
+  });
+
   it("les jetons du coffre d'une personne ne servent qu'à elle", async () => {
     await store.put({ workspaceId: bob.workspaceId, userId: bob.userId }, "github.token", "github_pat_DE_BOB_5678");
     await store.put({ workspaceId: bob.workspaceId, userId: bob.userId }, "gitlab.token", "glpat-DE-BOB-1234");

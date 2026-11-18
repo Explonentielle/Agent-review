@@ -76,6 +76,33 @@ export function createSessionStore(db: Db, days: number) {
     },
 
     /**
+     * Change l'espace actif d'une session, à condition que la personne en soit membre.
+     * @param token Jeton de la session.
+     * @param workspaceId Espace voulu.
+     * @returns Vrai si la session désigne maintenant cet espace, faux si elle est inconnue ou si la personne n'est pas membre de cet espace.
+     */
+    async switchWorkspace(token: string, workspaceId: number): Promise<boolean> {
+      if (token === "") return false;
+      const res = await db.run(
+        `UPDATE sessions SET workspace_id = ?
+          WHERE token_hash = ? AND expires_at > ${db.sql.now}
+            AND EXISTS (SELECT 1 FROM memberships m WHERE m.workspace_id = ? AND m.user_id = sessions.user_id)`,
+        [workspaceId, hashOf(token), workspaceId],
+      );
+      return res.changes === 1;
+    },
+
+    /**
+     * Ferme les sessions d'un utilisateur dans un espace (retrait de cet espace). Ses sessions dans d'autres espaces ne sont pas touchées.
+     * @param userId Utilisateur concerné.
+     * @param workspaceId Espace qu'il quitte.
+     * @returns Le nombre de sessions fermées.
+     */
+    async deleteForMember(userId: number, workspaceId: number): Promise<number> {
+      return (await db.run("DELETE FROM sessions WHERE user_id = ? AND workspace_id = ?", [userId, workspaceId])).changes;
+    },
+
+    /**
      * Ferme toutes les sessions d'un utilisateur (retrait d'accès).
      * @param userId Utilisateur concerné.
      * @returns Le nombre de sessions fermées.

@@ -51,6 +51,7 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 41 | Forge | Salles custom générées par un agent, jeux libres choisis par la personne, visites entre membres d'un espace | Très élevé | **Retiré le 2026-11-18** (décision : hors du périmètre de l'outil). Le jalon 1 (moteur à règles, générateur, salles privées ou d'équipe, quête) a existé du 2026-11-16 au 2026-11-18 ; le code reste dans l'historique git |
 | 42 | Forge | La forge (jeu) sortie du noyau et derrière un drapeau ; le Scribe devient une page du tableau de bord | Élevé | ✅ Fait (2026-11-18), voir la section 42. Tests automatiques et contrôles de la page ; jamais regardé dans un vrai navigateur |
 | 43 | Dashboard | Flux ticket, agent dev, review, correction, fusion : audit et trous comblés (la reprise reçoit la relecture, lien review vers tâche, état de la MR sur la carte du ticket) | Élevé | ✅ Fait (2026-11-18), voir la section 43. Jamais essayé de bout en bout avec un vrai agent ni une vraie forge |
+| 44 | Plateforme | Droits par rôle (les rôles n'étaient contrôlés nulle part), invitations d'équipe, gestion des membres, quotas par personne, limitation du débit de connexion | Très élevé | ✅ Fait (2026-11-18), détail dans `docs/roadmap-plateforme.md` (« C2 suite et C7 ») et recette dans `docs/a-tester.md`, section 11 quater. Jamais essayé avec de vrais comptes de forge ni dans un navigateur |
 
 ---
 

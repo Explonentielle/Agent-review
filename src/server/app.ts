@@ -9,6 +9,7 @@ import { diagnoseAgentRuntime, type RuntimeDiagnostic } from "../agent/dockerDia
 import { allowedImages, imageFor } from "../agent/imageName.js";
 import { attachmentIds, failAttachment, giveAttachments, planAttachments, registerAttachments } from "../attachments/routes.js";
 import type { AttachmentOwner } from "../attachments/store.js";
+import { BudgetExceededError, UserQuotaError, assertQuotaAvailable } from "../budget.js";
 import { allows, levelOf, refusalMessage } from "../auth/permissions.js";
 import { registerAuth, type AuthRuntime } from "../auth/routes.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
@@ -26,6 +27,8 @@ import { SecretConflictError, deleteManagedSecret, describeSecrets, managedName,
 import { ALLOWED_EFFORTS, ALLOWED_MODELS, DEFAULT_SETTINGS, type Settings } from "../settings/schema.js";
 import type { TenantContext, TenantDeps } from "../tenants/manager.js";
 import { registerGame } from "../game/routes.js";
+import { registerTeam } from "../team/routes.js";
+import type { InvitationRepo } from "../db/invitations.js";
 import { registerPiece, summarizePieces } from "../dev/pieceRoutes.js";
 import type { DevTaskRow } from "../db/devTasks.js";
 import { followupInstructions } from "../dev/reviewFeedback.js";
@@ -59,13 +62,17 @@ export interface ServerDeps extends TenantDeps {
   terminal?: TerminalFeature;
   /** Exécuteur d'agent imposé au Scribe (tests). Absent : celui des réglages de la personne. */
   scribeRunner?: AgentRunner;
+  /** Invitations à rejoindre l'espace. Absent : celles de la connexion par compte, s'il y en a une ; sinon on ne peut inviter personne. */
+  invitations?: InvitationRepo;
+  /** Appelée quand quelqu'un quitte l'espace ou en est retiré : arrête ses détecteurs et efface ses jetons de cet espace. */
+  onMemberRemoved?: (who: TenantContext) => Promise<void>;
 }
 
 /**
  * Propriétés de `ServerDeps` communes à toutes les personnes. Toutes les autres sont celles de la personne servie : une propriété ajoutée
  * plus tard est donc propre à la personne par défaut, jamais partagée par oubli.
  */
-const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal", "scribeRunner"]);
+const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal", "scribeRunner", "invitations", "onMemberRemoved"]);
 
 type IdParams = { Params: { id: string } };
 /** Une tâche terminée qui a ouvert une MR : ce qu'il faut pour la reprendre. */
@@ -88,6 +95,7 @@ function fail(reply: FastifyReply, err: unknown, code = 502) {
     return reply.code(400).send({ error: err.issues.map((i) => `${i.path.join(".") || "valeur"} : ${i.message}`).join(" · ") });
   }
   if (err instanceof BadRequestError || err instanceof SecretError) return reply.code(400).send({ error: err.message });
+  if (err instanceof UserQuotaError || err instanceof BudgetExceededError) return reply.code(429).send({ error: err.message }); // limite atteinte : réessayer plus tard ou la relever
   if (err instanceof SecretConflictError) return reply.code(409).send({ error: err.message });
   return reply.code(code).send({ error: errorMessage(err) });
 }
@@ -105,7 +113,8 @@ function forgeOf(value: unknown): ForgeKind {
  * grâce au forwarding localhost de WSL2), jamais exposé sur le réseau.
  */
 export function buildServer(base: ServerDeps) {
-  const app = Fastify({ logger: false });
+  // trustProxy : l'adresse du visiteur vient de X-Forwarded-For seulement derrière un reverse proxy déclaré (TRUST_PROXY), sinon l'en-tête serait falsifiable
+  const app = Fastify({ logger: false, trustProxy: base.config.server?.trustProxy ?? false });
 
   // Toutes les routes déclarées, `MÉTHODE /chemin` : le test des droits vérifie que chacune est classée dans `auth/permissions.ts`
   const registered: string[] = [];
@@ -314,6 +323,17 @@ export function buildServer(base: ServerDeps) {
   // La forge (jeu) : une couche isolée, qu'un drapeau des Paramètres allume ou éteint (voir src/game/routes.ts)
   registerGame(app, { deps, whoIs: (req) => req.session ?? base.local, ownerUserId: base.local.userId, terminal: base.terminal, fail });
 
+  // L'équipe de l'espace : membres, rôles, invitations, limites par personne (administrateurs seulement, voir src/team/routes.ts)
+  registerTeam(app, {
+    deps,
+    accounts: base.accounts,
+    invitations: base.invitations ?? base.auth?.invitations,
+    ...(base.auth ? { auth: { publicUrl: base.auth.publicUrl, sessions: base.auth.sessions } } : {}),
+    whoIs: (req) => req.session ?? base.local,
+    ...(base.onMemberRemoved ? { onMemberRemoved: base.onMemberRemoved } : {}),
+    fail,
+  });
+
   // --- Paramètres ------------------------------------------------------------
 
   app.get("/api/settings", async () => ({
@@ -448,6 +468,7 @@ export function buildServer(base: ServerDeps) {
       const retryOf = typeof req.body.retryOf === "number" && Number.isInteger(req.body.retryOf) && req.body.retryOf > 0 ? req.body.retryOf : null;
       const copyFrom: AttachmentOwner[] = retryOf ? [{ task: retryOf }] : [{ ticket: { source, projectId: project.projectId, iid: issue.iid } }];
       await planAttachments(deps, copyFrom, ids);
+      await assertQuotaAvailable(await deps.settings.get(), deps.costs, (req.session ?? base.local).userId, { pending: true });
 
       const id = await deps.tasks.insert({
         source,
@@ -488,7 +509,7 @@ export function buildServer(base: ServerDeps) {
         if (!fix.ok) return reply.code(fix.code).send({ error: fix.error });
         instructions = followupInstructions(note.slice(0, 4000), fix.result);
       }
-      const id = await startFollowup(origin as FollowupOrigin, instructions, req.body?.attachments);
+      const id = await startFollowup(origin as FollowupOrigin, instructions, req.body?.attachments, (req.session ?? base.local).userId);
       return { id };
     } catch (err) {
       return failAttachment(reply, err, fail);
@@ -508,7 +529,7 @@ export function buildServer(base: ServerDeps) {
       const fix = await reviewToFix(origin as FollowupOrigin);
       if (!fix.ok) return reply.code(fix.code).send({ error: fix.error });
       const note = typeof req.body?.note === "string" ? req.body.note.slice(0, 4000) : "";
-      const id = await startFollowup(origin as FollowupOrigin, followupInstructions(note, fix.result), req.body?.attachments);
+      const id = await startFollowup(origin as FollowupOrigin, followupInstructions(note, fix.result), req.body?.attachments, (req.session ?? base.local).userId);
       return { id };
     } catch (err) {
       return failAttachment(reply, err, fail);
@@ -550,10 +571,11 @@ export function buildServer(base: ServerDeps) {
   }
 
   /** Crée et met en file la tâche de reprise d'une tâche terminée (même branche, même MR). Les pièces jointes de la tâche reprise sont gardées. */
-  async function startFollowup(origin: FollowupOrigin, instructions: string, attachments: unknown): Promise<number> {
+  async function startFollowup(origin: FollowupOrigin, instructions: string, attachments: unknown, userId: number): Promise<number> {
     const ids = attachmentIds(attachments);
     const copyFrom: AttachmentOwner[] = [{ task: origin.id }];
     await planAttachments(deps, copyFrom, ids);
+    await assertQuotaAvailable(await deps.settings.get(), deps.costs, userId, { pending: true });
     const id = await deps.tasks.insert({
       source: origin.source,
       projectId: origin.project_id,

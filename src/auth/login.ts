@@ -1,4 +1,5 @@
 import { AccountError, type AccountRepo } from "../db/accounts.js";
+import type { InvitationRepo } from "../db/invitations.js";
 import type { AuthProviderKind, OAuthProfile } from "./oauth.js";
 
 /** Qui a le droit de se connecter. */
@@ -51,11 +52,13 @@ async function activeWorkspace(accounts: AccountRepo, userId: number): Promise<n
  * @param policy Qui a le droit de se connecter.
  * @param provider Forge qui a authentifié la personne.
  * @param profile Identité renvoyée par la forge.
+ * @param invite Invitation présentée avec la connexion (jeton lu dans le lien), ou absente.
  * @returns L'utilisateur et son espace actif.
- * @throws LoginRefusedError Si la personne n'est pas autorisée.
+ * @throws LoginRefusedError Si la personne n'est pas autorisée, ou si l'invitation n'est pas valable.
  */
-export async function signIn(accounts: AccountRepo, policy: SignInPolicy, provider: AuthProviderKind, received: OAuthProfile): Promise<SignedIn> {
+export async function signIn(accounts: AccountRepo, policy: SignInPolicy, provider: AuthProviderKind, received: OAuthProfile, invite?: { repo: InvitationRepo; token: string }): Promise<SignedIn> {
   const profile = { ...received, name: received.name.slice(0, 100) }; // un nom trop long chez la forge ne doit pas bloquer la connexion
+  if (invite) return signInWithInvitation(accounts, provider, profile, invite);
   const key = `${provider}:${profile.login.toLowerCase()}`;
   const local = await accounts.localContext();
   const existing = await accounts.findUserByIdentity(provider, profile.id);
@@ -82,6 +85,42 @@ export async function signIn(accounts: AccountRepo, policy: SignInPolicy, provid
   await accounts.linkIdentity(userId, provider, profile.id, profile.login);
   const workspaceId = await accounts.createWorkspace({ name: `Espace de ${profile.name}`.slice(0, 100), kind: "personal", adminUserId: userId });
   return { userId, workspaceId };
+}
+
+/**
+ * Connexion d'une personne qui arrive avec un lien d'invitation. L'invitation décide de tout : elle doit être valable (jamais utilisée, ni révoquée, ni expirée),
+ * et si elle est réservée à un compte de forge, c'est ce compte qui doit se connecter. La personne entre dans l'espace invité avec le rôle prévu, et c'est cet
+ * espace qui devient son espace actif. Un compte de forge déjà connu garde son utilisateur ; un compte inconnu reçoit un nouvel utilisateur, sans espace
+ * personnel. Une invitation n'est consommée que si la personne n'est pas déjà membre : se reconnecter avec son lien ne coûte rien.
+ * @param accounts Dépôt des comptes.
+ * @param provider Forge qui a authentifié la personne.
+ * @param profile Identité renvoyée par la forge.
+ * @param invite Invitation et son jeton.
+ * @returns L'utilisateur et l'espace invité.
+ * @throws LoginRefusedError Si l'invitation n'est plus valable, est réservée à un autre compte, ou vient d'être prise par quelqu'un d'autre.
+ */
+async function signInWithInvitation(accounts: AccountRepo, provider: AuthProviderKind, profile: OAuthProfile, invite: { repo: InvitationRepo; token: string }): Promise<SignedIn> {
+  const found = await invite.repo.lookup(invite.token);
+  if (!found) throw new LoginRefusedError("Cette invitation n'est plus valable (utilisée, révoquée ou expirée)");
+  const key = `${provider}:${profile.login.toLowerCase()}`;
+  if (found.forgeLogin !== null && found.forgeLogin !== key) throw new LoginRefusedError(`Cette invitation est réservée au compte ${found.forgeLogin}`);
+
+  const existing = await accounts.findUserByIdentity(provider, profile.id);
+  let userId: number;
+  if (existing) {
+    userId = existing.id;
+    await accounts.updateIdentityLogin(provider, profile.id, profile.login);
+  } else {
+    userId = await createUserFor(accounts, profile);
+    await accounts.linkIdentity(userId, provider, profile.id, profile.login);
+  }
+
+  if ((await accounts.membershipRole(found.workspaceId, userId)) === null) {
+    // Prise en une seule instruction : de deux personnes qui arrivent en même temps avec le même lien, une seule entre
+    if (!(await invite.repo.consume(found.id, userId))) throw new LoginRefusedError("Cette invitation vient d'être utilisée par quelqu'un d'autre");
+    await accounts.addMember(found.workspaceId, userId, found.role);
+  }
+  return { userId, workspaceId: found.workspaceId };
 }
 
 /**

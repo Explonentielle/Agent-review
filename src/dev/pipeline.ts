@@ -5,7 +5,7 @@ import { ATTACHMENTS_DIRNAME } from "../attachments/rules.js";
 import type { AttachmentStore } from "../attachments/store.js";
 import { agentRunConfig, ProcessCancelledError } from "../claude/process.js";
 import type { Config } from "../config.js";
-import { assertBudgetAvailable } from "../budget.js";
+import { assertBudgetAvailable, assertQuotaAvailable } from "../budget.js";
 import type { ForgeRegistry } from "../connectors/registry.js";
 import type { CurrentUser, ForgeConnector } from "../connectors/types.js";
 import type { CostRepo } from "../db/costs.js";
@@ -95,6 +95,7 @@ export async function runDevTask(taskId: number, deps: DevDeps): Promise<void> {
     const project = await deps.settings.getProject(task.source, task.project_id);
     if (!project?.devEnabled) throw new Error("Projet non configuré pour l'agent dev (Paramètres > Projets)");
     await assertBudgetAvailable(settings, deps.costs);
+    await assertQuotaAvailable(settings, deps.costs, task.user_id);
 
     await tasks.update(taskId, { status: "running" });
     log.info("dev.start", { taskId, project: task.project_path, issue: task.issue_iid, mode: task.mode });

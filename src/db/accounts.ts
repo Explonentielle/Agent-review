@@ -32,6 +32,16 @@ export interface MemberRow {
   email: string | null;
   role: Role;
   created_at: string;
+  /** Budget mensuel propre à ce membre en dollars (null : valeur par défaut de l'espace ; 0 : sans limite). */
+  budget_usd: number | null;
+  /** Nombre d'agents lancés par jour propre à ce membre (null : valeur par défaut de l'espace ; 0 : sans limite). */
+  daily_runs: number | null;
+}
+
+/** Compte de forge lié à un utilisateur. */
+export interface IdentityRow {
+  provider: string;
+  login: string;
 }
 
 /** Qui agit, dans quel espace et avec quel rôle : ce que chaque requête devra porter (lot C4). */
@@ -237,11 +247,52 @@ export function createAccountRepo(db: Db) {
      */
     listMembers(workspaceId: number): Promise<MemberRow[]> {
       return db.all<MemberRow>(
-        `SELECT u.id AS user_id, u.name AS name, u.email AS email, m.role AS role, m.created_at AS created_at
+        `SELECT u.id AS user_id, u.name AS name, u.email AS email, m.role AS role, m.created_at AS created_at, m.budget_usd AS budget_usd, m.daily_runs AS daily_runs
            FROM memberships m JOIN users u ON u.id = m.user_id
           WHERE m.workspace_id = ? ORDER BY u.id`,
         [workspaceId],
       );
+    },
+
+    /**
+     * Comptes de forge liés à un utilisateur.
+     * @param userId Identifiant de l'utilisateur.
+     * @returns Ses comptes de forge (forge et identifiant de connexion).
+     */
+    listIdentities(userId: number): Promise<IdentityRow[]> {
+      return db.all<IdentityRow>("SELECT provider, login FROM identities WHERE user_id = ? ORDER BY id", [userId]);
+    },
+
+    /**
+     * Transforme un espace personnel en espace d'équipe, pour pouvoir y inviter du monde. Les données de l'espace restent en place. Sans retour : une équipe
+     * qui a des membres ne redevient pas personnelle.
+     * @param workspaceId Identifiant de l'espace.
+     * @param name Nouveau nom (facultatif : l'ancien est gardé).
+     * @returns Rien.
+     * @throws AccountError Si l'espace est introuvable, déjà une équipe, ou si le nom est invalide.
+     */
+    async convertToTeam(workspaceId: number, name?: string): Promise<void> {
+      const workspace = await requireWorkspace(workspaceId);
+      if (workspace.kind === "team") throw new AccountError("Cet espace est déjà un espace d'équipe");
+      const clean = name === undefined || name.trim() === "" ? workspace.name : cleanName(name, "Nom de l'espace");
+      const res = await db.run("UPDATE workspaces SET kind = 'team', name = ? WHERE id = ? AND kind = 'personal'", [clean, workspaceId]);
+      if (res.changes === 0) throw new AccountError("Cet espace est déjà un espace d'équipe");
+    },
+
+    /**
+     * Fixe les limites propres à un membre : son budget mensuel et son nombre d'agents par jour.
+     * @param workspaceId Identifiant de l'espace.
+     * @param userId Identifiant du membre.
+     * @param quota Budget en dollars et agents par jour : null pour reprendre la valeur par défaut de l'espace, 0 pour ne pas limiter.
+     * @returns Rien.
+     * @throws AccountError Si une valeur est négative ou trop grande, ou si la personne n'est pas membre.
+     */
+    async setMemberQuota(workspaceId: number, userId: number, quota: { budgetUsd: number | null; dailyRuns: number | null }): Promise<void> {
+      const { budgetUsd, dailyRuns } = quota;
+      if (budgetUsd !== null && (!Number.isFinite(budgetUsd) || budgetUsd < 0 || budgetUsd > 100_000)) throw new AccountError("Le budget va de 0 à 100000 dollars");
+      if (dailyRuns !== null && (!Number.isInteger(dailyRuns) || dailyRuns < 0 || dailyRuns > 1000)) throw new AccountError("Le nombre d'agents par jour va de 0 à 1000");
+      const res = await db.run("UPDATE memberships SET budget_usd = ?, daily_runs = ? WHERE workspace_id = ? AND user_id = ?", [budgetUsd, dailyRuns, workspaceId, userId]);
+      if (res.changes === 0) throw new AccountError("Cet utilisateur n'est pas membre de l'espace");
     },
 
     /**
@@ -371,17 +422,16 @@ export function createAccountRepo(db: Db) {
     },
 
     /**
-     * Contexte du mode local : le premier utilisateur (créé par la migration) et son espace personnel.
+     * Contexte du mode local : le premier utilisateur (créé par la migration) et son premier espace, celui de l'installation : personnel au départ,
+     * d'équipe une fois transformé pour inviter du monde.
      * @returns L'utilisateur, l'espace et le rôle à utiliser quand il n'y a pas de connexion.
-     * @throws AccountError Si la base ne contient aucun espace personnel.
+     * @throws AccountError Si la base ne contient aucun espace.
      */
     async localContext(): Promise<AccountContext> {
       const row = await db.get<{ user_id: number; workspace_id: number; role: Role }>(
-        `SELECT m.user_id AS user_id, m.workspace_id AS workspace_id, m.role AS role
-           FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
-          WHERE w.kind = 'personal' ORDER BY m.user_id, m.workspace_id LIMIT 1`,
+        "SELECT m.user_id AS user_id, m.workspace_id AS workspace_id, m.role AS role FROM memberships m ORDER BY m.user_id, m.workspace_id LIMIT 1",
       );
-      if (!row) throw new AccountError("Aucun espace personnel : la base n'a pas été migrée");
+      if (!row) throw new AccountError("Aucun espace : la base n'a pas été migrée");
       return { userId: row.user_id, workspaceId: row.workspace_id, role: row.role };
     },
   };

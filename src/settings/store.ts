@@ -25,6 +25,7 @@ export function mergeWithDefaults(stored: unknown): Settings {
     reviewTrigger: section("reviewTrigger"),
     agentAuth: section("agentAuth"),
     budget: section("budget"),
+    quotas: section("quotas"),
     review: section("review"),
     dev: section("dev"),
     rules: section("rules"),

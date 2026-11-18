@@ -10,6 +10,7 @@ export const TRANSFER_TABLES = [
   "workspaces",
   "memberships",
   "identities",
+  "invitations",
   "secrets",
   "settings",
   "projects",
@@ -21,13 +22,13 @@ export const TRANSFER_TABLES = [
 ] as const;
 
 /** Tables dont la clé primaire entière `id` est auto-incrémentée : leur compteur doit repartir après le plus grand identifiant copié. */
-const TABLES_WITH_ID = ["users", "workspaces", "identities", "secrets", "reviews", "actions", "dev_tasks", "dev_task_events", "audit_log"] as const;
+const TABLES_WITH_ID = ["users", "workspaces", "identities", "invitations", "secrets", "reviews", "actions", "dev_tasks", "dev_task_events", "audit_log"] as const;
 
 /** Colonnes qui n'ont de sens que sur la machine d'origine : vidées à l'import (dossier de travail local, session de l'agent). */
 const LOCAL_ONLY_COLUMNS: Record<string, string[]> = { dev_tasks: ["worktree_path", "session_id"] };
 
 /** Tables qui doivent être vides dans la base cible (hors le compte local créé par la migration). */
-const MUST_BE_EMPTY = ["reviews", "dev_tasks", "projects", "settings", "secrets", "identities", "audit_log"] as const;
+const MUST_BE_EMPTY = ["reviews", "dev_tasks", "projects", "settings", "secrets", "identities", "invitations", "audit_log"] as const;
 
 export interface TransferReport {
   /** Lignes copiées, par table. */

@@ -175,6 +175,23 @@ La forge (onglet « La forge », monde 2D, voir roadmap Annexe B) :
 - [ ] **Vraie CLI** : `npx tsx scripts/smoke-scribe.ts` (là où `claude` est installé) : options acceptées, brouillon lu, consigne piégée dans un titre non suivie.
 - [ ] Recharger la page ou changer d'onglet puis revenir : la progression (nom, or, tenues) est conservée ; vider le stockage du navigateur la remet à zéro.
 
+## 11 quater. Équipe, invitations, rôles et limites par personne
+
+Prérequis : la connexion par compte de forge est configurée (`AUTH_*`, section 5), avec deux comptes de forge réels : le tien (propriétaire) et un second (un autre compte GitHub ou GitLab, ou un collègue). Aucune migration à faire à la main : elles s'appliquent au démarrage.
+
+- [ ] **Transformer l'espace en équipe** : Paramètres > Équipe. Ton espace est « personnel » : le bouton « Transformer en espace d'équipe » apparaît, avec l'explication « on n'invite que dans un espace d'équipe ». Après confirmation, tes projets, réglages, reviews et tâches sont toujours là, et le formulaire d'invitation apparaît.
+- [ ] **Inviter** : rôle « Membre », un mot, et le compte de forge du second compte dans « Réservée à un compte ». « Créer le lien d'invitation » : le lien s'affiche **une seule fois** (copier). Fermer le bandeau : le lien n'est plus récupérable. L'invitation est dans « en attente », sans le lien.
+- [ ] **Accepter** : dans une fenêtre privée, ouvrir le lien : la page dit qui invite, l'espace et le rôle (un texte saisi par un autre, comme `<b>x</b>`, s'affiche tel quel, sans mise en forme). « Accepter avec GitHub » (ou GitLab) : la personne arrive dans l'espace de l'équipe avec le bon rôle, **sans espace personnel** (pas de sélecteur d'espace s'il n'y en a qu'un), et voit la pastille de son rôle dans l'en-tête si ce n'est pas administrateur.
+- [ ] **Lien à usage unique** : rouvrir le même lien (autre navigateur, ou après déconnexion) : « Cette invitation n'est plus valable ». Même réponse pour un lien révoqué ou expiré, et pour un lien inventé. Avec un autre compte de forge sur une invitation réservée : la connexion est refusée avec le message d'invitation, et le lien reste utilisable par le bon compte.
+- [ ] **Rôles** : le second compte en **membre** : il lance l'agent sur un ticket, relit, fusionne ; Paramètres : tout est grisé sauf « Connexion » (ses jetons), avec le bandeau qui l'explique ; pas de section Équipe, pas de journal. En **lecteur** (tu changes son rôle dans Équipe : effet immédiat, sans reconnexion) : il lit, mais « Traiter avec l'agent » répond « Ton rôle (lecteur) ne permet pas cette action ». En administrateur : tout est permis.
+- [ ] **Dernier administrateur** : essayer de te passer en membre ou de te retirer quand tu es le seul administrateur : refusé, avec le message.
+- [ ] **Ses jetons ne sont pas les tiens** : le second compte enregistre son propre jeton (Connexion) : il ne voit que ses tickets, jamais les tiens, et ses reviews et tâches apparaissent dans les listes de l'espace.
+- [ ] **Retirer un membre** : ses sessions sont fermées tout de suite (rechargement : retour à la connexion), il ne voit plus l'espace, ses jetons de cet espace sont effacés.
+- [ ] **Changer d'espace** : une personne membre de deux espaces (son personnel et l'équipe) a un sélecteur dans l'en-tête ; le changement recharge la page avec les données de l'autre espace, et son rôle y est celui de cet espace.
+- [ ] **Limites par personne** : Paramètres > Modèles, « Agents par jour et par personne » à 1, enregistrer. Le second compte lance un agent : OK ; un deuxième : refusé tout de suite avec « Tu as atteint ta limite de 1 agent par jour » (rien n'est créé). Dans Équipe, relever sa limite à 3 : ça repart. En mode clé API : budget mensuel par personne bas : l'agent est refusé une fois le budget atteint (la consommation de chaque personne est affichée dans Équipe).
+- [ ] **Limitation des tentatives** : appuyer 31 fois sur « Se connecter avec ... » depuis la même adresse en moins de 10 minutes : la 31e répond « Trop de tentatives ». Derrière un proxy : avec `TRUST_PROXY=true`, deux visiteurs différents n'ont pas la même limite ; avec `false`, un en-tête `X-Forwarded-For` envoyé à la main ne contourne pas la limite.
+- [ ] **Sans connexion par compte** (outil local) : Paramètres > Équipe montre l'équipe mais dit que les invitations demandent `AUTH_*` ; tout reste permis (utilisateur local administrateur).
+
 ## 11 ter. Arène et caractéristiques (forge)
 
 Après `git pull && docker compose up -d --build`, dans la forge (aucune migration, tout est dans le navigateur) :

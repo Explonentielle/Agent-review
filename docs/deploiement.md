@@ -255,5 +255,8 @@ Retour arrière : `systemctl --user stop review-agent` (libère le port 4321), p
 - [ ] La connexion OAuth est active (`AUTH_*` renseigné) : sans session, `curl http://127.0.0.1:4321/api/stats` répond 401.
 - [ ] Une sauvegarde existe **et** une restauration a été essayée.
 - [ ] `free -h` : au moins 1,5 Go de mémoire disponible une fois la pile démarrée.
-- [ ] `AUTH_ALLOWED_USERS` ne contient que des personnes de confiance.
+- [ ] Les personnes entrent **sur invitation** (Paramètres > Équipe : lien à usage unique, rôle voulu, de préférence réservé à un compte de forge) : `AUTH_ALLOWED_USERS` reste vide ou ne contient que des personnes de confiance. Chaque personne a le bon rôle : un **membre** lance les agents, seul un **administrateur** règle l'espace et les commandes autorisées des projets.
+- [ ] L'espace de l'installation a été **transformé en espace d'équipe** (Paramètres > Équipe) avant la première invitation : on n'invite pas dans un espace personnel. La transformation ne se défait pas.
+- [ ] Derrière un reverse proxy (Caddy, nginx) : `TRUST_PROXY=true` dans le `.env`, et `PUBLIC_URL` en https (le cookie de session reçoit alors `Secure`). Sans proxy : `TRUST_PROXY` reste à `false`. La limite de 30 tentatives de connexion par 10 minutes et par adresse en dépend.
+- [ ] Des limites par personne sont réglées avant d'inviter (Paramètres > Modèles : budget du mois en mode clé API, agents par jour dans les deux modes), surtout sur un abonnement partagé.
 - [ ] Si les agents tournent en conteneurs (section 11) : `review` n'est ni dans `sudo` ni dans le groupe `docker`, `docker info` contient `name=rootless`, et le test de plafond mémoire de l'étape 4 affiche bien `67108864`.

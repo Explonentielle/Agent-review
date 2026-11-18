@@ -42,6 +42,9 @@ export const ROUTE_LEVELS: Readonly<Record<string, Level>> = {
   "GET /api/forge/armory": "read",
   "GET /api/forge/loot": "read",
   "GET /api/rooms": "read",
+  // Changer d'espace est permis à tout rôle : c'est la session qui change, pas des données (le rôle dans l'espace visé s'applique ensuite)
+  "GET /api/workspaces": "read",
+  "POST /api/workspaces/active": "read",
 
   // Agir : membre et administrateur
   "GET /api/secrets": "act",
@@ -76,6 +79,14 @@ export const ROUTE_LEVELS: Readonly<Record<string, Level>> = {
 
   // Régler l'espace : administrateur seulement
   "GET /api/audit": "admin",
+  "GET /api/team": "admin",
+  "POST /api/team/invitations": "admin",
+  "POST /api/team/invitations/:id/revoke": "admin",
+  "POST /api/team/members/:userId/role": "admin",
+  "POST /api/team/members/:userId/remove": "admin",
+  "POST /api/team/members/:userId/quota": "admin",
+  "POST /api/team/convert": "admin",
+  "POST /api/team/rename": "admin",
   "POST /api/settings": "admin",
   "POST /api/projects": "admin",
   "POST /api/projects/:id/delete": "admin",

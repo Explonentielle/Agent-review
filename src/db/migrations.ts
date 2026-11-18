@@ -200,6 +200,36 @@ export function migrationsFor(s: Sql): string[] {
   );
   CREATE INDEX idx_audit_workspace ON audit_log(workspace_id, id);
   `,
+    // Invitations dans un espace d'équipe : le jeton n'est jamais stocké, seulement son empreinte SHA-256 ; il sert une seule fois, expire, et peut être
+    // révoqué. forge_login (facultatif, `forge:identifiant` en minuscules) réserve l'invitation à un compte de forge.
+    `
+  CREATE TABLE invitations (
+    id           ${s.pk},
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    token_hash   TEXT    NOT NULL,
+    role         TEXT    NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
+    note         TEXT    NOT NULL DEFAULT '',
+    forge_login  TEXT,
+    created_by   INTEGER NOT NULL REFERENCES users(id),
+    created_at   TEXT    NOT NULL ${s.nowDefault},
+    expires_at   TEXT    NOT NULL,
+    used_by      INTEGER REFERENCES users(id),
+    used_at      TEXT,
+    revoked_at   TEXT
+  );
+  CREATE UNIQUE INDEX uq_invitations_token ON invitations(token_hash);
+  CREATE INDEX idx_invitations_workspace ON invitations(workspace_id, id);
+  `,
+    // Quotas par personne : celui qui a lancé la review ou la tâche (pour compter sa consommation), et ses limites propres dans l'espace
+    // (vide : la valeur par défaut des réglages de l'espace ; 0 : sans limite). Les lignes déjà là n'ont pas de propriétaire connu.
+    `
+  ALTER TABLE reviews ADD COLUMN user_id INTEGER REFERENCES users(id);
+  ALTER TABLE dev_tasks ADD COLUMN user_id INTEGER REFERENCES users(id);
+  CREATE INDEX idx_reviews_user ON reviews(workspace_id, user_id);
+  CREATE INDEX idx_dev_tasks_user ON dev_tasks(workspace_id, user_id);
+  ALTER TABLE memberships ADD COLUMN budget_usd ${s.real};
+  ALTER TABLE memberships ADD COLUMN daily_runs INTEGER;
+  `,
   ];
 }
 

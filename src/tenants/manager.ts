@@ -115,6 +115,19 @@ export class TenantManager {
   }
 
   /**
+   * Arrête les pollers d'une personne et l'oublie : à son prochain passage (si elle est encore membre), son exécution est reconstruite. Sert quand
+   * elle quitte un espace ou en est retirée : ses détecteurs ne doivent plus tourner pour un espace qui n'est plus le sien.
+   * @param ctx Personne et espace.
+   * @returns Rien (sans effet si elle n'était pas démarrée).
+   */
+  async drop(ctx: TenantContext): Promise<void> {
+    const key = `${ctx.workspaceId}:${ctx.userId}`;
+    const old = await this.tenants.get(key)?.catch(() => undefined);
+    this.tenants.delete(key);
+    old?.stop();
+  }
+
+  /**
    * Démarre au lancement de l'outil le propriétaire et, si l'accès à plusieurs personnes est ouvert, toutes celles qui ont des jetons enregistrés
    * (leurs pollers doivent tourner même quand elles ne sont pas connectées).
    * @param owner Espace et utilisateur du propriétaire.
@@ -171,8 +184,9 @@ export class TenantManager {
       { allowEmpty: true },
     );
 
-    const reviews = createReviewRepo(db, ctx.workspaceId);
-    const tasks = createDevTaskRepo(db, ctx.workspaceId);
+    // Chaque review et chaque tâche créées pour cette personne portent son identifiant : c'est ce qui permet de compter sa consommation (quotas)
+    const reviews = createReviewRepo(db, ctx.workspaceId, ctx.userId);
+    const tasks = createDevTaskRepo(db, ctx.workspaceId, ctx.userId);
     const settings = createSettingsStore(db, ctx.workspaceId);
     const costs = createCostRepo(db, ctx.workspaceId);
     const attachments = createAttachmentStore(path.join(config.dataDir, "attachments"), ctx.workspaceId);

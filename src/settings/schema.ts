@@ -35,6 +35,16 @@ export const SettingsSchema = z.object({
   agentAuth: z.enum(["subscription", "api"]),
   /** Budget du mois en dollars, appliqué seulement en mode clé API (0 = aucune limite). */
   budget: z.object({ monthlyUsd: z.number().min(0).max(100_000) }),
+  /**
+   * Limites par personne de l'espace, valeurs par défaut de chaque membre (un administrateur peut en fixer d'autres pour un membre : Paramètres > Équipe).
+   * 0 = sans limite. Le budget ne joue qu'en mode clé API ; le nombre d'agents par jour joue dans les deux modes.
+   */
+  quotas: z
+    .object({
+      perUserMonthlyUsd: z.number().min(0).max(100_000),
+      perUserDailyRuns: z.number().int().min(0).max(1000),
+    })
+    .default({ perUserMonthlyUsd: 0, perUserDailyRuns: 0 }), // un navigateur ouvert avant la mise à jour n'envoie pas encore cette section
   review: AgentSettingsSchema,
   dev: AgentSettingsSchema,
   rules: z.object({
@@ -82,6 +92,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reviewTrigger: "all",
   agentAuth: "subscription",
   budget: { monthlyUsd: 0 },
+  quotas: { perUserMonthlyUsd: 0, perUserDailyRuns: 0 },
   review: { model: "claude-sonnet-5-5", effort: "high", maxTurns: 40, timeoutMin: 20 },
   dev: { model: "claude-sonnet-5-5", effort: "high", maxTurns: 120, timeoutMin: 45 },
   rules: {

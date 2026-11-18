@@ -1,6 +1,7 @@
 import type { AuthConfig } from "../config.js";
 import type { AccountRepo } from "../db/accounts.js";
 import type { Db } from "../db/db.js";
+import { createInvitationRepo } from "../db/invitations.js";
 import { createGithubProvider, createGitlabProvider, type AuthProviderKind, type OAuthProvider } from "./oauth.js";
 import type { AuthRuntime } from "./routes.js";
 import { createSessionStore } from "./sessions.js";
@@ -21,8 +22,10 @@ export function createAuthRuntime(config: AuthConfig, db: Db, accounts: AccountR
     providers,
     sessions: createSessionStore(db, config.sessionDays),
     accounts,
-    // L'accès à d'autres personnes s'ouvre en renseignant AUTH_ALLOWED_USERS : chacune a ses propres connexions aux forges (tenants/manager.ts)
-    policy: { owner: config.owner, allowedUsers: config.allowedUsers, multiUser: config.allowedUsers.length > 0 },
+    invitations: createInvitationRepo(db),
+    // Chaque personne a ses propres connexions aux forges (tenants/manager.ts) : l'accès à d'autres personnes est ouvert, mais seulement sur invitation
+    // d'un administrateur, ou pour les comptes listés dans AUTH_ALLOWED_USERS (ancien mode, gardé pour la compatibilité)
+    policy: { owner: config.owner, allowedUsers: config.allowedUsers, multiUser: true },
     publicUrl: config.publicUrl,
     sessionDays: config.sessionDays,
   };

@@ -37,9 +37,10 @@ describe("droits par rôle : la table", () => {
     expect(refusalMessage("member", "admin")).toContain("un administrateur de l'espace");
   });
 
-  it("toute écriture (POST) demande au moins « agir » : aucune n'est ouverte au lecteur, et rien n'est classé « lire » par erreur", () => {
+  it("toute écriture (POST) demande au moins « agir » : aucune n'est ouverte au lecteur, sauf le changement d'espace (qui ne change que la session)", () => {
+    const sessionOnly = ["POST /api/workspaces/active"];
     for (const [route, level] of Object.entries(ROUTE_LEVELS)) {
-      if (route.startsWith("POST ")) expect(level, route).not.toBe("read");
+      if (route.startsWith("POST ") && !sessionOnly.includes(route)) expect(level, route).not.toBe("read");
     }
   });
 });
@@ -72,7 +73,13 @@ describe("droits par rôle : le serveur", () => {
   it("aucune route du serveur n'échappe à la table, et la table ne garde aucune route qui n'existe plus", async () => {
     const app = await localServer("admin", true);
     await app.ready();
-    const api = [...new Set(app.registeredRoutes.map((r) => r.replace(/^HEAD /, "GET ")))].filter((r) => r.split(" ")[1]!.startsWith("/api/") && !r.startsWith("OPTIONS "));
+    // Avec la connexion par compte, d'autres routes existent (espaces) : on réunit les deux serveurs
+    const auth = createAuthRuntime(AUTH, h.db, h.accounts);
+    const withLogin = buildServer({ config: h.config, forges: h.forges, costs: h.costs, reviews: h.reviews, settings: h.settings, tasks: h.tasks, vault: h.vault, audit: h.audit, accounts: h.accounts, local: h.local, auth, enqueueReview: () => undefined, enqueueDev: () => undefined, queueSize: () => 0 });
+    apps.push(withLogin);
+    await withLogin.ready();
+    const all = [...app.registeredRoutes, ...withLogin.registeredRoutes];
+    const api = [...new Set(all.map((r) => r.replace(/^HEAD /, "GET ")))].filter((r) => r.split(" ")[1]!.startsWith("/api/") && !r.startsWith("OPTIONS "));
     expect(api.length).toBeGreaterThan(55); // le serveur complet, terminal compris : la liste ne doit jamais se vider sans qu'on le voie
     const unclassified = api.filter((r) => ROUTE_LEVELS[r] === undefined);
     expect(unclassified, `routes à classer dans src/auth/permissions.ts : ${unclassified.join(", ")}`).toEqual([]);

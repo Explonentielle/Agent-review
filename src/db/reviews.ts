@@ -17,6 +17,8 @@ export interface ReviewRow {
   id: number;
   /** Espace auquel appartient la review. */
   workspace_id: number;
+  /** Personne pour qui la review a été faite (celle dont le détecteur l'a trouvée, ou qui l'a lancée) ; null pour une review d'avant les quotas. */
+  user_id: number | null;
   /** Forge d'où vient la demande de fusion. */
   source: ForgeKind;
   project_id: number;
@@ -69,9 +71,10 @@ export type ReviewRepo = ReturnType<typeof createReviewRepo>;
  * (lecture, modification, journal d'actions). Aucune méthode ne permet de sortir de l'espace.
  * @param db Base de données.
  * @param workspaceId Espace auquel le dépôt est lié.
+ * @param userId Personne servie par ce dépôt : elle est inscrite comme propriétaire des reviews créées par lui (pour compter sa consommation).
  * @returns Les opérations sur les reviews de cet espace.
  */
-export function createReviewRepo(db: Db, workspaceId: number) {
+export function createReviewRepo(db: Db, workspaceId: number, userId: number | null = null) {
   const touch = `updated_at = ${db.sql.now}`;
 
   return {
@@ -82,11 +85,11 @@ export function createReviewRepo(db: Db, workspaceId: number) {
      */
     async insertIfNew(r: NewReview): Promise<number | null> {
       const row = await db.get<{ id: number }>(
-        `INSERT INTO reviews (workspace_id, source, project_id, project_path, mr_iid, mr_title, mr_url, author, head_sha, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO reviews (workspace_id, user_id, source, project_id, project_path, mr_iid, mr_title, mr_url, author, head_sha, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (workspace_id, source, project_id, mr_iid, head_sha) DO NOTHING
          RETURNING id`,
-        [workspaceId, r.source ?? DEFAULT_FORGE, r.projectId, r.projectPath, r.mrIid, r.mrTitle, r.mrUrl, r.author, r.headSha, r.status ?? "queued"],
+        [workspaceId, userId, r.source ?? DEFAULT_FORGE, r.projectId, r.projectPath, r.mrIid, r.mrTitle, r.mrUrl, r.author, r.headSha, r.status ?? "queued"],
       );
       return row ? row.id : null;
     },

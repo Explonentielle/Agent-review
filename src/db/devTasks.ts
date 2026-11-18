@@ -15,6 +15,8 @@ export interface DevTaskRow {
   id: number;
   /** Espace auquel appartient la tâche. */
   workspace_id: number;
+  /** Personne qui a lancé la tâche ; null pour une tâche d'avant les quotas. */
+  user_id: number | null;
   /** Forge d'où vient le ticket. */
   source: ForgeKind;
   project_id: number;
@@ -86,9 +88,10 @@ const ACTIVE = "('queued', 'running')";
  * (lecture, modification, journal d'événements). Aucune méthode ne permet de sortir de l'espace.
  * @param db Base de données.
  * @param workspaceId Espace auquel le dépôt est lié.
+ * @param userId Personne servie par ce dépôt : elle est inscrite comme propriétaire des tâches créées par lui (pour compter sa consommation).
  * @returns Les opérations sur les tâches de cet espace.
  */
-export function createDevTaskRepo(db: Db, workspaceId: number) {
+export function createDevTaskRepo(db: Db, workspaceId: number, userId: number | null = null) {
   return {
     /**
      * Crée une tâche de dev dans l'espace.
@@ -112,12 +115,12 @@ export function createDevTaskRepo(db: Db, workspaceId: number) {
         throw new Error(`Tâche d'origine ${f.parentId} introuvable dans cet espace`);
       }
       const row = await db.get<{ id: number }>(
-        `INSERT INTO dev_tasks (workspace_id, source, project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
+        `INSERT INTO dev_tasks (workspace_id, user_id, source, project_id, project_path, issue_iid, issue_title, issue_url, extra_instructions,
                                 mode, parent_id, branch, base_branch, target_branch, mr_iid, mr_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING id`,
         [
-          workspaceId, t.source ?? DEFAULT_FORGE, t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions,
+          workspaceId, userId, t.source ?? DEFAULT_FORGE, t.projectId, t.projectPath, t.issueIid, t.issueTitle, t.issueUrl, t.extraInstructions,
           f ? "followup" : "new", f?.parentId ?? null, f?.branch ?? null, f?.baseBranch ?? null,
           f?.targetBranch ?? null, f?.mrIid ?? null, f?.mrUrl ?? null,
         ],

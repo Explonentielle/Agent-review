@@ -95,6 +95,11 @@ async function main(): Promise<void> {
     terminal,
     // Avec ou sans connexion : chaque requête est servie avec les connexions actuelles de la personne, même après une reconstruction
     tenants: async (who) => (await manager.get(who)).deps,
+    // Quelqu'un quitte l'espace : ses détecteurs s'arrêtent et ses jetons de cet espace sont effacés (il ne doit rien garder d'un espace qui n'est plus le sien)
+    onMemberRemoved: async (who) => {
+      await manager.drop(who);
+      for (const secret of await store.list(who)) await store.delete(who, secret.name);
+    },
   });
   await server.listen({ host: config.server.host, port: config.server.port });
 

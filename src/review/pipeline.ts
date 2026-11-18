@@ -1,7 +1,7 @@
 import { createRunner, type AgentRunner } from "../agent/index.js";
 import { agentRunConfig } from "../claude/process.js";
 import type { Config } from "../config.js";
-import { assertBudgetAvailable } from "../budget.js";
+import { assertBudgetAvailable, assertQuotaAvailable } from "../budget.js";
 import type { CostRepo } from "../db/costs.js";
 import type { DevTaskRepo } from "../db/devTasks.js";
 import type { ReviewRepo, ReviewRow } from "../db/reviews.js";
@@ -48,6 +48,7 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
   let cleanup: (() => Promise<void>) | undefined;
   try {
     await assertBudgetAvailable(settings, deps.costs);
+    await assertQuotaAvailable(settings, deps.costs, row.user_id);
     const { connector, workspace } = deps.forges.get(row.source);
     const [project, mr] = await Promise.all([connector.getProject(row.project_id), connector.getChangeRequest(row.project_id, row.mr_iid)]);
     // La MR de l'agent dev est la tienne : la relire est un contrôle avant fusion, jamais un commentaire ni une approbation automatiques

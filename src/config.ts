@@ -74,6 +74,11 @@ const EnvSchema = z
     AUTH_ALLOWED_USERS: z.preprocess(blankIsMissing, z.string().optional()),
     /** Durée d'une session de connexion, en jours. */
     SESSION_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+    /**
+     * `true` quand l'outil est derrière un reverse proxy qui pose X-Forwarded-For (Caddy, nginx) : l'adresse du visiteur est alors celle de cet en-tête, ce qui
+     * sert à limiter les tentatives de connexion par visiteur. Sans proxy, laisse `false` : l'en-tête serait sinon falsifiable.
+     */
+    TRUST_PROXY: z.preprocess(blankIsMissing, z.enum(["true", "false"]).default("false")),
   })
   .superRefine((e, ctx) => {
     const identity = /^(gitlab|github):[A-Za-z0-9._-]+$/i;
@@ -149,7 +154,7 @@ export interface Config {
   claudeBin: string;
   /** Clé API Anthropic, ou null. Utilisée uniquement quand les réglages demandent le mode clé API. */
   anthropicApiKey: string | null;
-  server: { host: string; port: number };
+  server: { host: string; port: number; /** Derrière un reverse proxy de confiance (X-Forwarded-For lu pour l'adresse du visiteur). */ trustProxy?: boolean };
   dataDir: string;
   databaseUrl: string | null;
   planio: { url: string; apiKey: string } | null;
@@ -197,7 +202,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agentRuntime: { mode: e.AGENT_RUNTIME, image: e.AGENT_IMAGE, extraImages: e.AGENT_IMAGES ?? [], memory: e.AGENT_MEMORY, cpus: e.AGENT_CPUS, pids: e.AGENT_PIDS, network: e.AGENT_NETWORK ?? null, dockerBin: e.DOCKER_BIN, containerUser: e.AGENT_CONTAINER_USER },
     claudeBin: e.CLAUDE_BIN ?? defaultClaudeBin(),
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
-    server: { host: e.HOST, port: e.PORT },
+    server: { host: e.HOST, port: e.PORT, trustProxy: e.TRUST_PROXY === "true" },
     dataDir: path.resolve(e.DATA_DIR),
     databaseUrl: e.DATABASE_URL ?? null,
     planio: e.PLANIO_URL && e.PLANIO_API_KEY ? { url: e.PLANIO_URL.replace(/\/+$/, ""), apiKey: e.PLANIO_API_KEY } : null,
