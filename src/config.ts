@@ -11,6 +11,8 @@ import { IMAGE_NAME_RE } from "./agent/imageName.js";
  */
 /** Une variable laissée vide dans le .env (`GITHUB_TOKEN=`) vaut « non renseignée ». */
 const blankIsMissing = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+/** Une adresse email (AUTH_OWNER peut en être une : la connexion par email ne passe pas par une forge). */
+const EMAIL_OWNER = /^[^\s@:]+@[^\s@]+\.[^\s@]+$/;
 
 const EnvSchema = z
   .object({
@@ -68,8 +70,17 @@ const EnvSchema = z
     /** Connexion par compte GitHub (application OAuth de github.com) : les deux ensemble, ou aucun. */
     AUTH_GITHUB_CLIENT_ID: z.preprocess(blankIsMissing, z.string().trim().optional()),
     AUTH_GITHUB_CLIENT_SECRET: z.preprocess(blankIsMissing, z.string().trim().optional()),
-    /** Propriétaire de l'installation, au format `forge:identifiant` (ex. gitlab:alex) : il reprend le compte local et ses données. Obligatoire dès qu'une connexion est configurée. */
+    /**
+     * Propriétaire de l'installation : `forge:identifiant` (ex. gitlab:alex) ou son adresse email (connexion par email). Il reprend le compte local et ses données.
+     * Obligatoire dès qu'une connexion est configurée.
+     */
     AUTH_OWNER: z.preprocess(blankIsMissing, z.string().trim().optional()),
+    /** Envoi d'emails par Resend (inscription, mot de passe oublié, invitations) : clé d'API et expéditeur vont ensemble. Les configurer active la connexion par email et mot de passe. */
+    RESEND_API_KEY: z.preprocess(blankIsMissing, z.string().trim().optional()),
+    /** Expéditeur des emails, `Nom <adresse@domaine>` ou `adresse@domaine` : le domaine doit être vérifié chez Resend. */
+    MAIL_FROM: z.preprocess(blankIsMissing, z.string().trim().max(200).optional()),
+    /** Qui peut créer un compte : `invite` (sur invitation d'un administrateur, par défaut) ou `open` (n'importe qui, par email ou par une forge). */
+    AUTH_SIGNUP: z.preprocess(blankIsMissing, z.enum(["open", "invite"]).default("invite")),
     /** Autres personnes autorisées à se connecter, `forge:identifiant` séparés par des virgules. */
     AUTH_ALLOWED_USERS: z.preprocess(blankIsMissing, z.string().optional()),
     /** Durée d'une session de connexion, en jours. */
@@ -93,12 +104,21 @@ const EnvSchema = z
     const gitlabLogin = pair("GITLAB");
     const githubLogin = pair("GITHUB");
     if (gitlabLogin && !e.GITLAB_URL) ctx.addIssue({ code: "custom", path: ["GITLAB_URL"], message: "la connexion par GitLab demande GITLAB_URL" });
-    if (gitlabLogin || githubLogin) {
+    if (Boolean(e.RESEND_API_KEY) !== Boolean(e.MAIL_FROM)) {
+      ctx.addIssue({ code: "custom", path: [e.RESEND_API_KEY ? "MAIL_FROM" : "RESEND_API_KEY"], message: "RESEND_API_KEY et MAIL_FROM vont ensemble" });
+    }
+    const mailLogin = Boolean(e.RESEND_API_KEY && e.MAIL_FROM);
+    // Les liens des emails pointent vers PUBLIC_URL : sans elle, ils viseraient localhost et ne serviraient à personne
+    if (mailLogin && !e.PUBLIC_URL) ctx.addIssue({ code: "custom", path: ["PUBLIC_URL"], message: "l'envoi d'emails demande PUBLIC_URL (adresse que voit le navigateur, utilisée dans les liens)" });
+    if (gitlabLogin || githubLogin || mailLogin) {
+      const ownerByEmail = EMAIL_OWNER.test(e.AUTH_OWNER ?? "");
       if (!e.AUTH_OWNER) {
-        ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER est obligatoire quand une connexion est configurée (ex. gitlab:alex)" });
-      } else if (!identity.test(e.AUTH_OWNER)) {
-        ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER doit avoir la forme forge:identifiant (ex. gitlab:alex)" });
-      } else if (!(e.AUTH_OWNER.toLowerCase().startsWith("gitlab:") ? gitlabLogin : githubLogin)) {
+        ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER est obligatoire quand une connexion est configurée (ex. gitlab:alex, ou ton adresse email)" });
+      } else if (!identity.test(e.AUTH_OWNER) && !ownerByEmail) {
+        ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER doit avoir la forme forge:identifiant (ex. gitlab:alex) ou être une adresse email" });
+      } else if (ownerByEmail && !mailLogin) {
+        ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER est une adresse email : la connexion par email demande RESEND_API_KEY et MAIL_FROM" });
+      } else if (!ownerByEmail && !(e.AUTH_OWNER.toLowerCase().startsWith("gitlab:") ? gitlabLogin : githubLogin)) {
         ctx.addIssue({ code: "custom", path: ["AUTH_OWNER"], message: "AUTH_OWNER vise une forge dont la connexion n'est pas configurée" });
       }
       for (const entry of (e.AUTH_ALLOWED_USERS ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
@@ -124,12 +144,16 @@ export interface AuthConfig {
   gitlab: { baseUrl: string; clientId: string; clientSecret: string } | null;
   /** Null si la connexion par GitHub n'est pas configurée. */
   github: { clientId: string; clientSecret: string } | null;
-  /** Propriétaire de l'installation, `forge:identifiant` en minuscules. */
+  /** Propriétaire de l'installation, `forge:identifiant` ou adresse email, en minuscules. */
   owner: string;
   /** Autres personnes autorisées, `forge:identifiant` en minuscules. */
   allowedUsers: string[];
   /** Durée d'une session, en jours. */
   sessionDays: number;
+  /** Envoi d'emails par Resend : présent, la connexion par email et mot de passe est active ; null ou absent, seules les forges connectent. */
+  mail?: { apiKey: string; from: string } | null;
+  /** Qui peut créer un compte : sur invitation d'un administrateur (par défaut), ou n'importe qui. */
+  signup?: "open" | "invite";
 }
 
 export interface Config {
@@ -177,9 +201,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const gitlabLogin = e.AUTH_GITLAB_CLIENT_ID && e.AUTH_GITLAB_CLIENT_SECRET && e.GITLAB_URL ? { baseUrl: e.GITLAB_URL, clientId: e.AUTH_GITLAB_CLIENT_ID, clientSecret: e.AUTH_GITLAB_CLIENT_SECRET } : null;
   const githubLogin = e.AUTH_GITHUB_CLIENT_ID && e.AUTH_GITHUB_CLIENT_SECRET ? { clientId: e.AUTH_GITHUB_CLIENT_ID, clientSecret: e.AUTH_GITHUB_CLIENT_SECRET } : null;
 
+  const mail = e.RESEND_API_KEY && e.MAIL_FROM ? { apiKey: e.RESEND_API_KEY, from: e.MAIL_FROM } : null;
+
   return {
     auth:
-      (gitlabLogin || githubLogin) && e.AUTH_OWNER
+      (gitlabLogin || githubLogin || mail) && e.AUTH_OWNER
         ? {
             publicUrl: e.PUBLIC_URL ?? `http://localhost:${e.PORT}`,
             gitlab: gitlabLogin,
@@ -187,6 +213,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
             owner: e.AUTH_OWNER.toLowerCase(),
             allowedUsers: (e.AUTH_ALLOWED_USERS ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean),
             sessionDays: e.SESSION_DAYS,
+            mail,
+            signup: e.AUTH_SIGNUP,
           }
         : null,
     gitlabUrl: e.GITLAB_URL ?? null,

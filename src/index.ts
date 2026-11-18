@@ -28,6 +28,7 @@ function registerEnvSecrets(config: Config): void {
     ...config.secrets.previousKeys,
     config.auth?.gitlab?.clientSecret,
     config.auth?.github?.clientSecret,
+    config.auth?.mail?.apiKey,
   ];
   if (config.databaseUrl) secrets.push(decodeURIComponent(new URL(config.databaseUrl).password));
   for (const secret of secrets) registerSecret(secret);
@@ -63,10 +64,13 @@ async function main(): Promise<void> {
   // Connexion par compte de forge : seulement si une application OAuth est configurée dans le .env, sinon l'outil sert l'utilisateur local
   const auth = config.auth ? createAuthRuntime(config.auth, db, accounts) : undefined;
   if (auth) {
-    const purge = () => void auth.sessions.purgeExpired().catch((err: unknown) => log.warn("auth.purge_failed", { error: errorMessage(err) }));
+    const purge = () => {
+      void auth.sessions.purgeExpired().catch((err: unknown) => log.warn("auth.purge_failed", { error: errorMessage(err) }));
+      void auth.password?.tokens.purge().catch((err: unknown) => log.warn("auth.purge_failed", { error: errorMessage(err) }));
+    };
     purge();
     setInterval(purge, 3_600_000).unref();
-    log.info("auth.enabled", { providers: [...auth.providers.keys()], owner: auth.policy.owner, multiUser: auth.policy.multiUser });
+    log.info("auth.enabled", { providers: [...auth.providers.keys()], password: Boolean(auth.password), signup: auth.policy.signup, owner: auth.policy.owner, multiUser: auth.policy.multiUser });
   }
 
   // Chaque personne a ses connexions aux forges, ses files et ses pollers ; la machine est partagée, avec une limite commune d'agents simultanés

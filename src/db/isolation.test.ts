@@ -44,7 +44,7 @@ describe.each(backends)("étanchéité entre espaces : $name", ({ open }) => {
     await db.close();
   });
   beforeEach(async () => {
-    for (const table of ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "invitations", "memberships", "workspaces", "users"]) await db.run(`DELETE FROM ${table}`);
+    for (const table of ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "invitations", "email_tokens", "credentials", "memberships", "workspaces", "users"]) await db.run(`DELETE FROM ${table}`);
     const accounts = createAccountRepo(db);
     const alice = await accounts.createUser({ name: "Alice" });
     const bob = await accounts.createUser({ name: "Bob" });

@@ -192,6 +192,26 @@ Prérequis : la connexion par compte de forge est configurée (`AUTH_*`, section
 - [ ] **Limitation des tentatives** : appuyer 31 fois sur « Se connecter avec ... » depuis la même adresse en moins de 10 minutes : la 31e répond « Trop de tentatives ». Derrière un proxy : avec `TRUST_PROXY=true`, deux visiteurs différents n'ont pas la même limite ; avec `false`, un en-tête `X-Forwarded-For` envoyé à la main ne contourne pas la limite.
 - [ ] **Sans connexion par compte** (outil local) : Paramètres > Équipe montre l'équipe mais dit que les invitations demandent `AUTH_*` ; tout reste permis (utilisateur local administrateur).
 
+## 11 quinquies. Compte par email, organisations et invitations par email
+
+Prérequis : un compte Resend avec un **domaine vérifié** (enregistrements DNS), `RESEND_API_KEY` et `MAIL_FROM` dans le `.env` du VPS, `PUBLIC_URL` en https, et `AUTH_OWNER` (ton adresse email, ou une forge). Redémarrer l'outil : les migrations s'appliquent seules. Prévoir deux boîtes email que tu lis : la tienne et une seconde.
+
+- [ ] **Les emails partent** : sur `/signup` (avec `AUTH_SIGNUP=open` pour ce test), donner la seconde adresse : un email arrive en quelques secondes, expéditeur `MAIL_FROM`, pas classé en courrier indésirable (sinon vérifier SPF et DKIM chez Resend). Le lien pointe vers `PUBLIC_URL`.
+- [ ] **Inscription** : le lien ouvre « Choisis ton mot de passe » avec l'adresse en lecture seule. Un mot de passe trop court est refusé **sans brûler le lien** ; un bon mot de passe crée le compte, ouvre la session et donne un espace personnel dont tu es l'administrateur. Rouvrir le lien : « Ce lien n'est plus valable ».
+- [ ] **Même réponse** : redemander l'inscription avec cette adresse (déjà inscrite) : la page répond comme pour une adresse neuve, mais l'email reçu dit « Tu as déjà un compte ». Une adresse jamais vue sur « Mot de passe oublié » : même réponse, aucun email.
+- [ ] **Connexion** : bon mot de passe, session ouverte. Mauvais mot de passe et adresse inconnue : le même message. Après 10 essais ratés sur une adresse : « Trop d'essais », même avec le bon mot de passe, pendant 15 minutes.
+- [ ] **Mot de passe oublié** : l'email arrive, le lien permet d'en choisir un nouveau, l'ancien ne marche plus, et une session ouverte dans un autre navigateur est fermée.
+- [ ] **Propriétaire** : avec `AUTH_OWNER` = ton adresse et un `.env` sans forge, t'inscrire avec cette adresse : tu retrouves tes projets, réglages, reviews et tâches (le compte local est repris).
+- [ ] **Créer une organisation** : le sélecteur d'espace de l'en-tête propose « + Nouvelle organisation » ; après création, tu es administrateur et l'espace actif est la nouvelle organisation, vide.
+- [ ] **Inviter par email** : Paramètres > Équipe, l'adresse de la seconde boîte, rôle « Membre », « Envoyer l'invitation par email ». Le message « Invitation envoyée à ... » s'affiche, **aucun lien n'est montré**, l'invitation est « en attente » avec l'adresse. L'email reçu nomme l'organisation, la personne qui invite et le rôle.
+- [ ] **Accepter sans compte** : le lien de l'email ouvre une page avec l'adresse imposée ; nom et mot de passe : la personne arrive dans l'organisation avec le bon rôle, et le sélecteur d'espace de l'en-tête lui montre aussi son espace personnel.
+- [ ] **Accepter avec un compte** : inviter une adresse qui a déjà un compte : la page demande le mot de passe (« Me connecter et accepter ») ; déjà connecté avec ce compte, un bouton « Accepter » suffit ; connecté avec un autre compte, la page le dit et refuse.
+- [ ] **Lien à usage unique** : rouvrir le lien après acceptation, après révocation, ou un lien inventé : même page « plus valable ».
+- [ ] **Resend en panne** : mettre une fausse clé `RESEND_API_KEY`, inviter : message d'échec, et aucune invitation en attente. Remettre la bonne clé.
+- [ ] **Sans Resend** (variables retirées) : plus de formulaire de mot de passe sur `/login`, `/signup` renvoie vers la connexion, et les invitations par lien marchent comme avant.
+- [ ] **Nombre d'organisations** : en créer 11 : la onzième est refusée avec « c'est la limite ».
+
+
 ## 11 ter. Arène et caractéristiques (forge)
 
 Après `git pull && docker compose up -d --build`, dans la forge (aucune migration, tout est dans le navigateur) :

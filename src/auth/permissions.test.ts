@@ -38,7 +38,7 @@ describe("droits par rôle : la table", () => {
   });
 
   it("toute écriture (POST) demande au moins « agir » : aucune n'est ouverte au lecteur, sauf le changement d'espace (qui ne change que la session)", () => {
-    const sessionOnly = ["POST /api/workspaces/active"];
+    const sessionOnly = ["POST /api/workspaces/active", "POST /api/workspaces"];
     for (const [route, level] of Object.entries(ROUTE_LEVELS)) {
       if (route.startsWith("POST ") && !sessionOnly.includes(route)) expect(level, route).not.toBe("read");
     }

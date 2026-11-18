@@ -45,23 +45,24 @@
 
   /** @returns Le formulaire de création d'une invitation, et le lien juste créé (affiché une seule fois). */
   function inviteBox(team) {
-    if (!team.loginEnabled) return `<div class="callout warn">${ICON.warn}<h3>Invitations indisponibles</h3><p>La connexion par compte de forge n'est pas configurée sur cette installation (variables <code>AUTH_*</code> du .env) : personne ne pourrait accepter une invitation.</p></div>`;
+    if (!team.loginEnabled) return `<div class="callout warn">${ICON.warn}<h3>Invitations indisponibles</h3><p>Aucune connexion n'est configurée sur cette installation (variables <code>AUTH_*</code> ou <code>RESEND_*</code> du .env) : personne ne pourrait accepter une invitation.</p></div>`;
     if (!team.canInvite) return `<div class="callout info">${ICON.info}<h3>Espace personnel</h3><p>On n'invite que dans un espace d'équipe : transforme-le d'abord, avec le bouton ci-dessus. Tes données restent en place.</p></div>`;
     const link = state.teamLink
       ? `<div class="callout ok">${ICON.ok}<h3>Lien d'invitation créé</h3><p>Il n'est affiché <b>qu'une seule fois</b> : copie-le et envoie-le à la personne par le moyen de ton choix. Il ne sert qu'une fois et expire.</p>
           <div class="team-link"><input readonly value="${esc(state.teamLink)}" data-team-link><button type="button" class="btn sm primary" data-copy="${esc(state.teamLink)}">Copier</button><button type="button" class="btn sm ghost" data-act="team-link-close">Fermer</button></div></div>` : "";
     return `${link}<div class="team-invite" id="team-invite-form">
       <label class="field"><span>Rôle</span>${roleSelect("member", "data-team-new-role")}<small>${esc(Object.entries(ROLE_HELP).map(([id, help]) => `${ROLE_NAMES[id]} : ${help}`).join(" · "))}</small></label>
+      ${team.canEmail ? `<label class="field"><span>Email de la personne</span><input type="email" maxlength="254" data-team-email placeholder="dan@exemple.com"><small>Le lien part à cette adresse seulement : tu ne le vois jamais. La personne crée son compte, ou se connecte, avec cette adresse.</small></label>` : ""}
       <label class="field"><span>Mot d'accompagnement (facultatif)</span><input maxlength="200" data-team-note placeholder="Ex. pour Dan, de l'équipe back"></label>
-      <label class="field"><span>Réservée à un compte (facultatif)</span><input maxlength="100" data-team-forge placeholder="github:dan ou gitlab:dan"><small>Si renseigné, seul ce compte peut accepter.</small></label>
+      <label class="field"><span>Lien seulement : réservé à un compte (facultatif)</span><input maxlength="100" data-team-forge placeholder="github:dan ou gitlab:dan"><small>Si renseigné, seul ce compte de forge peut accepter le lien.</small></label>
       <label class="field"><span>Valable (jours)</span><input type="number" min="1" max="30" value="7" data-team-days></label>
-      <div class="team-actions"><button type="button" class="btn primary" data-act="team-invite">Créer le lien d'invitation</button></div></div>`;
+      <div class="team-actions">${team.canEmail ? `<button type="button" class="btn primary" data-act="team-invite-mail">Envoyer l'invitation par email</button>` : ""}<button type="button" class="btn ${team.canEmail ? "" : "primary"}" data-act="team-invite">Créer un lien à transmettre</button></div></div>`;
   }
 
   /** @returns Les invitations en attente, avec de quoi les révoquer. */
   function pendingInvitations(team) {
     if (!team.invitations.length) return `<p class="note">Aucune invitation en attente.</p>`;
-    return team.invitations.map((i) => `<div class="team-pending"><div><b>${esc(ROLE_NAMES[i.role])}</b>${i.forgeLogin ? ` ${pill("gray", esc(i.forgeLogin))}` : ""} ${i.note ? esc(i.note) : ""}
+    return team.invitations.map((i) => `<div class="team-pending"><div><b>${esc(ROLE_NAMES[i.role])}</b>${i.email ? ` ${pill("accent", esc(i.email))}` : ""}${i.forgeLogin ? ` ${pill("gray", esc(i.forgeLogin))}` : ""} ${i.note ? esc(i.note) : ""}
         <div class="note">créée par ${esc(i.createdBy)} · expire le ${esc(String(i.expiresAt).slice(0, 10))}</div></div>
       <button type="button" class="btn sm ghost" data-act="team-revoke" data-id="${i.id}">Révoquer</button></div>`).join("");
   }
@@ -149,15 +150,19 @@
       if (res && Number(el.dataset.user) === state.me?.user?.id) location.reload(); // on s'est retiré soi-même : l'espace n'est plus le nôtre
       return;
     }
-    if (act_ === "team-invite") {
+    if (act_ === "team-invite" || act_ === "team-invite-mail") {
       const form = document.getElementById("team-invite-form");
+      const byMail = act_ === "team-invite-mail";
+      const email = form.querySelector("[data-team-email]")?.value.trim() ?? "";
+      if (byMail && email === "") return toast("Indique l'adresse email de la personne.", true);
       const res = await act("/api/team/invitations", {
         role: form.querySelector("[data-team-new-role]").value,
         note: form.querySelector("[data-team-note]").value,
-        forgeLogin: form.querySelector("[data-team-forge]").value.trim(),
+        forgeLogin: byMail ? "" : form.querySelector("[data-team-forge]").value.trim(),
+        ...(byMail ? { email } : {}),
         days: Number(form.querySelector("[data-team-days]").value) || 7,
-      });
-      if (res) { state.teamLink = res.link; if (box) box.innerHTML = inner(state.team); document.querySelector("[data-team-link]")?.select(); }
+      }, byMail ? `Invitation envoyée à ${email}.` : undefined);
+      if (res && res.link) { state.teamLink = res.link; if (box) box.innerHTML = inner(state.team); document.querySelector("[data-team-link]")?.select(); }
       return;
     }
     if (act_ === "team-link-close") { state.teamLink = null; if (box) box.innerHTML = inner(state.team); return; }

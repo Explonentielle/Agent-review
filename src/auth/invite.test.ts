@@ -76,7 +76,7 @@ describe("invitations : de l'administrateur à la personne invitée", () => {
     h.cleanup();
   });
 
-  it("une personne inconnue entre avec le lien : membre de l'espace avec le rôle prévu, sans espace personnel, espace actif = l'équipe", async () => {
+  it("une personne inconnue entre avec le lien : membre de l'espace avec le rôle prévu, avec son espace personnel, espace actif = l'équipe", async () => {
     const token = await invite({ role: "member" });
     const { callback, session } = await accept(token);
     expect(callback.headers.location).toBe("/");
@@ -85,7 +85,7 @@ describe("invitations : de l'administrateur à la personne invitée", () => {
     const me = (await api(session, "/api/me")).json<{ user: { name: string }; workspace: { id: number; name: string; kind: string }; role: string }>();
     expect(me).toMatchObject({ user: { name: "Bob Martin" }, workspace: { id: team, name: "Équipe Alpha", kind: "team" }, role: "member" });
     const user = (await h.accounts.findUserByIdentity("gitlab", "501"))!;
-    expect((await h.accounts.listWorkspacesOf(user.id)).map((w) => [w.id, w.kind, w.role])).toEqual([[team, "team", "member"]]); // pas d'espace personnel créé
+    expect((await h.accounts.listWorkspacesOf(user.id)).map((w) => [w.kind, w.role]).sort()).toEqual([["personal", "admin"], ["team", "member"]]); // son espace personnel, plus l'équipe
     expect((await h.accounts.listIdentities(user.id))).toEqual([{ provider: "gitlab", login: "bob" }]);
   });
 
@@ -233,7 +233,9 @@ describe("invitations : de l'administrateur à la personne invitée", () => {
       expect([400, 403], String(id)).toContain(res.statusCode);
     }
     expect((await api(session, "/api/me")).json<{ workspace: { id: number } }>().workspace.id).toBe(team); // rien n'a changé
-    expect((await api(session, "/api/workspaces")).json<{ workspaces: Array<{ id: number }> }>().workspaces.map((w) => w.id)).toEqual([team]); // il ne voit pas l'espace des autres
+    const visible = (await api(session, "/api/workspaces")).json<{ workspaces: Array<{ id: number }> }>().workspaces.map((w) => w.id);
+    expect(visible).toContain(team);
+    expect(visible).not.toContain(other); // il ne voit pas l'espace des autres
     expect((await app.inject({ method: "POST", url: "/api/workspaces/active", headers: WRITE, payload: { id: team } })).statusCode).toBe(401); // sans session
   });
 });

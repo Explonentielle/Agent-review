@@ -2,11 +2,12 @@ import type { Db } from "./db.js";
 import { migrationsFor } from "./migrations.js";
 
 /**
- * Tables copiées, dans l'ordre des clés étrangères (une table parente avant ses filles). Les sessions de connexion ne sont pas copiées :
- * elles se refont à la prochaine connexion.
+ * Tables copiées, dans l'ordre des clés étrangères (une table parente avant ses filles). Les sessions de connexion et les liens envoyés par email
+ * (inscription, mot de passe oublié) ne sont pas copiés : ils se refont à la prochaine connexion ou demande.
  */
 export const TRANSFER_TABLES = [
   "users",
+  "credentials",
   "workspaces",
   "memberships",
   "identities",
@@ -28,7 +29,7 @@ const TABLES_WITH_ID = ["users", "workspaces", "identities", "invitations", "sec
 const LOCAL_ONLY_COLUMNS: Record<string, string[]> = { dev_tasks: ["worktree_path", "session_id"] };
 
 /** Tables qui doivent être vides dans la base cible (hors le compte local créé par la migration). */
-const MUST_BE_EMPTY = ["reviews", "dev_tasks", "projects", "settings", "secrets", "identities", "invitations", "audit_log"] as const;
+const MUST_BE_EMPTY = ["reviews", "dev_tasks", "projects", "settings", "secrets", "identities", "credentials", "invitations", "audit_log"] as const;
 
 export interface TransferReport {
   /** Lignes copiées, par table. */

@@ -328,7 +328,7 @@ export function buildServer(base: ServerDeps) {
     deps,
     accounts: base.accounts,
     invitations: base.invitations ?? base.auth?.invitations,
-    ...(base.auth ? { auth: { publicUrl: base.auth.publicUrl, sessions: base.auth.sessions } } : {}),
+    ...(base.auth ? { auth: { publicUrl: base.auth.publicUrl, sessions: base.auth.sessions, ...(base.auth.password ? { mailer: base.auth.password.mailer } : {}) } } : {}),
     whoIs: (req) => req.session ?? base.local,
     ...(base.onMemberRemoved ? { onMemberRemoved: base.onMemberRemoved } : {}),
     fail,

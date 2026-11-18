@@ -1,18 +1,34 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { AccountRepo, Role } from "../db/accounts.js";
-import type { InvitationLookup, InvitationRepo } from "../db/invitations.js";
+import { AccountError, type AccountRepo } from "../db/accounts.js";
+import type { CredentialRepo } from "../db/credentials.js";
+import type { EmailTokenRepo } from "../db/emailTokens.js";
+import type { InvitationRepo } from "../db/invitations.js";
 import { errorMessage, log } from "../logger.js";
+import type { Mailer } from "../mail/mailer.js";
+import { SESSION_COOKIE, parseCookies, sameText, setCookie } from "./cookies.js";
 import { LoginRefusedError, signIn, type SignInPolicy } from "./login.js";
 import { OAuthError, createPkce, type AuthProviderKind, type OAuthProvider } from "./oauth.js";
+import { FORM_SCRIPT, invitePage, loginPage } from "./pages.js";
+import { inviteViewer, registerPasswordAuth } from "./passwordRoutes.js";
 import { createRateLimiter } from "./rateLimit.js";
 import type { SessionContext, SessionStore } from "./sessions.js";
+
+export { SESSION_COOKIE, parseCookies } from "./cookies.js";
 
 declare module "fastify" {
   interface FastifyRequest {
     /** Session de connexion de la requête, ou null (toujours null hors mode connexion). */
     session: SessionContext | null;
   }
+}
+
+/** Connexion par email et mot de passe : active seulement quand l'envoi d'emails est configuré (c'est lui qui confirme les adresses). */
+export interface PasswordRuntime {
+  mailer: Mailer;
+  credentials: CredentialRepo;
+  /** Liens envoyés par email (inscription, mot de passe oublié). */
+  tokens: EmailTokenRepo;
 }
 
 /** Ce dont le serveur a besoin pour gérer la connexion. */
@@ -23,6 +39,8 @@ export interface AuthRuntime {
   /** Invitations à rejoindre un espace d'équipe (liens `/invite/<jeton>`). */
   invitations: InvitationRepo;
   policy: SignInPolicy;
+  /** Connexion par email et mot de passe, ou absente (connexion par les forges seulement). */
+  password?: PasswordRuntime;
   /** Adresse publique de l'outil, sans barre finale. */
   publicUrl: string;
   sessionDays: number;
@@ -30,14 +48,13 @@ export interface AuthRuntime {
   rateLimit?: { limit: number; windowMs: number };
 }
 
-/** Cookie de session (HttpOnly : illisible par le JavaScript de la page). */
-export const SESSION_COOKIE = "ra_session";
 /** Cookie qui lie le retour OAuth au navigateur qui l'a demandé (sans lui, on pourrait connecter la victime au compte de l'attaquant). */
 const STATE_COOKIE = "ra_oauth";
 const PENDING_TTL_MS = 10 * 60_000;
 const MAX_PENDING = 1000;
 
-const PROVIDER_NAMES: Record<AuthProviderKind, string> = { gitlab: "GitLab", github: "GitHub" };
+/** Organisations d'équipe qu'une personne peut créer au plus : un compte ne doit pas pouvoir en fabriquer sans fin. */
+export const MAX_CREATED_WORKSPACES = 10;
 
 interface PendingLogin {
   provider: AuthProviderKind;
@@ -47,131 +64,11 @@ interface PendingLogin {
   invite?: string;
 }
 
-const ROLE_NAMES: Record<Role, string> = { admin: "administrateur", member: "membre", viewer: "lecteur" };
-
 /** Limite par défaut : 30 tentatives par adresse IP et par 10 minutes, pour la connexion, son retour et les invitations. */
 const DEFAULT_RATE = { limit: 30, windowMs: 10 * 60_000 };
 
 /**
- * Échappe un texte avant de l'écrire dans une page HTML (nom d'espace, mot d'accompagnement : saisis par d'autres personnes).
- * @param text Texte à écrire.
- * @returns Le texte, sans caractère qui puisse ouvrir une balise ou un attribut.
- */
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-}
-
-/**
- * Lit les cookies d'une requête.
- * @param header En-tête `Cookie` brut, ou undefined.
- * @returns Les cookies par nom.
- */
-export function parseCookies(header: string | undefined): Record<string, string> {
-  const cookies: Record<string, string> = {};
-  for (const part of (header ?? "").split(";")) {
-    const index = part.indexOf("=");
-    if (index > 0) cookies[part.slice(0, index).trim()] = part.slice(index + 1).trim();
-  }
-  return cookies;
-}
-
-/**
- * Construit un en-tête `Set-Cookie` sûr : HttpOnly, SameSite=Lax, limité au site, `Secure` quand l'adresse publique est en https.
- * @param name Nom du cookie.
- * @param value Valeur (caractères d'URL sûrs : les jetons sont en base64url).
- * @param maxAgeSeconds Durée de vie en secondes (0 pour l'effacer).
- * @param secure Vrai pour ajouter l'attribut Secure.
- * @returns La valeur de l'en-tête.
- */
-function setCookie(name: string, value: string, maxAgeSeconds: number, secure: boolean): string {
-  return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure ? "; Secure" : ""}`;
-}
-
-/**
- * Compare deux textes en temps constant.
- * @param a Premier texte.
- * @param b Second texte.
- * @returns true s'ils sont identiques.
- */
-function sameText(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-/**
- * Page de connexion : un bouton par forge configurée. Les styles passent par des classes.
- * @param providers Forges configurées.
- * @param error Code d'erreur éventuel (`refused` ou `failed`), jamais un texte libre.
- * @returns La page HTML.
- */
-function loginPage(providers: AuthProviderKind[], error: string | undefined): string {
-  const message = error === "refused" ? "Ce compte n'est pas autorisé sur cette installation."
-    : error === "invite" ? "Cette invitation n'est pas valable pour ce compte (déjà utilisée, révoquée, expirée ou réservée à un autre compte). Demande un nouveau lien à l'administrateur."
-      : error ? "La connexion a échoué. Réessaie." : "";
-  return shell("Connexion", `<h1>Review agent</h1>
-  <p>Connecte-toi avec ton compte de forge.</p>
-  ${message ? `<div class="error" role="alert">${message}</div>` : ""}
-  ${providers.map((p) => `<a class="btn" href="/auth/${p}/login">Se connecter avec ${PROVIDER_NAMES[p]}</a>`).join("\n  ")}`);
-}
-
-/**
- * Page d'accueil d'une invitation : qui invite, dans quel espace, avec quel rôle, et un bouton par forge. Tout texte saisi par une autre personne est échappé.
- * @param invitation L'invitation retrouvée par son jeton, ou null si elle n'est pas valable (même page pour tous les cas : on ne dit pas pourquoi).
- * @param token Jeton lu dans le lien (caractères d'URL sûrs).
- * @param providers Forges de connexion configurées.
- * @returns La page HTML.
- */
-function invitePage(invitation: InvitationLookup | null, token: string, providers: AuthProviderKind[]): string {
-  if (!invitation) {
-    return shell("Invitation", `<h1>Invitation</h1>
-  <div class="error" role="alert">Cette invitation n'est plus valable : elle a peut-être déjà été utilisée, révoquée, ou elle a expiré. Demande un nouveau lien à la personne qui t'a invité.</div>`);
-  }
-  const usable = providers.filter((p) => invitation.forgeLogin === null || invitation.forgeLogin.startsWith(`${p}:`));
-  return shell("Invitation", `<h1>Tu es invité(e)</h1>
-  <p>${escapeHtml(invitation.invitedBy)} t'invite à rejoindre l'espace <b>${escapeHtml(invitation.workspaceName)}</b> comme ${ROLE_NAMES[invitation.role]}.</p>
-  ${invitation.note ? `<p class="note">${escapeHtml(invitation.note)}</p>` : ""}
-  ${invitation.forgeLogin ? `<p class="note">Cette invitation est réservée au compte ${escapeHtml(invitation.forgeLogin)}.</p>` : ""}
-  ${usable.map((p) => `<a class="btn" href="/invite/${encodeURIComponent(token)}/login/${p}">Accepter avec ${PROVIDER_NAMES[p]}</a>`).join("\n  ")}
-  ${usable.length === 0 ? `<div class="error" role="alert">Aucune connexion ne correspond à cette invitation sur cette installation.</div>` : ""}`);
-}
-
-/**
- * Enveloppe commune des pages publiques (connexion, invitation) : mise en page et styles, sans style en ligne.
- * @param title Titre de l'onglet.
- * @param main Contenu de la carte (HTML déjà échappé).
- * @returns La page HTML.
- */
-function shell(title: string, main: string): string {
-  return `<!doctype html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<title>${title}</title>
-<style>
-  :root { color-scheme: light dark; --bg: #f6f7f9; --surface: #fff; --text: #1a1d23; --muted: #626b78; --accent: #2f5fd0; --danger: #b3261e; --border: #d6dae1; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #14161a; --surface: #1d2025; --text: #e8eaee; --muted: #9aa3b0; --accent: #7aa2f7; --danger: #f2b8b5; --border: #343a44; } }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
-  main { width: min(420px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
-  h1 { margin: 0 0 6px; font-size: 20px; }
-  p { margin: 0 0 18px; color: var(--muted); }
-  .error { color: var(--danger); margin-bottom: 14px; }
-  .btn { display: block; margin-top: 10px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); color: var(--text); text-decoration: none; text-align: center; font-weight: 600; }
-  .btn:hover, .btn:focus-visible { border-color: var(--accent); color: var(--accent); }
-</style>
-</head>
-<body>
-<main>
-  ${main}
-</main>
-</body>
-</html>`;
-}
-
-/**
- * Branche la connexion sur le serveur : contrôle d'accès de toutes les routes, page de connexion, aller-retour OAuth, déconnexion.
+ * Branche la connexion sur le serveur : contrôle d'accès de toutes les routes, page de connexion, aller-retour OAuth, connexion par email, déconnexion.
  * Sans session valide, les routes `/api` répondent 401 et les pages renvoient vers `/login`.
  * @param app Serveur Fastify.
  * @param auth Fournisseurs, sessions et règles d'accès.
@@ -182,44 +79,52 @@ export function registerAuth(app: FastifyInstance, auth: AuthRuntime): void {
   const pending = new Map<string, PendingLogin>();
   const redirectUri = (provider: AuthProviderKind) => `${auth.publicUrl}/auth/${provider}/callback`;
   const limiter = createRateLimiter((auth.rateLimit ?? DEFAULT_RATE).limit, (auth.rateLimit ?? DEFAULT_RATE).windowMs);
+  /** Pages publiques hors `/auth/` et `/invite/` : la connexion par email en ajoute deux. */
+  const publicPages = new Set(auth.password ? ["/login", "/signup", "/forgot"] : ["/login"]);
 
   app.decorateRequest("session", null);
 
   app.addHook("onRequest", async (req, reply) => {
     const path = req.url.split("?")[0]!;
-    // Essais en masse : la connexion, son retour et les liens d'invitation sont limités par adresse IP (la déconnexion ne l'est pas)
-    if ((path.startsWith("/auth/") && path !== "/auth/logout") || path.startsWith("/invite/")) {
+    // Essais en masse : la connexion, son retour et les liens d'invitation sont limités par adresse IP (la déconnexion et le script des formulaires ne le sont pas)
+    if (((path.startsWith("/auth/") && path !== "/auth/logout" && path !== "/auth/form.js") || path.startsWith("/invite/"))) {
       const verdict = limiter.take(req.ip);
       if (!verdict.ok) {
-        log.warn("auth.rate_limited", { path: path.startsWith("/invite/") ? "/invite/..." : path, ip: req.ip });
+        log.warn("auth.rate_limited", { path: path.startsWith("/invite/") ? "/invite/..." : path.startsWith("/auth/signup/") || path.startsWith("/auth/reset/") ? "/auth/.../..." : path, ip: req.ip });
         return reply.code(429).header("Retry-After", String(verdict.retryAfterSeconds)).type("text/plain; charset=utf-8").send("Trop de tentatives de connexion : réessaie un peu plus tard.");
       }
     }
     req.session = await auth.sessions.resolve(parseCookies(req.headers.cookie)[SESSION_COOKIE] ?? "");
-    if (req.session || path === "/login" || path.startsWith("/auth/") || path.startsWith("/invite/")) return;
+    if (req.session || publicPages.has(path) || path.startsWith("/auth/") || path.startsWith("/invite/")) return;
     if (path.startsWith("/api/")) return reply.code(401).send({ error: "Connexion requise" });
     return reply.redirect("/login");
   });
 
+  /** Script commun des formulaires des pages publiques (envoi en JSON avec l'en-tête exigé de toute écriture). */
+  app.get("/auth/form.js", async (_req, reply) => reply.header("Cache-Control", "public, max-age=300").type("text/javascript; charset=utf-8").send(FORM_SCRIPT));
+
   /** Page d'une invitation : aucun détail n'est donné sur une invitation qui n'est pas valable (utilisée, révoquée, expirée ou inconnue : même page). */
   app.get<{ Params: { token: string } }>("/invite/:token", async (req, reply) => {
     const invitation = await auth.invitations.lookup(req.params.token);
-    return reply.code(invitation ? 200 : 404).header("Cache-Control", "no-store").header("Referrer-Policy", "no-referrer").type("text/html; charset=utf-8").send(invitePage(invitation, req.params.token, [...auth.providers.keys()]));
+    const viewer = await inviteViewer(auth, req.session, invitation);
+    return reply.code(invitation ? 200 : 404).header("Cache-Control", "no-store").header("Referrer-Policy", "no-referrer").type("text/html; charset=utf-8").send(invitePage(invitation, req.params.token, [...auth.providers.keys()], Boolean(auth.password), viewer));
   });
 
   /** Départ de la connexion d'une personne invitée : comme la connexion normale, mais le retour de la forge sait de quelle invitation il s'agit. */
   app.get<{ Params: { token: string; provider: string } }>("/invite/:token/login/:provider", async (req, reply) => {
     const provider = auth.providers.get(req.params.provider as AuthProviderKind);
     const invitation = await auth.invitations.lookup(req.params.token);
-    if (!provider || !invitation) return reply.redirect("/login?error=invite");
+    if (!provider || !invitation || invitation.email !== null) return reply.redirect("/login?error=invite");
     if (invitation.forgeLogin !== null && !invitation.forgeLogin.startsWith(`${provider.kind}:`)) return reply.redirect("/login?error=invite");
     return startLogin(reply, provider, req.params.token);
   });
 
-  app.get<{ Querystring: { error?: string } }>("/login", async (req, reply) => {
+  app.get<{ Querystring: { error?: string; notice?: string } }>("/login", async (req, reply) => {
     if (req.session) return reply.redirect("/");
-    return reply.header("Cache-Control", "no-store").type("text/html; charset=utf-8").send(loginPage([...auth.providers.keys()], req.query.error));
+    return reply.header("Cache-Control", "no-store").type("text/html; charset=utf-8").send(loginPage({ providers: [...auth.providers.keys()], password: Boolean(auth.password), signupOpen: auth.policy.signup === "open", error: req.query.error, notice: req.query.notice }));
   });
+
+  if (auth.password) registerPasswordAuth(app, auth as AuthRuntime & { password: PasswordRuntime }, secure);
 
   /**
    * Démarre la connexion chez une forge : état à usage unique, cookie qui lie le retour à ce navigateur, vérificateur PKCE.
@@ -281,6 +186,25 @@ export function registerAuth(app: FastifyInstance, auth: AuthRuntime): void {
     if (!req.session) return { active: null, workspaces: [] };
     const workspaces = await auth.accounts.listWorkspacesOf(req.session.userId);
     return { active: req.session.workspaceId, workspaces: workspaces.map((w) => ({ id: w.id, name: w.name, kind: w.kind, role: w.role })) };
+  });
+
+  /**
+   * Crée une organisation (espace d'équipe) dont la personne connectée est l'administratrice, et la rend active. Toute personne connectée peut en créer, quel que soit
+   * son rôle ailleurs : l'organisation est à elle, elle n'agit sur aucune donnée d'un autre espace. Le nombre d'organisations créées est borné.
+   */
+  app.post<{ Body: { name?: unknown } | null }>("/api/workspaces", async (req, reply) => {
+    if (!req.session) return reply.code(401).send({ error: "Connexion requise" });
+    try {
+      const mine = (await auth.accounts.listWorkspacesOf(req.session.userId)).filter((w) => w.kind === "team" && w.role === "admin").length;
+      if (mine >= MAX_CREATED_WORKSPACES) throw new AccountError(`Tu administres déjà ${MAX_CREATED_WORKSPACES} organisations : c'est la limite`);
+      const id = await auth.accounts.createWorkspace({ name: typeof req.body?.name === "string" ? req.body.name : "", kind: "team", adminUserId: req.session.userId });
+      await auth.sessions.switchWorkspace(parseCookies(req.headers.cookie)[SESSION_COOKIE] ?? "", id);
+      return { ok: true, id };
+    } catch (err) {
+      if (err instanceof AccountError) return reply.code(400).send({ error: err.message });
+      log.warn("auth.workspace_create_failed", { error: errorMessage(err) });
+      return reply.code(500).send({ error: "La création a échoué" });
+    }
   });
 
   /** Change l'espace actif de la session. La personne doit être membre de l'espace demandé : sinon refus, et la session ne change pas. */

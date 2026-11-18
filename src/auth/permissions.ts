@@ -45,6 +45,8 @@ export const ROUTE_LEVELS: Readonly<Record<string, Level>> = {
   // Changer d'espace est permis à tout rôle : c'est la session qui change, pas des données (le rôle dans l'espace visé s'applique ensuite)
   "GET /api/workspaces": "read",
   "POST /api/workspaces/active": "read",
+  // Créer SA propre organisation est permis à tout rôle : elle n'agit sur aucune donnée de l'espace courant (la personne en devient l'administratrice)
+  "POST /api/workspaces": "read",
 
   // Agir : membre et administrateur
   "GET /api/secrets": "act",

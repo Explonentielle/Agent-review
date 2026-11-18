@@ -17,7 +17,7 @@ const backends: Array<{ name: string; open(): Promise<Db> }> = [
   { name: "PostgreSQL (PGlite)", open: async () => postgresFromPglite(new PGlite() as unknown as PgliteLike) },
 ];
 
-const TABLES = ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "invitations", "memberships", "workspaces", "users"];
+const TABLES = ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "invitations", "email_tokens", "credentials", "memberships", "workspaces", "users"];
 const ISSUE = { projectId: 1, projectPath: "g/p", issueIid: 609, issueTitle: "Import", issueUrl: "u", extraInstructions: null };
 const MR = { projectId: 1, projectPath: "g/p", mrTitle: "t", mrUrl: "u", author: "a" };
 

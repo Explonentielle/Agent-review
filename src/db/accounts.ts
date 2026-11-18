@@ -82,7 +82,7 @@ function cleanName(name: string, label: string): string {
  * @returns L'adresse normalisée, ou null si aucune.
  * @throws AccountError Si l'adresse n'a pas un format valide.
  */
-function cleanEmail(email: string | null | undefined): string | null {
+export function cleanEmail(email: string | null | undefined): string | null {
   if (email === null || email === undefined || email.trim() === "") return null;
   const clean = email.trim().toLowerCase();
   if (clean.length > MAX_EMAIL_LENGTH || !EMAIL_FORMAT.test(clean)) throw new AccountError("Adresse email invalide");
@@ -172,6 +172,22 @@ export function createAccountRepo(db: Db) {
       const row = await db.get<{ id: number }>("INSERT INTO users (name, email) VALUES (?, ?) ON CONFLICT (email) DO NOTHING RETURNING id", [name, email]);
       if (!row) throw new AccountError("Cette adresse email est déjà utilisée");
       return row.id;
+    },
+
+    /**
+     * Donne un nom et une adresse à l'utilisateur local, tant qu'il n'a pas d'adresse (le propriétaire de l'installation reprend ainsi ses données en créant son compte par email).
+     * @param userId Identifiant de l'utilisateur local.
+     * @param input Nom affiché et adresse email.
+     * @returns Vrai si le compte a été repris, faux s'il avait déjà une adresse (repris entre-temps par une autre demande).
+     * @throws AccountError Si le nom ou l'adresse est invalide, ou si l'adresse est déjà prise.
+     */
+    async claimLocalUser(userId: number, input: { name: string; email: string }): Promise<boolean> {
+      const name = cleanName(input.name, "Nom");
+      const email = cleanEmail(input.email);
+      if (email === null) throw new AccountError("Adresse email invalide");
+      if (await db.get("SELECT 1 AS found FROM users WHERE email = ?", [email])) throw new AccountError("Cette adresse email est déjà utilisée");
+      const res = await db.run("UPDATE users SET name = ?, email = ? WHERE id = ? AND email IS NULL", [name, email, userId]);
+      return res.changes === 1;
     },
 
     /**

@@ -408,6 +408,8 @@ describe("configuration de la connexion", () => {
       owner: "gitlab:alex",
       allowedUsers: ["gitlab:bob", "github:carol"],
       sessionDays: 3,
+      mail: null,
+      signup: "invite",
     });
     expect(loadConfig({ ...base, AUTH_GITLAB_CLIENT_ID: "cid", AUTH_GITLAB_CLIENT_SECRET: "csecret", AUTH_OWNER: "gitlab:alex" }).auth?.publicUrl).toBe("http://localhost:4321");
   });

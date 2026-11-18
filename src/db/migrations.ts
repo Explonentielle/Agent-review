@@ -230,6 +230,31 @@ export function migrationsFor(s: Sql): string[] {
   ALTER TABLE memberships ADD COLUMN budget_usd ${s.real};
   ALTER TABLE memberships ADD COLUMN daily_runs INTEGER;
   `,
+    // Connexion par email et mot de passe. Les mots de passe vivent à part des utilisateurs (jamais lus par erreur avec un `SELECT *` sur users) et ne sont
+    // gardés que sous forme d'empreinte lente. email_tokens porte les liens envoyés par email (inscription, mot de passe oublié) : seule l'empreinte SHA-256
+    // du jeton est stockée, il sert une fois et expire. invitations.email réserve l'invitation à une adresse : son lien n'est alors envoyé qu'à cette adresse.
+    `
+  CREATE TABLE credentials (
+    user_id       INTEGER PRIMARY KEY REFERENCES users(id),
+    password_hash TEXT    NOT NULL,
+    updated_at    TEXT    NOT NULL ${s.nowDefault}
+  );
+
+  CREATE TABLE email_tokens (
+    id         ${s.pk},
+    purpose    TEXT    NOT NULL CHECK (purpose IN ('signup', 'reset')),
+    email      TEXT    NOT NULL,
+    user_id    INTEGER REFERENCES users(id),
+    token_hash TEXT    NOT NULL,
+    created_at TEXT    NOT NULL ${s.nowDefault},
+    expires_at TEXT    NOT NULL,
+    used_at    TEXT
+  );
+  CREATE UNIQUE INDEX uq_email_tokens_hash ON email_tokens(token_hash);
+  CREATE INDEX idx_email_tokens_email ON email_tokens(purpose, email);
+
+  ALTER TABLE invitations ADD COLUMN email TEXT;
+  `,
   ];
 }
 

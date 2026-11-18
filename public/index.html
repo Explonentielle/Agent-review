@@ -1773,7 +1773,23 @@ function applyMe() {
   chip.title = role === "viewer" ? "Lecture seule : tu ne peux ni lancer l'agent ni changer les réglages" : "Tu lances les agents ; les réglages de l'espace sont réservés aux administrateurs";
   const sw = document.getElementById("ws-switch");
   sw.hidden = !state.workspaces;
-  sw.innerHTML = state.workspaces ? state.workspaces.workspaces.map((w) => `<option value="${w.id}" ${w.id === state.workspaces.active ? "selected" : ""}>${esc(w.name)} (${ROLE_LABEL[w.role].toLowerCase()})</option>`).join("") : "";
+  const options = state.workspaces ? state.workspaces.workspaces.map((w) => `<option value="${w.id}" ${w.id === state.workspaces.active ? "selected" : ""}>${esc(w.name)} (${ROLE_LABEL[w.role].toLowerCase()})</option>`).join("") : "";
+  sw.innerHTML = options + (state.workspaces ? `<option value="new">+ Nouvelle organisation</option>` : "");
+}
+
+/** Crée une organisation (espace d'équipe) dont on devient l'administrateur, et bascule dessus. */
+async function createOrganization() {
+  const answer = await ask({ title: "Nouvelle organisation", html: "<p>Tu en seras l'administrateur : tu pourras y inviter des personnes par email, avec le rôle de ton choix. Elle a ses propres projets, réglages et limites.</p>", okLabel: "Créer", input: true, placeholder: "Nom de l'organisation" });
+  if (answer && answer.value) {
+    try {
+      await api("/api/workspaces", { name: answer.value });
+      location.reload();
+      return;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+  applyMe();
 }
 
 /** Change d'espace de travail : la session désigne l'autre espace, et la page se recharge avec ses données. */
@@ -2315,7 +2331,11 @@ function setSidebarCollapsed(collapsed) {
 try { if (localStorage.getItem("ra.sidebarCollapsed") === "1") setSidebarCollapsed(true); } catch { /* stockage indisponible */ }
 
 window.addEventListener("hashchange", route);
-document.addEventListener("change", (e) => { if (e.target.id === "ws-switch") switchWorkspace(Number(e.target.value)); });
+document.addEventListener("change", (e) => {
+  if (e.target.id !== "ws-switch") return;
+  if (e.target.value === "new") createOrganization();
+  else switchWorkspace(Number(e.target.value));
+});
 
 /* =====================================================================
    Démarrage

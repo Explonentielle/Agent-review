@@ -1,14 +1,20 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AccountError, type AccountContext, type AccountRepo, type Role } from "../db/accounts.js";
 import { currentMonth } from "../db/costs.js";
-import type { InvitationRepo } from "../db/invitations.js";
+import { createRateLimiter } from "../auth/rateLimit.js";
+import { readEmail } from "../auth/passwordLogin.js";
 import type { SessionStore } from "../auth/sessions.js";
+import { INVITATION_DAYS, type InvitationRepo } from "../db/invitations.js";
+import { errorMessage, log } from "../logger.js";
+import type { Mailer } from "../mail/mailer.js";
+import { invitationMail } from "../mail/templates.js";
 import type { TenantContext, TenantDeps } from "../tenants/manager.js";
 
 /**
  * Gestion de l'équipe d'un espace : membres, rôles, invitations, limites par personne. Toutes ces routes sont réservées aux administrateurs de l'espace
- * (`auth/permissions.ts`). Une invitation est un lien à usage unique, à transmettre à la personne par le moyen de ton choix : il est affiché UNE fois,
- * la base n'en garde que l'empreinte.
+ * (`auth/permissions.ts`). Une invitation par email part vers l'adresse de la personne (le lien n'est jamais montré à l'administrateur : seule la personne qui
+ * lit cette boîte peut l'ouvrir). Sans adresse, c'est un lien à usage unique, à transmettre par le moyen de ton choix : il est affiché UNE fois.
+ * Dans les deux cas la base n'en garde que l'empreinte.
  */
 export interface TeamContext {
   /** Consommation et réglages de l'espace de la personne servie. */
@@ -16,8 +22,11 @@ export interface TeamContext {
   accounts: AccountRepo;
   /** Absent : l'outil sert un seul utilisateur local, personne ne peut être invité. */
   invitations?: InvitationRepo;
-  /** Connexion par compte (adresse publique pour construire le lien, sessions à fermer quand on retire quelqu'un). Absente : pas d'invitation possible. */
-  auth?: { publicUrl: string; sessions: SessionStore };
+  /**
+   * Connexion par compte (adresse publique pour construire le lien, sessions à fermer quand on retire quelqu'un, envoi d'emails si configuré).
+   * Absente : pas d'invitation possible.
+   */
+  auth?: { publicUrl: string; sessions: SessionStore; mailer?: Mailer };
   /** Qui fait la requête : sa session, ou l'utilisateur local sans connexion. */
   whoIs: (req: FastifyRequest) => AccountContext;
   /** Appelée quand quelqu'un quitte l'espace ou en est retiré : arrête ses détecteurs et efface ses jetons de cet espace. */
@@ -34,6 +43,9 @@ export interface TeamContext {
  */
 export function registerTeam(app: FastifyInstance, ctx: TeamContext): void {
   const { deps, accounts, fail } = ctx;
+  // Emails d'invitation : 20 par personne et par heure, 3 par adresse et par jour (un administrateur ne doit pas pouvoir inonder la boîte de quelqu'un)
+  const mailByInviter = createRateLimiter(20, 3_600_000);
+  const mailByAddress = createRateLimiter(3, 86_400_000);
 
   /** Une règle des comptes violée (dernier administrateur, rôle inconnu, invitation invalide...) est une erreur de la personne : 400, avec le message. */
   const failTeam = (reply: FastifyReply, err: unknown) => (err instanceof AccountError ? reply.code(400).send({ error: err.message }) : fail(reply, err));
@@ -55,6 +67,7 @@ export function registerTeam(app: FastifyInstance, ctx: TeamContext): void {
         workspace: { id: workspace.id, name: workspace.name, kind: workspace.kind },
         loginEnabled: Boolean(ctx.auth),
         canInvite: Boolean(ctx.auth && ctx.invitations) && workspace.kind === "team",
+        canEmail: Boolean(ctx.auth?.mailer),
         agentAuth: settings.agentAuth,
         defaults: settings.quotas,
         members: await Promise.all(
@@ -70,28 +83,59 @@ export function registerTeam(app: FastifyInstance, ctx: TeamContext): void {
             usage: { monthUsd: await deps.costs.userMonthTotal(m.user_id, month), runsToday: await deps.costs.userRunsToday(m.user_id) },
           })),
         ),
-        invitations: pending.map((i) => ({ id: i.id, role: i.role, note: i.note, forgeLogin: i.forge_login, createdBy: i.created_by_name, createdAt: i.created_at, expiresAt: i.expires_at })),
+        invitations: pending.map((i) => ({ id: i.id, role: i.role, note: i.note, forgeLogin: i.forge_login, email: i.email, createdBy: i.created_by_name, createdAt: i.created_at, expiresAt: i.expires_at })),
       };
     } catch (err) {
       return failTeam(reply, err);
     }
   });
 
-  /** Crée une invitation et renvoie son lien : c'est la seule fois où il est visible. */
-  app.post<{ Body: { role?: unknown; note?: unknown; forgeLogin?: unknown; days?: unknown } | null }>("/api/team/invitations", async (req, reply) => {
+  /**
+   * Crée une invitation. Avec une adresse email, le lien part par email et n'est jamais renvoyé ; sans adresse, il est renvoyé : c'est la seule fois où il est visible.
+   * Si l'email ne part pas, l'invitation est révoquée aussitôt (pas de lien en circulation que personne n'a reçu).
+   */
+  app.post<{ Body: { role?: unknown; note?: unknown; forgeLogin?: unknown; email?: unknown; days?: unknown } | null }>("/api/team/invitations", async (req, reply) => {
     try {
-      if (!ctx.auth || !ctx.invitations) return reply.code(409).send({ error: "La connexion par compte de forge n'est pas configurée (variables AUTH_* du .env) : personne ne pourrait accepter l'invitation." });
+      if (!ctx.auth || !ctx.invitations) return reply.code(409).send({ error: "Aucune connexion n'est configurée (variables AUTH_* ou RESEND_* du .env) : personne ne pourrait accepter l'invitation." });
       const who = ctx.whoIs(req);
       const body = req.body ?? {};
+      const rawEmail = typeof body.email === "string" ? body.email.trim() : "";
+      const email = rawEmail === "" ? null : readEmail(rawEmail);
+      if (rawEmail !== "" && email === null) return reply.code(400).send({ error: "Adresse email invalide" });
+      if (email !== null && !ctx.auth.mailer) return reply.code(409).send({ error: "L'envoi d'emails n'est pas configuré (RESEND_API_KEY et MAIL_FROM du .env) : crée un lien d'invitation, à transmettre à la main." });
+
+      if (email !== null) {
+        const existing = await accounts.getUserByEmail(email);
+        if (existing && (await accounts.membershipRole(who.workspaceId, existing.id)) !== null) return reply.code(400).send({ error: "Cette personne est déjà membre de l'espace" });
+        const byInviter = mailByInviter.take(String(who.userId));
+        const byAddress = mailByAddress.take(email);
+        if (!byInviter.ok || !byAddress.ok) return reply.code(429).send({ error: "Trop d'invitations envoyées : réessaie plus tard" });
+      }
+
+      const days = body.days === undefined ? INVITATION_DAYS : Number(body.days);
+      const role = typeof body.role === "string" ? body.role : "";
+      const note = typeof body.note === "string" ? body.note : "";
       const created = await ctx.invitations.create({
         workspaceId: who.workspaceId,
-        role: typeof body.role === "string" ? body.role : "",
-        note: typeof body.note === "string" ? body.note : "",
+        role,
+        note,
         forgeLogin: typeof body.forgeLogin === "string" ? body.forgeLogin : null,
-        ...(body.days === undefined ? {} : { days: Number(body.days) }),
+        email,
+        days,
         createdBy: who.userId,
       });
-      return { id: created.id, link: `${ctx.auth.publicUrl}/invite/${created.token}`, expiresAt: created.expiresAt };
+      const link = `${ctx.auth.publicUrl}/invite/${created.token}`;
+      if (email === null) return { id: created.id, link, expiresAt: created.expiresAt };
+
+      try {
+        const [inviter, workspace] = await Promise.all([accounts.getUser(who.userId), accounts.getWorkspace(who.workspaceId)]);
+        await ctx.auth.mailer!.send({ to: email, ...invitationMail({ invitedBy: inviter?.name ?? "Un administrateur", workspaceName: workspace?.name ?? "", role: role as Role, note: note.trim(), link, days }) });
+      } catch (err) {
+        log.warn("team.invite_mail_failed", { error: errorMessage(err) });
+        await ctx.invitations.revoke(who.workspaceId, created.id);
+        return reply.code(502).send({ error: "L'email n'a pas pu partir : l'invitation n'a pas été créée. Réessaie dans un moment, ou crée un lien à transmettre à la main." });
+      }
+      return { id: created.id, emailed: true, email, expiresAt: created.expiresAt };
     } catch (err) {
       return failTeam(reply, err);
     }

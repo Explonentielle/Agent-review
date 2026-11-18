@@ -34,6 +34,15 @@ export function createRateLimiter(limit: number, windowMs: number, now: () => nu
       return { ok: true };
     },
 
+    /**
+     * Oublie les tentatives d'une clé (une connexion réussie remet le compteur de l'adresse à zéro).
+     * @param key Clé à remettre à zéro.
+     * @returns Rien.
+     */
+    forget(key: string): void {
+      hits.delete(key);
+    },
+
     /** Oublie toutes les tentatives (tests). */
     reset(): void {
       hits.clear();
