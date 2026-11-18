@@ -99,6 +99,28 @@ describe.each(backends)("suppression et historique des tâches de dev : $name", 
     expect(await tb.findByMergeRequest("gitlab", 1, 7)).toBeUndefined(); // autre espace
   });
 
+  it("retrouve la tâche dont la page propose relecture, correction et fusion : MR vivante seulement, la plus récente, dans l'espace", async () => {
+    const ta = createDevTaskRepo(db, a);
+    const tb = createDevTaskRepo(db, b);
+    const first = await ta.insert(ISSUE);
+    await ta.update(first, { status: "mr_created", mr_iid: 7, mr_url: "u" });
+    const failed = await ta.insert({ ...ISSUE, followup: { parentId: first, branch: "feature/609-x", baseBranch: "develop", targetBranch: "develop", mrIid: 7, mrUrl: "u" } });
+    await ta.update(failed, { status: "error" });
+    expect((await ta.findPieceByMergeRequest("gitlab", 1, 7))?.id).toBe(first); // la reprise échouée n'a plus ces actions : on renvoie la tâche d'origine
+    expect((await ta.findByMergeRequest("gitlab", 1, 7))?.id).toBe(failed); // alors que « la plus récente » est la reprise échouée
+
+    const worked = await ta.insert({ ...ISSUE, followup: { parentId: first, branch: "feature/609-x", baseBranch: "develop", targetBranch: "develop", mrIid: 7, mrUrl: "u" } });
+    await ta.update(worked, { status: "mr_updated" });
+    expect((await ta.findPieceByMergeRequest("gitlab", 1, 7))?.id).toBe(worked); // une reprise réussie est plus récente que l'origine
+
+    const running = await ta.insert({ ...ISSUE, issueIid: 700 });
+    await ta.update(running, { status: "running", mr_iid: 8, mr_url: "u" });
+    expect(await ta.findPieceByMergeRequest("gitlab", 1, 8)).toBeUndefined(); // pas encore de MR vivante
+    expect(await ta.findPieceByMergeRequest("gitlab", 1, 99)).toBeUndefined();
+    expect(await ta.findPieceByMergeRequest("github", 1, 7)).toBeUndefined(); // autre forge
+    expect(await tb.findPieceByMergeRequest("gitlab", 1, 7)).toBeUndefined(); // autre espace
+  });
+
   it("retrouve les tâches dont la MR a été fusionnée depuis l'outil, dans l'espace seulement", async () => {
     const ta = createDevTaskRepo(db, a);
     const tb = createDevTaskRepo(db, b);

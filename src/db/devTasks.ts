@@ -171,6 +171,21 @@ export function createDevTaskRepo(db: Db, workspaceId: number) {
     },
 
     /**
+     * La tâche la plus récente qui porte cette demande de fusion ET dont la MR est vivante (créée ou reprise avec succès) : celle dont la page propose
+     * la relecture, la correction et la fusion. Une reprise échouée ou annulée ne compte pas : sa page n'a plus ces actions.
+     * @param source Forge de la demande.
+     * @param projectId Projet chez la forge.
+     * @param mrIid Numéro de la demande.
+     * @returns La tâche, ou undefined si aucune tâche de cet espace n'a une MR vivante sous ce numéro.
+     */
+    findPieceByMergeRequest(source: ForgeKind, projectId: number, mrIid: number): Promise<DevTaskRow | undefined> {
+      return db.get<DevTaskRow>(
+        "SELECT * FROM dev_tasks WHERE workspace_id = ? AND source = ? AND project_id = ? AND mr_iid = ? AND status IN ('mr_created', 'mr_updated') ORDER BY id DESC LIMIT 1",
+        [workspaceId, source, projectId, mrIid],
+      );
+    },
+
+    /**
      * Les tâches dont la MR a été fusionnée depuis l'outil (le journal de la tâche le note à la fusion). Une fusion faite à la main chez la
      * forge n'y figure pas : l'outil ne la voit pas.
      * @returns Les identifiants de ces tâches, dans l'espace.

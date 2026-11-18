@@ -50,6 +50,7 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 40 | Forge | Caractéristiques et arène : points à répartir, bonus des objets, combats contre des bots (solo), puis duels entre joueurs (multi) | Élevé | Solo implémenté (2026-11-17) : temps réel, quatre caractéristiques, cinq vagues et un seigneur, herse de fer et Maître d'armes. Multi noté : demande un stockage serveur (migration, à confirmer) |
 | 41 | Forge | Salles custom générées par un agent, jeux libres choisis par la personne, visites entre membres d'un espace | Très élevé | **Retiré le 2026-11-18** (décision : hors du périmètre de l'outil). Le jalon 1 (moteur à règles, générateur, salles privées ou d'équipe, quête) a existé du 2026-11-16 au 2026-11-18 ; le code reste dans l'historique git |
 | 42 | Forge | La forge (jeu) sortie du noyau et derrière un drapeau ; le Scribe devient une page du tableau de bord | Élevé | ✅ Fait (2026-11-18), voir la section 42. Tests automatiques et contrôles de la page ; jamais regardé dans un vrai navigateur |
+| 43 | Dashboard | Flux ticket, agent dev, review, correction, fusion : audit et trous comblés (la reprise reçoit la relecture, lien review vers tâche, état de la MR sur la carte du ticket) | Élevé | ✅ Fait (2026-11-18), voir la section 43. Jamais essayé de bout en bout avec un vrai agent ni une vraie forge |
 
 ---
 
@@ -617,3 +618,25 @@ Décidé avec toi : la gamification reste (et peut continuer en parallèle des f
 - **Testé** : `src/server/gameFlag.test.ts` (drapeau, 404 de chaque route du jeu, noyau inchangé éteint ou allumé, persistance, type d'arme choisi une fois), `src/game/prefs.test.ts`, sections du magasin de réglages sur les deux moteurs (`src/db/db.test.ts`) ; la page : parcours du Scribe avec des doublures (ticket, projet, erreurs, échappement : 28 contrôles, 11 mutations détectées) et logique du drapeau et du routage (13 contrôles, 7 mutations détectées).
 - **Pas testé** : le rendu dans un vrai navigateur (la page du Scribe, l'onglet qui disparaît, le choix d'arme dans le râtelier) ; une vraie création de ticket par la page du Scribe chez GitHub ou GitLab.
 - **Limites** : le type d'arme choisi avant le 2026-11-18 (stocké dans les réglages du projet) n'est pas repris : il revient au type par défaut du projet et peut être rechoisi une fois. Le drapeau vaut pour tout l'espace, pas par personne. Les ressources du jeu (feuille de style, sprites) restent servies par le serveur de fichiers statiques même éteintes : seules les routes de données sont fermées.
+
+### 43. Flux ticket, agent dev, review, correction, fusion : audit (2026-11-18)
+
+Demande : vérifier que créer un ticket, lancer l'agent dev, relire sa MR, corriger avec la relecture puis fusionner se suit sans trou, **dans le tableau de bord, hors de la forge**. Questions posées : peut-on relancer l'agent dev après une review qui demande des corrections ? L'agent de reprise a-t-il accès à la review ? Voit-on la review côté dev ?
+
+**Constat avant correction** (code relu, pas supposé)
+- **Existait déjà** : « Corriger avec la relecture » (`POST /api/tasks/:id/fix-review`) dans la page de la tâche et dans la forge, et le bloc « Relecture et fusion » de la page de la tâche qui montre les points de la relecture (lus en base, qu'elle ait été publiée ou non). Aucun besoin de recréer un agent dev : une reprise repart de la même branche et de la même MR.
+- **Trou 1, le plus important** : la reprise « avec des consignes » ne portait pas la relecture. Ce que l'agent de reprise voyait de la review, c'étaient les commentaires **publiés** sur la MR (`getChangeRequestComments`, lu dans `runFollowup`). Or la relecture lancée depuis la page de la tâche ne publie rien, et en mode « ombre » aucune review ne publie : l'agent n'avait donc pas la review, sauf par le bouton « Corriger ».
+- **Trou 2** : « Corriger avec la relecture » n'avait pas de champ de note dans le tableau de bord (la forge en avait un) et ne menait pas à la tâche de reprise.
+- **Trou 3** : la page d'une review (onglet Reviews) ne renvoyait pas à la tâche de l'agent dev : on ne voyait pas qu'elle concernait sa MR, ni où la corriger.
+- **Trou 4** : la carte d'un ticket n'indiquait pas où en est la MR de l'agent (à relire, à corriger, relue OK, fusionnée).
+- **Trou 5** : du vocabulaire du jeu dans le tableau de bord (« Maître juré », « pièce », « l'apprenti est réveillé »).
+
+**Corrigé (2026-11-18)**
+- `POST /api/tasks/:id/followup` accepte `withReview: true` : l'agent reçoit alors les points de la relecture du commit ACTUEL (lue en base, jamais envoyée par le navigateur, remise comme contenu non fiable), et les consignes deviennent facultatives. Mêmes refus que « Corriger » (MR fermée ou fusionnée, pas de relecture, relecture d'un ancien commit, relecture sans point), partagés dans `reviewToFix`. Seul `true` active l'option.
+- Page de la tâche : la case « Joindre la relecture du commit actuel (N points) » apparaît dans « Reprendre avec des consignes », cochée d'emblée, quand la relecture a des points (elle garde le choix de la personne pendant les rafraîchissements). « Corriger avec la relecture » ajoute maintenant les consignes déjà écrites, les pièces jointes, et ouvre la tâche de reprise.
+- `GET /api/reviews/:id` renvoie `devTask` (la tâche la plus récente dont la MR est vivante : `findPieceByMergeRequest`, qui ignore une reprise échouée) et la page de la review affiche un bandeau « MR faite par l'agent dev » avec un lien vers elle.
+- Carte du ticket : pastille d'état de la MR (À relire, Relecture en cours, À corriger, Relue OK, MR fusionnée...) et action « Relire, corriger, fusionner » ; plus d'action une fois la MR fusionnée.
+- Vocabulaire neutre dans le tableau de bord (« agent de review », « MR »).
+- **Testé** : `src/server/followupReview.test.ts` (7 tests, 8 mutations du serveur détectées), `findPieceByMergeRequest` (2 espaces, 2 forges), `src/server/fixReview.test.ts` inchangé (la route « Corriger » refactorée donne les mêmes réponses) ; la page : 34 contrôles (pastilles, cartes, case de relecture, lancement de la reprise, « Corriger », lien depuis la review, vocabulaire) et 15 mutations détectées.
+- **Pas testé** : un vrai agent qui corrige à partir de la relecture jointe (le prompt est testé, pas le comportement du modèle) ; le rendu dans un vrai navigateur ; le flux complet contre un vrai GitLab ou GitHub.
+- **Reste un clic, volontairement** : après une reprise, la relecture est périmée (nouveau commit) et se relance par « Faire relire par l'agent de review » ; la fusion reste un clic confirmé. Une relecture automatique après chaque reprise est possible, mais elle consomme du quota à chaque passage : à décider.

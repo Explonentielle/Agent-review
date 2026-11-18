@@ -442,22 +442,26 @@ export function buildServer(base: ServerDeps) {
     }
   });
 
-  /** Reprise : relance l'agent sur la branche de la MR créée par cette tâche, avec des consignes. */
-  app.post<IdParams & { Body: { instructions?: string; attachments?: string[] } }>("/api/tasks/:id/followup", async (req, reply) => {
+  /**
+   * Reprise : relance l'agent sur la branche de la MR créée par cette tâche, avec des consignes. Avec `withReview`, l'agent reçoit aussi les points de la
+   * relecture du commit ACTUEL (lue en base, jamais envoyée par le navigateur) : les consignes deviennent alors facultatives.
+   */
+  app.post<IdParams & { Body: { instructions?: string; attachments?: string[]; withReview?: boolean } }>("/api/tasks/:id/followup", async (req, reply) => {
     try {
       const origin = await deps.tasks.get(Number(req.params.id));
       if (!origin) return reply.code(404).send({ error: "Tâche introuvable" });
-      const instructions = req.body?.instructions?.trim();
-      if (!instructions) return reply.code(400).send({ error: "Les consignes de reprise sont obligatoires" });
-      if (!origin.branch || !origin.mr_iid || !origin.mr_url || origin.status === "running" || origin.status === "queued") {
-        return reply.code(400).send({ error: "Seule une tâche terminée liée à une MR peut être reprise" });
-      }
-      const project = await deps.settings.getProject(origin.source, origin.project_id);
-      if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
-      if (await deps.tasks.findActive(origin.source, origin.project_id, origin.issue_iid)) {
-        return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
-      }
+      const note = req.body?.instructions?.trim() ?? "";
+      const withReview = req.body?.withReview === true;
+      if (!note && !withReview) return reply.code(400).send({ error: "Les consignes de reprise sont obligatoires" });
+      const refused = await refuseFollowup(origin);
+      if (refused) return reply.code(refused.code).send({ error: refused.error });
 
+      let instructions = note;
+      if (withReview) {
+        const fix = await reviewToFix(origin as FollowupOrigin);
+        if (!fix.ok) return reply.code(fix.code).send({ error: fix.error });
+        instructions = followupInstructions(note.slice(0, 4000), fix.result);
+      }
       const id = await startFollowup(origin as FollowupOrigin, instructions, req.body?.attachments);
       return { id };
     } catch (err) {
@@ -473,27 +477,51 @@ export function buildServer(base: ServerDeps) {
     try {
       const origin = await deps.tasks.get(Number(req.params.id));
       if (!origin) return reply.code(404).send({ error: "Tâche introuvable" });
-      if (!origin.branch || !origin.mr_iid || !origin.mr_url || origin.status === "running" || origin.status === "queued") {
-        return reply.code(400).send({ error: "Seule une tâche terminée liée à une MR peut être reprise" });
-      }
-      const project = await deps.settings.getProject(origin.source, origin.project_id);
-      if (!project?.devEnabled) return reply.code(400).send({ error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" });
-      if (await deps.tasks.findActive(origin.source, origin.project_id, origin.issue_iid)) return reply.code(409).send({ error: "Un agent travaille déjà sur ce ticket" });
-      const mr = await deps.forges.get(origin.source).connector.getChangeRequest(origin.project_id, origin.mr_iid);
-      if (mr.state !== "opened") return reply.code(409).send({ error: mr.state === "merged" ? "La MR est déjà fusionnée." : "La MR est fermée." });
-      const latest = (await deps.reviews.listForMergeRequest(origin.source, origin.project_id, origin.mr_iid))[0];
-      if (!latest || !latest.result_json) return reply.code(409).send({ error: "Aucune relecture terminée : fais d'abord relire la pièce." });
-      if (latest.head_sha !== mr.headSha) return reply.code(409).send({ error: "La MR a reçu un nouveau commit depuis la relecture : fais relire la version actuelle." });
-      const parsed = ReviewResultSchema.safeParse(JSON.parse(latest.result_json));
-      if (!parsed.success) return reply.code(409).send({ error: "Le résultat de la relecture est illisible : relance-la." });
-      if (parsed.data.findings.length === 0 && parsed.data.questions_for_author.length === 0) return reply.code(400).send({ error: "La relecture n'a relevé aucun point à corriger." });
+      const refused = await refuseFollowup(origin);
+      if (refused) return reply.code(refused.code).send({ error: refused.error });
+      const fix = await reviewToFix(origin as FollowupOrigin);
+      if (!fix.ok) return reply.code(fix.code).send({ error: fix.error });
       const note = typeof req.body?.note === "string" ? req.body.note.slice(0, 4000) : "";
-      const id = await startFollowup(origin as FollowupOrigin, followupInstructions(note, parsed.data), req.body?.attachments);
+      const id = await startFollowup(origin as FollowupOrigin, followupInstructions(note, fix.result), req.body?.attachments);
       return { id };
     } catch (err) {
       return failAttachment(reply, err, fail);
     }
   });
+
+  /**
+   * Une tâche peut-elle être reprise ? Elle doit être terminée, liée à une MR, sur un projet où l'agent dev est autorisé, et aucun agent ne doit déjà
+   * travailler sur son ticket.
+   * @param origin Tâche à reprendre.
+   * @returns Le refus (code HTTP et message), ou null si la reprise est permise.
+   */
+  async function refuseFollowup(origin: DevTaskRow): Promise<{ code: number; error: string } | null> {
+    if (!origin.branch || !origin.mr_iid || !origin.mr_url || origin.status === "running" || origin.status === "queued") {
+      return { code: 400, error: "Seule une tâche terminée liée à une MR peut être reprise" };
+    }
+    const project = await deps.settings.getProject(origin.source, origin.project_id);
+    if (!project?.devEnabled) return { code: 400, error: "Projet non configuré pour l'agent dev (Paramètres > Projets)" };
+    if (await deps.tasks.findActive(origin.source, origin.project_id, origin.issue_iid)) return { code: 409, error: "Un agent travaille déjà sur ce ticket" };
+    return null;
+  }
+
+  /**
+   * La relecture à remettre à l'agent pour corriger : celle du commit ACTUEL de la MR, lue en base. Refus si la MR n'est plus ouverte, s'il n'y a pas de
+   * relecture terminée, si elle porte sur un ancien commit, si son résultat est illisible ou si elle ne relève aucun point.
+   * @param origin Tâche terminée qui a ouvert la MR.
+   * @returns La relecture, ou le refus (code HTTP et message).
+   */
+  async function reviewToFix(origin: FollowupOrigin): Promise<{ ok: true; result: ReviewResult } | { ok: false; code: number; error: string }> {
+    const mr = await deps.forges.get(origin.source).connector.getChangeRequest(origin.project_id, origin.mr_iid);
+    if (mr.state !== "opened") return { ok: false, code: 409, error: mr.state === "merged" ? "La MR est déjà fusionnée." : "La MR est fermée." };
+    const latest = (await deps.reviews.listForMergeRequest(origin.source, origin.project_id, origin.mr_iid))[0];
+    if (!latest || !latest.result_json) return { ok: false, code: 409, error: "Aucune relecture terminée : fais d'abord relire la MR." };
+    if (latest.head_sha !== mr.headSha) return { ok: false, code: 409, error: "La MR a reçu un nouveau commit depuis la relecture : fais relire la version actuelle." };
+    const parsed = ReviewResultSchema.safeParse(JSON.parse(latest.result_json));
+    if (!parsed.success) return { ok: false, code: 409, error: "Le résultat de la relecture est illisible : relance-la." };
+    if (parsed.data.findings.length === 0 && parsed.data.questions_for_author.length === 0) return { ok: false, code: 400, error: "La relecture n'a relevé aucun point à corriger." };
+    return { ok: true, result: parsed.data };
+  }
 
   /** Crée et met en file la tâche de reprise d'une tâche terminée (même branche, même MR). Les pièces jointes de la tâche reprise sont gardées. */
   async function startFollowup(origin: FollowupOrigin, instructions: string, attachments: unknown): Promise<number> {
@@ -609,7 +637,9 @@ export function buildServer(base: ServerDeps) {
   app.get<IdParams>("/api/reviews/:id", async (req, reply) => {
     const row = await deps.reviews.get(Number(req.params.id));
     if (!row) return reply.code(404).send({ error: "Review introuvable" });
-    return { ...row, result: row.result_json ? JSON.parse(row.result_json) : null };
+    // Si cette MR est celle d'une tâche de l'agent dev, la page de la review y renvoie (relire, corriger avec la relecture, fusionner)
+    const task = await deps.tasks.findPieceByMergeRequest(row.source, row.project_id, row.mr_iid);
+    return { ...row, result: row.result_json ? JSON.parse(row.result_json) : null, devTask: task ? { id: task.id, status: task.status } : null };
   });
 
   app.post<IdParams>("/api/reviews/:id/publish", async (req, reply) => {
