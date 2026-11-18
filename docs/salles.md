@@ -1,6 +1,6 @@
 # Salles du monde de la forge
 
-Le but : chaque utilisateur pourra générer **ses propres salles, à la volée, selon ses envies**, à partir de données produites par un agent. Ce document décrit le format que l'agent produit. La salle du trône (`public/rooms/throne.json`) n'est qu'une salle d'exemple.
+Ce document décrit le format des salles livrées avec l'outil (`public/rooms/`) : la salle du trône (`public/rooms/throne.json`, un exemple) et l'arène. Les salles créées par les personnes (générateur par agent, jeux libres, visites) ont été retirées le 2026-11-18 : voir la fin du document.
 
 Une salle est un fichier de **données** : `public/rooms/<id>.json`. Elle ne contient ni code, ni image, ni HTML. Le navigateur la dessine avec les objets d'un catalogue fermé (`src/rooms/catalog.ts`). Le serveur ne livre que les salles qui passent toutes les vérifications (`GET /api/rooms`).
 
@@ -11,8 +11,6 @@ Créer ou modifier une salle :
 3. Les tests (`src/rooms/rooms.test.ts`) vérifient aussi toutes les salles livrées.
 
 Exemple complet : `public/rooms/throne.json` (la salle du trône).
-
-Dans la forge, **l'Architecte** (un personnage, en bas à gauche, dès qu'une forge est allumée) explique ces étapes. Sa fenêtre propose le modèle de salle (`src/rooms/template.ts`, livré par `GET /api/rooms` et vérifié par un test), liste les salles du monde avec les erreurs des fichiers refusés, et rappelle le catalogue. Le générateur automatique n'existe pas encore.
 
 ## Le fichier
 
@@ -89,16 +87,11 @@ La salle fait **24 colonnes sur 15 rangées**, numérotées à partir de 0.
 - La jouabilité : depuis l'arrivée, on peut atteindre chaque personnage, chaque objet à lire et chaque porte.
 - Les portes mènent à la forge ou à une salle qui existe. Fichier de 64 Ko au plus, 50 salles au plus.
 
-## Un jeu dans une salle, et les salles des utilisateurs
-
-Une salle peut avoir un champ `game` (une carte, des objets, une physique, des règles, une victoire) et un personnage `"plays": true` qui le propose : voir **`docs/jeux.md`**. L'Architecte (en bas à gauche de la forge) crée une salle à partir d'une description : un agent sans outil l'écrit, le code la valide, la personne la visite puis la garde.
-
-Les salles créées par les personnes ne sont **pas** dans `public/rooms/` : elles sont rangées en fichiers sous `DATA_DIR/rooms/<espace>/<auteur>/`, **privées par défaut**, partageables à l'équipe (les membres du même espace). Le code impose : l'identifiant (`u<auteur>-nom`), pas de porte magique dans la forge, des portes qui ne mènent qu'à la forge. Un espace ne voit jamais les salles d'un autre.
 
 ## L'arène
 
 `public/rooms/arene.json` est une salle livrée comme les autres, mais sans `hub` : on y entre par la herse de fer du mur du bas de la forge, pas par une porte magique. Son Maître d'armes (`maitre-armes`) lance les combats : voir `docs/arene.md`.
 
-## Pour la suite
+## Ce qui a été retiré (2026-11-18)
 
-Aujourd'hui les salles sont celles du dépôt. Les salles d'autres personnes (leurs dépôts, propriétaires, public ou privé avec code) viendront ensuite : voir la roadmap, annexe B.
+Les salles créées par les personnes n'existent plus : champ `game` et `"plays"` d'une salle, moteur de jeu à règles et son robot, générateur par agent, salles d'utilisateurs privées ou d'équipe, Architecte, quête « Dessiner ta première salle », prompts `rooms-*`. Les salles livrées (`public/rooms/`) restent la seule source de salles ; le code retiré reste lisible dans l'historique git (item 41 de la roadmap).

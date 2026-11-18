@@ -48,7 +48,7 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 38 | Plateforme | Connexion par organisation (OAuth ou GitHub App) pour la version commerciale | Élevé | Noté (2026-11-12), lié à l'item 36 (lot C) |
 | 39 | Dashboard | Terminal Claude dans le navigateur, premiers pas guidés, forge MMORPG | Élevé | ✅ Fait (2026-11-12), annexe A de ce fichier ; jamais essayé avec la vraie CLI ni sous Linux, voir `docs/a-tester.md` section 11 bis |
 | 40 | Forge | Caractéristiques et arène : points à répartir, bonus des objets, combats contre des bots (solo), puis duels entre joueurs (multi) | Élevé | Solo implémenté (2026-11-17) : temps réel, quatre caractéristiques, cinq vagues et un seigneur, herse de fer et Maître d'armes. Multi noté : demande un stockage serveur (migration, à confirmer) |
-| 41 | Forge | Salles custom générées par un agent, jeux libres choisis par la personne, visites entre membres d'un espace | Très élevé | Jalon 1 implémenté (2026-11-16) : architecture A, moteur à règles, générateur, salles privées ou d'équipe, quête ; galerie publique et code dans des conteneurs non faits (voir la section) |
+| 41 | Forge | Salles custom générées par un agent, jeux libres choisis par la personne, visites entre membres d'un espace | Très élevé | **Retiré le 2026-11-18** (décision : hors du périmètre de l'outil). Le jalon 1 (moteur à règles, générateur, salles privées ou d'équipe, quête) a existé du 2026-11-16 au 2026-11-18 ; le code reste dans l'historique git |
 
 ---
 
@@ -570,9 +570,11 @@ Demande du 2026-11-16 : donner un usage au niveau et aux objets (raretés, butin
 
 **À trancher pour la suite** : classement ou non, lien avec le prestige (un rang d'arène à côté du rang de forgeron ?), durée de vie d'un défi en multi, commandes tactiles.
 
-### 41. Salles custom générées, jeux libres et visites : jalon 1 implémenté (2026-11-16)
+### 41. Salles custom générées, jeux libres et visites : retiré (2026-11-18)
 
-Demandes du 2026-11-16. **Rien n'est implémenté** (sauf l'Architecte et le modèle de salle, voir l'annexe B).
+**Retiré le 2026-11-18** : le moteur de jeu à règles, le robot, le générateur par agent, les salles d'utilisateurs, l'Architecte, la quête « Dessiner ta première salle » et les prompts `rooms-*` ont été supprimés (décision du propriétaire : hors périmètre, et c'est la part la plus coûteuse en quota d'agent, en calcul serveur et en surface d'attaque). Les salles livrées (`public/rooms/`, dont l'arène) restent. Le texte ci-dessous est conservé comme historique de la décision.
+
+Demandes du 2026-11-16 (historique).
 
 **Décidé**
 - **Quête du didacticiel** : une 7e quête, « Dessiner ta première salle », accomplie quand la personne a gardé une salle. L'Architecte la lance.

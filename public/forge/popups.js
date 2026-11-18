@@ -16,9 +16,7 @@
   function questsBody(source = game) {
     const h = source.data.hero;
     const quest = (q) => `<div class="fg-quest-row ${q.done ? "done" : q.id === h.nextQuest ? "next" : ""}"><span class="chk">${q.done ? "✓" : ""}</span><div><b>${esc(q.title)}</b><small>${esc(q.hint)}</small></div><span class="xp">+${q.xp} XP</span></div>`;
-    const extra = h.extraQuests ?? [];
     return `<h4>Quêtes de départ (${h.quests.filter((q) => q.done).length}/${h.quests.length})</h4>${h.quests.map(quest).join("")}
-      ${extra.length ? `<h4>Quêtes de l'atelier (${extra.filter((q) => q.done).length}/${extra.length})</h4>${extra.map(quest).join("")}` : ""}
       <h4>Hauts faits (${h.achievements.filter((a) => a.unlocked).length}/${h.achievements.length})</h4>
       <div class="fg-achv">${h.achievements.map((a) => `<div class="${a.unlocked ? "" : "locked"}"><b>${esc(a.title)}</b><small>${esc(a.description)}</small></div>`).join("")}</div>
       <details><summary>Comment gagner de l'XP ?</summary><ul>${h.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>`;
@@ -514,15 +512,6 @@
     launch: (info) => launchTicket(info),
   });
   defs.scribe = scribe.def;
-  const architect = window.ForgeArchitect.create({
-    game: () => game,
-    rerender: () => render(),
-    sel: () => current?.sel,
-    setSel: (sel) => { if (current) current.sel = sel; },
-    isOpen: () => current?.id === "architect",
-    sfx: A.sfx,
-  });
-  defs.architect = architect.def;
 
   /* ---------- ouverture, fermeture ---------- */
   async function render() {
@@ -554,7 +543,7 @@
     back.innerHTML = `<div class="fg-popup ${def.wide ? "wide" : ""}" role="dialog" aria-modal="true"><button type="button" class="fg-x" aria-label="Fermer"></button><h3>…</h3><div class="fg-pbody"><p class="fg-note">Un instant…</p></div></div>`;
     back.addEventListener("click", onClick);
     back.addEventListener("input", (ev) => { if (ev.target.matches?.("[data-fg-fixnote]")) fixNote = ev.target.value; });
-    back.addEventListener("input", (ev) => { if (current?.id === "scribe") scribe.handleInput(ev); else if (current?.id === "architect") architect.handleInput(ev); });
+    back.addEventListener("input", (ev) => { if (current?.id === "scribe") scribe.handleInput(ev); });
     document.querySelector(".fg-popups").append(back);
     current = { id, params, def, el: back, sel: undefined };
     game.setPopup(true);
@@ -575,19 +564,6 @@
   document.addEventListener("ra:changed", () => { if (current?.def.rerender) render(); });
 
   /* ---------- actions dans les popups ---------- */
-  /** Copie la salle modèle de l'Architecte dans le presse-papiers (si le navigateur refuse, le modèle reste lisible dans la fenêtre). */
-  async function copyRoomTemplate() {
-    const template = game.rooms?.template;
-    if (!template) return game.banner("Le modèle n'est pas disponible.");
-    try {
-      await navigator.clipboard.writeText(`${JSON.stringify(template, null, 2)}\n`);
-      A.sfx.select();
-      game.banner("Modèle copié : colle-le dans public/rooms/ma-salle.json.");
-    } catch {
-      game.banner("Copie refusée par le navigateur : ouvre « Voir le modèle » et copie-le à la main.");
-    }
-  }
-
   async function launch(key) {
     const [source, projectId, iid] = key.split(":");
     const i = state.issues.find((x) => x.source === source && String(x.projectId) === projectId && String(x.iid) === iid);
@@ -619,7 +595,6 @@
     const by = (attr) => t.closest(`[${attr}]`);
     let el;
     if (current?.id === "scribe" && scribe.handleClick(ev)) return;
-    if (current?.id === "architect" && architect.handleClick(ev)) return;
     if ((el = by("data-fg-deltask"))) return deleteTask(el.dataset.fgDeltask);
     if ((el = by("data-fg-relaunch"))) return relaunchWorker(el.dataset.fgRelaunch, el);
     if ((el = by("data-fg-unpin"))) return unpinWorker(el.dataset.fgUnpin);
@@ -645,7 +620,6 @@
     if ((el = by("data-fg-claim"))) { game.claim([el.dataset.fgClaim]); return render(); }
     if (by("data-fg-claimall")) { game.claim(null); return render(); }
     if ((el = by("data-fg-sell"))) return sell([el.dataset.fgSell]);
-    if (by("data-fg-copy-room")) return copyRoomTemplate();
     if (by("data-fg-sellcommons")) return sell(game.data.armory.loot.filter((i) => i.grade === "common" && !game.save.sold.includes(i.id)).map((i) => i.id));
     if ((el = by("data-fg-buy"))) {
       const item = game.cosmetics.find((c) => c.id === el.dataset.fgBuy);

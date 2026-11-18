@@ -53,7 +53,7 @@
   const g = {
     root: null, stage: null, canvas: null, c: null, el: {},
     pieces: [], piecesAt: -999, play: false,
-    roomId: "forge", rooms: { catalog: null, list: [], byId: new Map(), problems: [], template: null, at: -999 }, deco: [], transition: false,
+    roomId: "forge", rooms: { catalog: null, list: [], byId: new Map(), problems: [], at: -999 }, deco: [], transition: false,
     running: false, raf: 0, last: 0, time: 0, poll: 0,
     save: loadSave(), data: { hero: null, armory: { weapons: [], loot: [] }, forges: [] }, firstRefresh: true, done: null,
     player: { tx: 12, ty: 11, x: 12 * T, y: 11 * T, dir: "up", frame: 0, moving: null, path: [] },
@@ -67,7 +67,7 @@
   /* ---------- données réelles ---------- */
   const flag = (id) => g.data.hero?.quests.some((q) => q.id === id && q.done) ?? false;
   /** Quêtes de départ puis quêtes de l'atelier (dessiner une salle...) : une seule liste à l'affichage. */
-  const allQuests = (h) => [...(h?.quests ?? []), ...(h?.extraQuests ?? [])];
+  const allQuests = (h) => h?.quests ?? [];
   const lit = (kind) => g.data.forges.includes(kind);
   const hasLoot = () => g.data.armory.loot.length > 0 || g.save.sold.length > 0;
   const modal = () => Boolean(g.dlg || g.popup || g.custom || g.transition || g.play);
@@ -146,7 +146,6 @@
     add({ id: "apprentice", name: "Apprenti", verb: "Parler", tiles: [[9, 12]], z: 13 * T, lx: 9.5, ly: 11.35, when: () => flag("claude"), draw: (c) => S.person(c, 9 * T, 12 * T, { ...S.LOOKS.apprenti, dir: "right" }), interact: apprenticeTalk });
     add({ id: "guard", name: "Maître juré", verb: "Parler", tiles: [[4, 8]], z: 9 * T, lx: 4.5, ly: 7.35, when: () => flag("project"), draw: (c) => S.person(c, 4 * T, 8 * T, { ...S.LOOKS.gardien, dir: "down" }), interact: guardTalk });
     add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[13, 4]], z: 5 * T, lx: 13.5, ly: 3.35, when: () => flag("forge"), draw: (c) => S.person(c, 13 * T, 4 * T, { ...S.LOOKS.scribe, dir: "up" }), interact: scribeTalk });
-    add({ id: "architect", name: "Architecte", verb: "Parler", tiles: [[6, 11]], z: 12 * T, lx: 6.5, ly: 10.35, when: () => flag("forge"), draw: (c) => S.person(c, 6 * T, 11 * T, { ...S.LOOKS.architecte, dir: "left" }), interact: architectTalk });
     /** Décor plein d'un coin du hall : visible avec la forge, il bloque le passage comme les autres meubles. */
     const deco = (id, tiles, z, draw) => add({ id, tiles, z, when: () => flag("forge"), decor: true, draw });
     const obj = (type, x, y) => (c, t) => S.drawObject(c, { type, x, y }, t);
@@ -346,8 +345,6 @@
       review: ["Va voir le Maître juré : il contrôle les lames des autres, les revues de demandes de fusion."],
     }[h?.nextQuest ?? ""];
     if (lines) return say("Maître Brann", lines);
-    const atelier = (h?.extraQuests ?? []).find((q) => !q.done);
-    if (atelier) return say("Maître Brann", ["Ma forge est allumée, bravo. Maintenant, laisse parler ton imagination : va voir l'Architecte, en bas à gauche.", "Dis-lui la salle que tu rêves, et même un jeu : il la dessine, tu la visites, tu y joues. Elle reste à toi tant que tu ne la partages pas."]);
     if (flag("project") && g.rooms.byId.has(ARENA_ROOM) && !g.save.arena.met) return say("Maître Brann", ["Tu as une arme au râtelier : tu peux la mettre à l'épreuve. Vois la herse de fer, en bas à droite : c'est l'arène.", "Le Maître d'armes t'y apprendra à répartir tes points de caractéristique et à te battre contre des bots."]);
     const forged = g.data.armory.loot.length, pg = progress(), pr = prestige();
     const out = [`Niveau ${h?.level ?? 1}, rang ${pr?.rank.name ?? "Fer"}, ${forged} pièce${forged > 1 ? "s" : ""} forgée${forged > 1 ? "s" : ""}. Ma forge n'a jamais tourné aussi bien.`];
@@ -411,16 +408,6 @@
     await say("Scribe", ["Tu me dictes une idée, j'écris le ticket. Ou tout un projet, avec ses premiers tickets.", "Je ne pose rien sur la forge sans que tu aies relu, patron."]);
     openPopup("scribe");
   }
-  /** L'Architecte explique comment créer une salle. Le générateur automatique n'existe pas encore : il le dit. */
-  async function architectTalk() {
-    if (!g.rooms.catalog) await loadRooms();
-    await say("Architecte", [
-      "Je dessine les salles de ce monde. Dis-moi ce que tu veux : un décor, des personnages, et même un jeu à jouer.",
-      "Je ne fais pas de code : je décris ta salle avec une carte, des objets et des règles, et le moteur de la forge la fait vivre.",
-      "Tu la visites, tu y joues, puis tu la gardes. Elle reste privée tant que tu ne la partages pas à ton équipe.",
-    ]);
-    openPopup("architect");
-  }
   async function merchantTalk() {
     const n = g.data.armory.loot.filter((i) => !g.save.sold.includes(i.id)).length;
     await say("Marchand Sélim", [n ? "Des pièces forgées ? Montre-moi ça, je rachète tout !" : "Rien à vendre ? Reviens quand tes apprentis auront forgé, ou regarde mes tenues."]);
@@ -465,10 +452,6 @@
         interact: async () => {
           if (room.id === ARENA_ROOM && n.id === ARENA_MASTER) return arenaTalk(n);
           await say(n.name, n.lines.map(fillName));
-          if (n.plays && room.game) {
-            const answer = await choose(n.name, "Jouer à « " + room.game.title + " » ?", ["Jouer", "Plus tard"]);
-            if (answer === 0) await playRoomGame(room);
-          }
         },
       });
     }
@@ -476,19 +459,6 @@
       E.push({ id: "door-" + i, always: true, solid: true, decor: true, name: d.label, verb: "Sortir", tiles: [[d.x, 14], [d.x + 1, 14]], z: 0, lx: d.x + 1, ly: 13.7, draw: (c, t) => S.doorBottom(c, d.x, H, d.style, t), interact: () => doorTo(d) });
     });
     return E;
-  }
-
-  /** Lance le jeu d'une salle (moteur à règles : public/forge/engine.js). Le meilleur score de chaque salle est gardé dans le navigateur. */
-  let gameplay = null;
-  async function playRoomGame(room) {
-    gameplay ??= window.ForgeGameplay.create({
-      stage: g.el.stage, sfx: A.sfx, look: playerLook,
-      onKeysCaptured: (on) => { g.play = on; if (on) { g.keys = []; g.player.path = []; } },
-    });
-    const best = g.save.bests?.[room.id] ?? 0;
-    const result = await gameplay.start(room.game, { theme: room.theme, best });
-    if (result.best > best) { g.save.bests = { ...(g.save.bests || {}), [room.id]: result.best }; persist(); }
-    if (result.state === "won") { A.sfx.fanfare(); banner("Gagné ! Score : " + result.score + "."); }
   }
 
   /* ---------- l'arène : le Maître d'armes explique, puis on combat des bots avec son équipement ---------- */
@@ -545,18 +515,6 @@
     return { gold, note: gold < wanted ? `plafond de ${ARENA_DAILY_GOLD} or par jour` : record ? "nouveau record !" : "" };
   }
 
-  /** Visite une salle (un brouillon de l'Architecte ou une salle d'utilisateur) : elle est connue du monde le temps de la visite. */
-  async function visitRoom(room) {
-    g.rooms.byId.set(room.id, room);
-    window.ForgePopups.close(true);
-    await enterRoom(room.id, null);
-  }
-  /** Joue directement au jeu d'une salle (sans y entrer). */
-  function playRoom(room) {
-    if (!room.game) { banner("Cette salle n'a pas de jeu."); return; }
-    return playRoomGame(room);
-  }
-
   async function portalTalk(room) {
     const answer = await choose("", "Une porte mène à « " + room.name + " ».", ["Entrer", "Rester"]);
     if (answer === 0) enterRoom(room.id, null);
@@ -601,7 +559,7 @@
     g.rooms.at = g.time;
     try {
       const out = await api("/api/rooms");
-      g.rooms = { catalog: out.catalog, list: out.rooms, byId: new Map(out.rooms.map((r) => [r.id, r])), problems: out.problems ?? [], template: out.template ?? null, at: g.time };
+      g.rooms = { catalog: out.catalog, list: out.rooms, byId: new Map(out.rooms.map((r) => [r.id, r])), problems: out.problems ?? [], at: g.time };
     } catch { /* pas de salles */ }
   }
 
@@ -1111,8 +1069,7 @@
     document.removeEventListener("visibilitychange", onVisibility);
     if (g.popup) window.ForgePopups.close();
     if (g.dlg) endDialog(-1);
-    // Un jeu ou l'arène ouverts capturent le clavier de toute la page : on les ferme en quittant la forge
-    gameplay?.close();
+    // L'arène ouverte capture le clavier de toute la page : on la ferme en quittant la forge
     arena?.close();
     g.keys = [];
     g.hover = null;
@@ -1128,7 +1085,6 @@
     persist, say, choose, banner, refresh, renderHud, weaponType, items, claim, claimable, claimKey, goldBonus, rankIndex, rankOrder: RANK_ORDER,
     setPopup(open) { g.popup = open; if (open) { g.keys = []; g.player.path = []; } },
     openCustomizer: () => openCustomizer(false),
-    visitRoom, playRoom,
   };
 
   window.ForgeGame = {

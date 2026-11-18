@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { COLORS, DIRECTIONS, DOOR_STYLES, FORGE_ROOM_ID, GRID, LIMITS, NPC_LOOKS, OBJECTS, OBJECT_TYPES, THEMES, type ObjectType } from "./catalog.js";
-import { GameSchema, checkGame } from "./game.js";
 import { text } from "./text.js";
 
 /** Identifiant : minuscules, chiffres et tirets. Il sert aussi de nom de fichier. */
@@ -30,8 +29,6 @@ const NpcSchema = z
     y: row,
     dir: z.enum(DIRECTIONS).default("down"),
     lines: z.array(text(LIMITS.lineLength)).min(1).max(LIMITS.lines),
-    /** Ce personnage propose le jeu de la salle (« Jouer ? » après ses répliques). Il faut alors un `game`. */
-    plays: z.boolean().optional(),
   })
   .strict();
 
@@ -62,8 +59,6 @@ export const RoomSchema = z
     objects: z.array(ObjectSchema).max(LIMITS.objects).default([]),
     npcs: z.array(NpcSchema).max(LIMITS.npcs).default([]),
     doors: z.array(DoorSchema).min(1, "une salle a au moins une porte, sinon on n'en sort pas").max(LIMITS.doors),
-    /** Un jeu décrit en données (src/rooms/game.ts), lancé par le personnage qui a `plays: true`. */
-    game: GameSchema.optional(),
   })
   .strict();
 
@@ -143,12 +138,6 @@ export function validateRoom(raw: unknown): RoomResult {
     }
     if (d.spawn && (d.spawn[1] < GRID.floorTop || d.spawn[1] > GRID.floorBottom)) errors.push(`${name} : spawn doit être au sol`);
   });
-
-  const players = room.npcs.filter((n) => n.plays);
-  if (room.game && players.length === 0) errors.push("game : personne ne propose ce jeu, mets « plays: true » sur un personnage");
-  if (!room.game && players.length > 0) errors.push(`npcs : ${players[0]!.name} propose un jeu mais la salle n'a pas de « game »`);
-  if (players.length > 1) errors.push("npcs : un seul personnage propose le jeu de la salle");
-  if (room.game) errors.push(...checkGame(room.game).map((e) => `game.${e}`));
 
   const total = [...room.npcs.flatMap((n) => n.lines), ...room.objects.map((o) => o.text ?? "")].join("").length;
   if (total > LIMITS.totalText) errors.push(`textes : ${total} caractères au total, ${LIMITS.totalText} au plus`);

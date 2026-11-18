@@ -170,7 +170,6 @@
     queen: { hair: "#3a2a1c", tunic: "#4a2f8a", apron: "#e8e4da", hat: "crown", skin: "#f2c9a0", long: true },
     noble: { hair: "#222", tunic: "#2f6a8a", apron: "#c9c4b0", skin: "#d9a066" },
     armurier: { hair: "#3a2a1c", tunic: "#7a2f2f", apron: "#4a4a52", skin: "#d9a066", hat: "helmet", beard: true, item: "weapon:axe:epic" },
-    architecte: { hair: "#7a5a3a", tunic: "#2a7f86", apron: "#d8cfa8", skin: "#e0b088", hat: "copper", beard: true },
   };
 
   /** Tapis : bordure dorée et liseré intérieur (les franges sont ajoutées par `carpet`, quand le tapis ne touche pas un mur). */
