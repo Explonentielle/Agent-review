@@ -128,7 +128,18 @@ export class TerminalSession {
   private push(chunk: Buffer): void {
     this.backlog.push(chunk);
     this.backlogSize += chunk.length;
-    while (this.backlogSize > this.limits.backlogBytes && this.backlog.length > 1) this.backlogSize -= this.backlog.shift()!.length;
+    // Borné à l'octet près : on retire les plus vieux blocs, puis le début du premier bloc restant (un gros bloc ne dépasse pas la limite à lui seul)
+    while (this.backlogSize > this.limits.backlogBytes && this.backlog.length > 0) {
+      const excess = this.backlogSize - this.limits.backlogBytes;
+      const oldest = this.backlog[0]!;
+      if (oldest.length <= excess) {
+        this.backlog.shift();
+        this.backlogSize -= oldest.length;
+      } else {
+        this.backlog[0] = oldest.subarray(excess);
+        this.backlogSize -= excess;
+      }
+    }
     for (const listener of this.listeners) listener({ type: "data", data: chunk });
   }
 

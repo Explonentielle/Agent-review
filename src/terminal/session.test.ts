@@ -59,6 +59,19 @@ describe("session de terminal", () => {
     expect(kept).toContain("ligne-19");
   });
 
+  it("la sortie gardée ne dépasse jamais la limite, même quand tout arrive d'un seul bloc", async () => {
+    // Un seul write : un seul bloc de 103 octets, quel que soit le découpage du tube (avant, il était gardé entier)
+    const session = open({ ...LIMITS, backlogBytes: 30 }, launchOf("process.stdout.write('A'.repeat(100) + 'FIN'); setInterval(() => {}, 1000);"));
+    await waitFor(() => collect(session).text().includes("FIN"));
+    const kept = collect(session).text();
+    expect(Buffer.byteLength(kept)).toBe(30);
+    expect(kept.endsWith("AAAFIN")).toBe(true);
+    // Les blocs suivants continuent de repousser les plus vieux octets
+    const later = open({ ...LIMITS, backlogBytes: 10 }, launchOf("process.stdout.write('0123456789'); setTimeout(() => process.stdout.write('abcdef'), 50); setInterval(() => {}, 1000);"));
+    await waitFor(() => collect(later).text().includes("abcdef"));
+    expect(collect(later).text()).toBe("6789abcdef");
+  });
+
   it("signale la fin du programme avec son code, puis refuse la saisie", async () => {
     const session = open();
     const out = collect(session);

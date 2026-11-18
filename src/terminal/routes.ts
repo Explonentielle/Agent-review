@@ -107,6 +107,7 @@ export function registerTerminal(app: FastifyInstance, options: TerminalRouteOpt
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+    res.flushHeaders(); // Node garde les en-têtes jusqu'au premier octet : sans cela, un programme silencieux au départ laisserait le client en attente
     const send = (event: string, data: string) => res.write(`event: ${event}\ndata: ${data}\n\n`);
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "data") return void send("data", event.data.toString("base64"));
