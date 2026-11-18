@@ -27,8 +27,8 @@ export interface Quest {
   hint: string;
   done: boolean;
   xp: number;
-  /** Où mener la quête : dans le dashboard, ou à la forge (l'Architecte). */
-  action: "settings" | "terminal" | "tickets" | "reviews" | "architect";
+  /** Où mener la quête : dans le dashboard. */
+  action: "settings" | "terminal" | "tickets" | "reviews";
 }
 
 export interface Achievement {
