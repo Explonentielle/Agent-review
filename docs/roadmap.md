@@ -53,6 +53,7 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 43 | Dashboard | Flux ticket, agent dev, review, correction, fusion : audit et trous comblés (la reprise reçoit la relecture, lien review vers tâche, état de la MR sur la carte du ticket) | Élevé | ✅ Fait (2026-11-18), voir la section 43. Jamais essayé de bout en bout avec un vrai agent ni une vraie forge |
 | 44 | Plateforme | Droits par rôle (les rôles n'étaient contrôlés nulle part), invitations d'équipe, gestion des membres, quotas par personne, limitation du débit de connexion | Très élevé | ✅ Fait (2026-11-18), détail dans `docs/roadmap-plateforme.md` (« C2 suite et C7 ») et recette dans `docs/a-tester.md`, section 11 quater. Jamais essayé avec de vrais comptes de forge ni dans un navigateur |
 | 45 | Plateforme | Compte classique : inscription par email, mot de passe, mot de passe oublié, organisations créées par une personne, invitations envoyées par email (Resend) | Très élevé | ✅ Fait (2026-11-18), voir la section 45. Jamais essayé avec un vrai compte Resend ni dans un navigateur |
+| 46 | Plateforme | Tout en conteneurs : plus jamais d'agent ni de terminal sur la machine dès qu'il y a des comptes, et l'abonnement Claude conservé par un jeton `claude setup-token` par personne | Très élevé | ✅ Fait (2026-11-19), voir la section 46. Jamais essayé avec un vrai Docker sans root ni la vraie CLI avec le jeton |
 
 ---
 
@@ -666,3 +667,22 @@ Demande : vérifier que créer un ticket, lancer l'agent dev, relire sa MR, corr
 - Un blocage de 10 essais par adresse peut être provoqué par un tiers qui connaît l'adresse : choix assumé (il dure 15 minutes).
 
 **Pas fait** : page « Mon compte » (changer de mot de passe ou d'adresse, ajouter un email à un compte de forge, lier une forge à un compte par email), quitter une organisation soi-même, supprimer une organisation, renvoyer une invitation en un clic, SSO d'entreprise (OIDC), authentification à deux facteurs, journal d'audit des actions d'administration.
+
+### 46. Tout en conteneurs, et l'abonnement Claude conservé (2026-11-19)
+
+**Demande** : que plus rien ne tourne en mode machine (`AGENT_RUNTIME=host`) sur la plateforme, et garder l'usage de l'abonnement Claude Code. Constat de départ : `host` était le défaut (un `.env` sans la ligne remettait silencieusement les agents sur la machine), et le mode conteneur refusait l'abonnement (le dossier personnel de la machine, où vit la session, ne se monte pas dans un conteneur).
+
+**Fait**
+- **Conteneurs par défaut, machine refusée avec des comptes** : `AGENT_RUNTIME` vaut `docker` par défaut. `AGENT_RUNTIME=host` est refusé au démarrage dès qu'une connexion par compte (forge ou email) est configurée ; il reste permis sur un poste local sans comptes (une seule personne).
+- **Abonnement par jeton** : chaque personne enregistre son jeton `claude setup-token` (Paramètres > Connexion > « Jeton d'abonnement Claude », chiffré dans le coffre comme la clé API, ou `CLAUDE_CODE_OAUTH_TOKEN` du `.env` pour le propriétaire). Il est transmis au seul conteneur de ses tâches par l'environnement du client `docker` (jamais dans les arguments), masqué dans les erreurs et les journaux. Un membre n'hérite jamais de celui du propriétaire. Sans jeton, la tâche est refusée avec la marche à suivre, jamais exécutée sur la machine. Une clé API ne passe jamais devant l'abonnement (la CLI lui donnerait priorité) : un conteneur reçoit l'un ou l'autre.
+- **Terminal du navigateur en conteneur** : même conteneur isolé que les agents (lecture seule, aucune capacité, plafonds), avec le jeton du propriétaire, supprimé à la fin de la session. La pastille « connecté » se déduit de la présence du jeton.
+- **Diagnostic** : la première ligne devient « Connexion à Claude » (jeton ou clé selon le mode choisi). Les statistiques exposent `oauthTokenConfigured` (présence seulement).
+- **Décision renversée** : le jeton d'abonnement par personne avait été « non retenu » le 2026-11-09 (secrets sensibles centralisés, conditions d'utilisation incertaines). Retenu à la demande du propriétaire ; la validation des conditions d'utilisation par Anthropic reste à faire avant d'ouvrir au-delà de l'équipe.
+
+**Testé** : 927 tests (14 de plus), 24 mutations détectées (défaut remis sur la machine, machine permise avec des comptes ou avec la seule connexion par email, jeton du propriétaire donné aux autres, jeton non transmis, écrit dans les arguments, absent de l'environnement du client, clé du shell transmise, repli sur la machine sans jeton, jeton non masqué, conteneur du terminal jamais supprimé, environnement de l'outil donné au terminal, dossier créé avant validation, jeton non appliqué ou non supprimé, valeur renvoyée par les statistiques...), contrôles du front avec des doublures, faux `docker`.
+**Pas testé** : un vrai Docker sans root, la vraie CLI Claude Code avec `CLAUDE_CODE_OAUTH_TOKEN` et un dossier personnel vide (écrans de premier lancement, comportement hors ligne), le terminal en conteneur dans un navigateur, la construction de l'image des agents.
+**À savoir**
+- **Le déploiement des sections 1 à 8 (l'application dans son conteneur, sans Docker) ne peut plus lancer d'agents avec des comptes** : l'outil refuse de démarrer. Avec des comptes, c'est la section 11 de `docs/deploiement.md` (l'outil sur la machine, Docker sans root). Sans comptes, `AGENT_RUNTIME=host` doit être écrit explicitement dans le `.env`.
+- Le jeton est lisible par l'agent de la personne et, sans filtre du réseau sortant (D7), un agent manipulé pourrait l'envoyer ailleurs : même exposition que la clé API. Il vaut un an.
+- La connexion faite par `/login` dans le terminal en conteneur n'est pas conservée : le jeton est le seul moyen persistant. La session `~/.claude` existante de la machine ne sert plus.
+- Possible plus tard : un bouton du terminal qui lance `claude setup-token` dans le conteneur, pour obtenir le jeton sans quitter le navigateur.

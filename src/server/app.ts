@@ -207,6 +207,8 @@ export function buildServer(base: ServerDeps) {
       agentAuth: settings.agentAuth,
       /** Présence seulement : la clé n'est jamais renvoyée. */
       apiKeyConfigured: deps.config.anthropicApiKey !== null,
+      /** Présence seulement : le jeton d'abonnement n'est jamais renvoyé. */
+      oauthTokenConfigured: deps.config.claudeOauthToken !== null,
       counts: await deps.reviews.countByStatus(),
       queueSize: deps.queueSize(),
       agreement: await deps.reviews.agreementStats(),
@@ -271,6 +273,7 @@ export function buildServer(base: ServerDeps) {
           dataDir: deps.config.dataDir,
           agentAuth: settings.agentAuth,
           apiKeyConfigured: deps.config.anthropicApiKey !== null,
+          oauthTokenConfigured: deps.config.claudeOauthToken !== null,
         }).finally(() => runtimeChecks.delete(key));
         runtimeChecks.set(key, running);
       }

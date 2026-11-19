@@ -7,7 +7,7 @@ import { TerminalError, type TerminalHub, type TerminalLaunch } from "./session.
 export interface TerminalFeature {
   hub: TerminalHub;
   /** Prépare le lancement de la CLI ; lève TerminalError si le système ne le permet pas. */
-  launch: () => TerminalLaunch;
+  launch: () => Promise<TerminalLaunch>;
   /** État de la connexion de la CLI. */
   status: ClaudeStatusProbe;
 }
@@ -63,7 +63,7 @@ export function registerTerminal(app: FastifyInstance, options: TerminalRouteOpt
     let available = true;
     let reason = "";
     try {
-      feature.launch();
+      await feature.launch();
     } catch (err) {
       available = false;
       reason = err instanceof Error ? err.message : String(err);
@@ -74,7 +74,7 @@ export function registerTerminal(app: FastifyInstance, options: TerminalRouteOpt
 
   app.post("/api/terminal/start", route, async (req, reply) => {
     try {
-      const session = feature.hub.start(keyOf(req), feature.launch());
+      const session = feature.hub.start(keyOf(req), await feature.launch());
       return { ok: true, id: session.id, cols: TERMINAL_COLS, rows: TERMINAL_ROWS };
     } catch (err) {
       return fail(reply, err, err instanceof TerminalError ? 400 : 500);

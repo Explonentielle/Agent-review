@@ -424,4 +424,21 @@ describe("configuration de la connexion", () => {
     expect(() => loadConfig({ GITHUB_TOKEN: "t", AUTH_GITLAB_CLIENT_ID: "c", AUTH_GITLAB_CLIENT_SECRET: "s", AUTH_OWNER: "gitlab:a", DATA_DIR: "/tmp/x" })).toThrow(/demande GITLAB_URL/);
     expect(() => loadConfig({ ...base, ...gitlab, AUTH_OWNER: "gitlab:alex", SESSION_DAYS: "0" })).toThrow(/SESSION_DAYS/);
   });
+
+  it("des comptes configurés : les agents tournent en conteneurs, le mode machine est refusé ; sans comptes (poste local), il reste permis", () => {
+    const gitlab = { AUTH_GITLAB_CLIENT_ID: "cid", AUTH_GITLAB_CLIENT_SECRET: "csecret", AUTH_OWNER: "gitlab:alex" };
+    const mail = { RESEND_API_KEY: "re_cle_de_test", MAIL_FROM: "Outil <outil@exemple.test>", PUBLIC_URL: "https://review.example", AUTH_OWNER: "alex@example.com" };
+    expect(loadConfig({ ...base, ...gitlab }).agentRuntime.mode).toBe("docker"); // défaut : jamais sur la machine
+    expect(() => loadConfig({ ...base, ...gitlab, AGENT_RUNTIME: "host" })).toThrow(/AGENT_RUNTIME=host est refusé/);
+    expect(() => loadConfig({ ...base, ...mail, AGENT_RUNTIME: "host" })).toThrow(/AGENT_RUNTIME=host est refusé/);
+    expect(loadConfig({ ...base, ...gitlab, AGENT_RUNTIME: "docker" }).agentRuntime.mode).toBe("docker");
+    expect(loadConfig({ ...base, AGENT_RUNTIME: "host" }).agentRuntime.mode).toBe("host"); // un seul utilisateur local, aucun compte
+  });
+
+  it("jeton d'abonnement du .env : sans espace, absent par défaut", () => {
+    expect(loadConfig(base).claudeOauthToken).toBeNull();
+    expect(loadConfig({ ...base, CLAUDE_CODE_OAUTH_TOKEN: "  sk-ant-oat01-DU-ENV-1234567  " }).claudeOauthToken).toBe("sk-ant-oat01-DU-ENV-1234567");
+    expect(loadConfig({ ...base, CLAUDE_CODE_OAUTH_TOKEN: "" }).claudeOauthToken).toBeNull();
+    expect(() => loadConfig({ ...base, CLAUDE_CODE_OAUTH_TOKEN: "deux mots" })).toThrow(/CLAUDE_CODE_OAUTH_TOKEN/);
+  });
 });

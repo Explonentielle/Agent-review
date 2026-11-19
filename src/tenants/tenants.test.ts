@@ -108,12 +108,26 @@ describe("exécution par personne", () => {
     expect(configs[1]!.gitlab).toBeNull();
     expect(configs[1]!.github).toBeNull();
     expect(configs[1]!.anthropicApiKey).toBeNull();
+    expect(configs[1]!.claudeOauthToken).toBeNull();
     expect(configs[1]!.dataDir).toBe(path.join(h.config.dataDir, "tenants", `${bob.workspaceId}-${bob.userId}`));
     expect(other.deps.forges.all()).toEqual([]);
     expect(owner.deps.config.dataDir).toBe(h.config.dataDir);
 
     expect(started).toEqual([{ username: "alex", kind: "gitlab" }]); // pas de poller pour qui n'a aucune forge
     expect(await manager.get(h.local)).toBe(owner); // une seule exécution par personne
+  });
+
+  it("le jeton d'abonnement du .env est réservé au propriétaire : une autre personne n'a que le sien, ou aucun", async () => {
+    h.config.claudeOauthToken = "sk-ant-oat01-DU-ENV-PROPRIETAIRE";
+    const owner = await manager.get(h.local);
+    const other = await manager.get(bob);
+    expect(owner.deps.config.claudeOauthToken).toBe("sk-ant-oat01-DU-ENV-PROPRIETAIRE");
+    expect(other.deps.config.claudeOauthToken).toBeNull(); // aucun repli sur celui du propriétaire
+
+    await store.put({ workspaceId: bob.workspaceId, userId: bob.userId }, "anthropic.oauth_token", "sk-ant-oat01-DE-BOB-1234567");
+    await manager.drop(bob);
+    expect((await manager.get(bob)).deps.config.claudeOauthToken).toBe("sk-ant-oat01-DE-BOB-1234567");
+    expect(owner.deps.config.claudeOauthToken).toBe("sk-ant-oat01-DU-ENV-PROPRIETAIRE");
   });
 
   it("dépôts, réglages, clé API et files de chaque personne sont séparés", async () => {
@@ -333,7 +347,7 @@ describe("serveur pour plusieurs personnes", () => {
 
   it("une personne enregistre ses jetons : ses connexions se reconstruisent sans redémarrage, celles des autres ne bougent pas", async () => {
     const before = (await get(other, "/api/secrets")).json<{ secrets: { name: string; source: string | null }[] }>().secrets.map((s) => [s.name, s.source]);
-    expect(before).toEqual([["gitlab.url", "env"], ["gitlab.token", null], ["github.token", null], ["anthropic.api_key", null]]); // seule l adresse de l instance vient du .env : aucun jeton
+    expect(before).toEqual([["gitlab.url", "env"], ["gitlab.token", null], ["github.token", null], ["anthropic.api_key", null], ["anthropic.oauth_token", null]]); // seule l adresse de l instance vient du .env : aucun jeton
 
     const saved = await post(other, "/api/secrets/github.token", { value: "github_pat_DE_BOB_1234" });
     expect(saved.statusCode).toBe(200);
@@ -346,12 +360,18 @@ describe("serveur pour plusieurs personnes", () => {
       ["gitlab.token", "env"],
       ["github.token", null],
       ["anthropic.api_key", null],
+      ["anthropic.oauth_token", null],
     ]);
 
     // La clé API de l'un n'est pas celle de l'autre
     expect((await post(other, "/api/secrets/anthropic.api_key", { value: "sk-ant-DE-BOB-12345" })).statusCode).toBe(200);
     expect((await get(other, "/api/stats")).json<{ apiKeyConfigured: boolean }>().apiKeyConfigured).toBe(true);
     expect((await get(owner, "/api/stats")).json<{ apiKeyConfigured: boolean }>().apiKeyConfigured).toBe(false);
+
+    // Le jeton d'abonnement non plus
+    expect((await post(other, "/api/secrets/anthropic.oauth_token", { value: "sk-ant-oat01-DE-BOB-12345678" })).statusCode).toBe(200);
+    expect((await get(other, "/api/stats")).json<{ oauthTokenConfigured: boolean }>().oauthTokenConfigured).toBe(true);
+    expect((await get(owner, "/api/stats")).json<{ oauthTokenConfigured: boolean }>().oauthTokenConfigured).toBe(false);
 
     // Le propriétaire ne peut pas lui retirer son jeton, ni l'inverse : chaque coffre est personnel
     expect((await post(owner, "/api/secrets/github.token/delete")).json()).toEqual({ deleted: false, restartRequired: false });

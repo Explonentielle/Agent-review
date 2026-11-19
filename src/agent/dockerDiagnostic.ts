@@ -30,6 +30,8 @@ export interface RuntimeContext {
   agentAuth: "subscription" | "api";
   /** Vrai si une clé API Anthropic est définie pour cette personne. */
   apiKeyConfigured: boolean;
+  /** Vrai si un jeton d'abonnement Claude (`claude setup-token`) est défini pour cette personne. */
+  oauthTokenConfigured: boolean;
 }
 
 /** Réponse d'une commande docker : jamais une exception, pour que chaque contrôle décrive lui-même l'échec. */
@@ -117,7 +119,7 @@ function limitFault(label: string, read: string | undefined, expected: number, u
  * Docker, l'image, puis un conteneur d'essai (écriture dans le dossier de travail, isolation, plafonds de ressources) et la CLI Claude Code.
  * Les contrôles qui dépendent d'un échec précédent (Docker injoignable, image absente) ne sont pas lancés. Hors du mode conteneur, rien n'est lancé.
  * @param runtime Réglages de l'exécution des agents (`AGENT_*`).
- * @param ctx Dossier de données, mode de connexion à Claude et présence de la clé API.
+ * @param ctx Dossier de données, mode de connexion à Claude, présence de la clé API et du jeton d'abonnement.
  * @returns Le résultat de chaque contrôle.
  */
 export async function diagnoseAgentRuntime(runtime: Config["agentRuntime"], ctx: RuntimeContext): Promise<RuntimeDiagnostic> {
@@ -127,13 +129,14 @@ export async function diagnoseAgentRuntime(runtime: Config["agentRuntime"], ctx:
   const finish = (): RuntimeDiagnostic => ({ mode: "docker", ok: checks.every((c) => c.ok), checks });
   const add = (id: RuntimeCheck["id"], label: string, ok: boolean, detail: string) => void checks.push({ id, label, ok, detail });
 
-  // 1. Connexion à Claude : l'abonnement ne se monte pas dans un conteneur
-  if (ctx.agentAuth !== "api") {
-    add("auth", "Mode clé API", false, "Les agents en conteneur exigent le mode « Clé API » (Paramètres > Modèles) : en mode abonnement, les tâches sont refusées.");
-  } else if (!ctx.apiKeyConfigured) {
-    add("auth", "Mode clé API", false, "Le mode clé API est actif, mais aucune clé Anthropic n'est définie (section Connexion ou ANTHROPIC_API_KEY).");
+  // 1. Connexion à Claude : le conteneur reçoit la clé API (mode clé API) ou le jeton d'abonnement (mode abonnement), rien d'autre
+  if (ctx.agentAuth === "api") {
+    if (ctx.apiKeyConfigured) add("auth", "Connexion à Claude", true, "Mode clé API actif, clé définie.");
+    else add("auth", "Connexion à Claude", false, "Le mode clé API est actif, mais aucune clé Anthropic n'est définie (Paramètres > Connexion, ou ANTHROPIC_API_KEY du .env).");
+  } else if (ctx.oauthTokenConfigured) {
+    add("auth", "Connexion à Claude", true, "Mode abonnement actif, jeton d'abonnement défini (transmis au seul conteneur de la tâche).");
   } else {
-    add("auth", "Mode clé API", true, "Mode clé API actif, clé définie.");
+    add("auth", "Connexion à Claude", false, "Le mode abonnement est actif, mais aucun jeton d'abonnement n'est défini : lance « claude setup-token » sur ton poste, puis colle le jeton dans Paramètres > Connexion.");
   }
 
   // 2. Docker répond, et en quel mode (classique ou sans root)

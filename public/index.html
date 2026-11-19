@@ -1434,8 +1434,11 @@ function claudeStatusRow() {
 }
 
 function claudeBlock() {
+  const inContainer = state.runtime?.mode === "docker";
   return `<div id="claude-block"><div class="sub-title">Abonnement Claude</div>
-    <p class="note">Les agents utilisent la CLI Claude Code de cette machine. Connecte ton abonnement ici, sans passer par SSH : le terminal ouvre la CLI.</p>
+    <p class="note">${inContainer
+      ? "Les agents tournent dans des conteneurs isolés et utilisent ton abonnement par le jeton enregistré ci-dessus (<code>claude setup-token</code> sur ton poste). Le terminal ouvre la CLI dans un conteneur du même genre, avec ce jeton."
+      : "Les agents utilisent la CLI Claude Code de cette machine. Connecte ton abonnement ici, sans passer par SSH : le terminal ouvre la CLI."}</p>
     <div id="claude-status">${claudeStatusRow()}</div>
     <div class="actions-inline">
       <button type="button" class="btn sm primary" data-act="term-open">Ouvrir le terminal Claude</button>
@@ -1446,7 +1449,9 @@ function claudeBlock() {
         <button type="button" class="btn sm ghost" data-act="term-hide" title="Cache le terminal, la session continue">Masquer</button>
         <button type="button" class="btn sm danger" data-act="term-stop">Arrêter la session</button></div>
       <div id="term-host"></div>
-      <div class="term-hint">Dans la CLI, choisis la connexion avec ton compte Claude (abonnement), ouvre le lien affiché dans ton navigateur, puis colle ici le code qu'il te donne (Ctrl+Maj+V ou clic droit). Si rien ne la propose, tape <code>/login</code>. La pastille passe à « connecté » toute seule.</div>
+      <div class="term-hint">${inContainer
+        ? "Ce terminal tourne dans un conteneur jetable : une connexion faite ici (<code>/login</code>) n'est pas conservée. Enregistre plutôt ton jeton d'abonnement dans la section Connexion."
+        : "Dans la CLI, choisis la connexion avec ton compte Claude (abonnement), ouvre le lien affiché dans ton navigateur, puis colle ici le code qu'il te donne (Ctrl+Maj+V ou clic droit). Si rien ne la propose, tape <code>/login</code>. La pastille passe à « connecté » toute seule."}</div>
     </div>
   </div>`;
 }
@@ -1616,6 +1621,11 @@ function apiKeyPill() {
   return state.stats?.apiKeyConfigured ? pill("green", "clé définie") : pill("orange", "clé absente");
 }
 
+/** Pastille du jeton d'abonnement Claude : défini (.env ou saisie) ou absent. */
+function oauthTokenPill() {
+  return state.stats?.oauthTokenConfigured ? pill("green", "jeton défini") : pill("orange", "jeton absent");
+}
+
 /** Libellés des écritures du journal d'audit. */
 const AUDIT_ACTIONS = {
   push_branch: "Branche poussée",
@@ -1647,6 +1657,11 @@ function sessionBlock() {
     <button type="button" class="btn sm ghost" data-act="logout">Se déconnecter</button>`;
 }
 
+/** Aide affichée sous un réglage enregistrable, quand il demande une explication. */
+const SECRET_HINT = {
+  "anthropic.oauth_token": `Pour utiliser ton abonnement Claude dans les conteneurs des agents : lance <code>claude setup-token</code> sur ton poste, copie le jeton affiché (valable un an) et colle-le ici. Il n'est transmis qu'à tes propres conteneurs.`,
+};
+
 /** Jetons enregistrables dans l'outil (chiffrés en base) : origine, saisie et suppression. Le serveur ne renvoie jamais leur valeur. */
 function secretsBlock() {
   const list = state.secrets;
@@ -1661,6 +1676,7 @@ function secretsBlock() {
     <div class="secret-list">${list.map((x) => `
       <div class="field"><span>${esc(x.label)} ${origin(x)}</span>
         ${x.source === "env" ? (x.secret === false && x.value ? `<small>${esc(x.value)}</small>` : "") : `<div class="secret-form">${input(x)}<button type="button" class="btn sm primary" data-act="secret-save" data-name="${esc(x.name)}">Enregistrer</button>${x.source === "vault" ? `<button type="button" class="btn sm ghost" data-act="secret-delete" data-name="${esc(x.name)}">Supprimer</button>` : ""}</div>`}
+        ${SECRET_HINT[x.name] ? `<small>${SECRET_HINT[x.name]}</small>` : ""}
         <small>Appliqué tout de suite.</small></div>`).join("")}</div>`;
 }
 
@@ -1681,7 +1697,7 @@ async function secretAction(act, name) {
     }
     await refreshHeader();
     state.secrets = (await api("/api/secrets")).secrets;
-    const blocks = { "forges-block": forgesBlock, "secrets-block": secretsBlock, "api-key-state": apiKeyPill };
+    const blocks = { "forges-block": forgesBlock, "secrets-block": secretsBlock, "api-key-state": apiKeyPill, "oauth-token-state": oauthTokenPill };
     for (const [id, render] of Object.entries(blocks)) { const el = document.getElementById(id); if (el) el.innerHTML = render(); }
     document.dispatchEvent(new Event("ra:changed"));
   } catch (err) { toast(err.message, true); }
@@ -1701,7 +1717,7 @@ function forgesBlock() {
 function runtimeSection() {
   const r = state.runtime;
   const body = !r ? `<p class="note">L'état des conteneurs d'agents est indisponible.</p>`
-    : r.mode !== "docker" ? `<p class="note">Les agents tournent directement sur la machine (<code>AGENT_RUNTIME=host</code>). Pour les isoler dans des conteneurs jetables, voir <code>docs/deploiement.md</code>, sections 10 et 11.</p>`
+    : r.mode !== "docker" ? `<p class="note">Les agents tournent directement sur la machine (<code>AGENT_RUNTIME=host</code>, permis seulement sur un poste local sans comptes) : rien ne les isole. Avec des comptes, les conteneurs sont obligatoires, voir <code>docs/deploiement.md</code>, sections 10 et 11.</p>`
     : (() => {
       const images = r.images || [r.image];
       return `<dl class="kv"><dt>Image par défaut</dt><dd><code>${esc(r.image)}</code></dd>
@@ -1712,7 +1728,7 @@ function runtimeSection() {
     })();
   return `<section class="card-section">
         <h2>Agents dans des conteneurs</h2>
-        <p class="desc">Chaque review et chaque tâche de dev peut tourner dans un conteneur jetable qui ne voit que son dossier de travail (réglage <code>AGENT_RUNTIME</code> du .env). Le test lance un conteneur d'essai avec les options d'une vraie tâche, et vérifie le mode clé API, Docker, l'image, l'écriture dans le dossier de travail, l'isolation, les plafonds de ressources et la CLI Claude Code.</p>
+        <p class="desc">Chaque review et chaque tâche de dev tourne dans un conteneur jetable qui ne voit que son dossier de travail (réglage <code>AGENT_RUNTIME</code> du .env, <code>docker</code> par défaut). Le test lance un conteneur d'essai avec les options d'une vraie tâche, et vérifie la connexion à Claude (jeton d'abonnement ou clé API), Docker, l'image, l'écriture dans le dossier de travail, l'isolation, les plafonds de ressources et la CLI Claude Code.</p>
         ${body}
       </section>`;
 }
@@ -1887,7 +1903,7 @@ function renderSettings() {
         <p class="desc">Le plafond (Sonnet 5.5, effort élevé) est imposé par le code, quelle que soit la connexion.</p>
         <div class="sub-title">Connexion à Claude</div>
         <div class="radios">
-          <label class="radio"><input type="radio" name="agentAuth" value="subscription" ${s.agentAuth === "subscription" ? "checked" : ""}><span><b>Abonnement Claude</b><small>La CLI utilise ton abonnement (Pro, Max...), sans facturation à l'usage. Une clé API présente dans ton shell est ignorée.</small></span></label>
+          <label class="radio"><input type="radio" name="agentAuth" value="subscription" ${s.agentAuth === "subscription" ? "checked" : ""}><span><b>Abonnement Claude</b><small>La CLI utilise ton abonnement (Pro, Max...), sans facturation à l'usage. Dans les conteneurs des agents, il passe par le jeton de la section Connexion ci-dessus (<code>claude setup-token</code>). <span id="oauth-token-state">${oauthTokenPill()}</span> Une clé API présente dans ton shell est ignorée.</small></span></label>
           <label class="radio"><input type="radio" name="agentAuth" value="api" ${s.agentAuth === "api" ? "checked" : ""}><span><b>Clé API Anthropic</b><small>Facturation à l'usage, avec la clé API Anthropic (fichier .env ou section Connexion ci-dessus). <span id="api-key-state">${apiKeyPill()}</span></small></span></label>
         </div>
         <div class="grid2" style="margin-top:14px">

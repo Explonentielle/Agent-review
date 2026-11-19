@@ -52,13 +52,13 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | C8 | Serveur | File de tâches par utilisateur, limites de concurrence | M | C4 | ✅ 2026-11-10 (files par personne, limite commune) ; priorité équitable et éviction des inactifs non faites |
 | C9 | Serveur | Déploiement : image de la plateforme, TLS, sauvegardes | L | C1a | 🟡 2026-11-10 préparé (image, compose, sauvegardes), jamais construit ni lancé ; TLS non fait |
 | D1 | Environnements | Modèle d'environnement et lecture de `devcontainer.json` | M | C4 | ⬜ |
-| D2 | Environnements | Orchestrateur Docker : rootless, limites, volumes, arrêt à l'inactivité | L | D1 | 🟡 2026-11-12 un conteneur jetable par tâche, limites, Docker sans root décidé et préparé ; pas de conteneur persistant ni d'arrêt à l'inactivité ; jamais essayé avec un vrai Docker sans root |
+| D2 | Environnements | Orchestrateur Docker : rootless, limites, volumes, arrêt à l'inactivité | L | D1 | 🟡 2026-11-12 un conteneur jetable par tâche, limites, Docker sans root décidé et préparé ; 2026-11-19 conteneurs par défaut et machine refusée dès qu'il y a des comptes ; pas de conteneur persistant ni d'arrêt à l'inactivité ; jamais essayé avec un vrai Docker sans root |
 | D3 | Environnements | Génération du Dockerfile par l'agent (droits réduits) | M | D1, A1 | ⬜ |
 | D4 | Environnements | Vérification de l'image : bac à sable, versions, scan, test à blanc | L | D2 | ⬜ |
 | D5 | Environnements | Patch seul : sortie du conteneur et application contrôlée | L | A2, D2 | 🟡 2026-11-12 le conteneur n'a aucun identifiant de forge, l'outil fait contrôles, commit et push ; pas de patch à proprement parler |
 | D6 | Environnements | Démon agent dans le conteneur (tâche, événements, annulation) | L | A1, D2 | 🟡 2026-11-12 tâche, événements et annulation par conteneur jetable, sans démon persistant |
 | D7 | Environnements | Réseau : liste blanche et proxy de paquets | M | D2 | ⬜ |
-| D8 | Environnements | Terminal web authentifié et `/login` Claude dans le conteneur | M | D2 | ⬜ |
+| D8 | Environnements | Terminal web authentifié et `/login` Claude dans le conteneur | M | D2 | 🟡 2026-11-19 le terminal du propriétaire tourne dans un conteneur isolé avec son jeton d'abonnement (`claude setup-token`, par personne, dans le coffre) ; pas de terminal pour les autres personnes, pas de `/login` conservé (le jeton le remplace) ; jamais essayé avec la vraie CLI |
 | D9 | Environnements | Modèles d'environnement d'équipe | S | D4 | ⬜ |
 | D10 | Environnements | Secret de construction pour paquets privés | S | D4 | ⬜ |
 | E1 | Support | Connecteur Planio (client existant à brancher) | M | A5 | ⬜ |
@@ -234,7 +234,7 @@ Aucune infrastructure serveur : tout se développe et se teste sur l'outil actue
 - Le réglage est relu à chaque cycle du poller : il s'applique sans redémarrer. Une review « À lancer » n'est pas relancée par un redémarrage. Lancer une review déjà en file est refusé (409), donc un double clic ne la lance pas deux fois. Le lancement est inscrit au journal des actions de la review.
 - **Vérifié** : 5 tests de plus (344 au total) et 7 mutations détectées ; le dashboard n'a été vérifié qu'en syntaxe.
 
-**Lot D, première tranche (2026-11-12)** : agents dans des conteneurs jetables, `src/agent/dockerRunner.ts`. Opt-in (`AGENT_RUNTIME=docker`), mode clé API seulement ; par défaut rien ne change.
+**Lot D, première tranche (2026-11-12)** : agents dans des conteneurs jetables, `src/agent/dockerRunner.ts`. Opt-in (`AGENT_RUNTIME=docker`), mode clé API seulement ; par défaut rien ne change. (**Modifié le 2026-11-19** : `docker` est devenu le défaut, `host` est refusé avec des comptes, et l'abonnement passe par un jeton par personne, voir D2 et D8.)
 - Un conteneur par tâche, supprimé ensuite (même après annulation ou délai dépassé) ; en lecture seule, sans capacités, sans élévation de droits, utilisateur sans droits (celui de l'outil, pour les fichiers écrits), mémoire, processeurs et processus plafonnés, image jamais téléchargée au lancement. Il ne monte que le dossier de travail de la tâche ; la clé API passe par l'environnement du client docker et jamais par les arguments (visibles par `ps`). Le mode abonnement est refusé dans ce mode (pas de repli silencieux sur la machine).
 - Correspondances : D2 (orchestrateur, limites) partiellement, sans conteneur persistant ni arrêt à l'inactivité ; D6 partiellement (un conteneur par tâche, pas de démon) ; D5 : le conteneur ne reçoit aucun identifiant de forge, l'outil fait les contrôles de fichiers puis le commit et le push depuis l'hôte.
 - **Pas fait** : D1 (lecture de devcontainer.json), D3/D4 (image générée et vérifiée), D7 (liste blanche réseau), D8 (terminal, connexion Claude dans le conteneur), D9/D10, le démon d'agent persistant. La décision de déploiement est prise (voir plus bas).
@@ -316,3 +316,5 @@ A1, A2, A4 et A5 sont faits (2026-11-09).
 - Les forges restent une façon de se connecter ; le compte par email s'ajoute (`src/auth/password*.ts`, `src/mail/`, tables `credentials` et `email_tokens`). Il est actif seulement avec `RESEND_API_KEY` et `MAIL_FROM` : l'email est ce qui prouve l'adresse, donc pas de mot de passe sans lui.
 - Choix de sécurité : aucun compte sans lien reçu (pas d'adresse non confirmée, pas de prise de compte à l'avance), mêmes réponses que l'adresse existe ou non, liens à usage unique, sessions fermées après un nouveau mot de passe, le lien d'une invitation par email n'est jamais montré à l'administrateur.
 - Toute personne a un espace personnel et peut créer des organisations ; l'invitation par email crée le compte ou rattache le compte existant, avec le rôle prévu.
+
+**D2 et D8, tout en conteneurs et abonnement conservé (2026-11-19)** : décidé avec toi, plus rien ne tourne sur la machine dès qu'il y a des comptes (`AGENT_RUNTIME=docker` par défaut, `host` refusé au démarrage avec des comptes), terminal compris, et l'abonnement Claude passe par un jeton `claude setup-token` par personne (renverse le « non retenu » du 2026-11-09). Le détail est dans `docs/roadmap.md`, section 46.

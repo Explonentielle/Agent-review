@@ -6,12 +6,13 @@ import { ProcessCancelledError, claudeEnv } from "../claude/process.js";
 import { loadConfig } from "../config.js";
 import { DEFAULT_SETTINGS } from "../settings/schema.js";
 import { CliRunner } from "./cliRunner.js";
-import { buildDockerArgs, dockerLauncher, type DockerRuntime } from "./dockerRunner.js";
+import { buildDockerArgs, dockerClientEnv, dockerLauncher, type DockerRuntime } from "./dockerRunner.js";
 import { createRunner } from "./index.js";
 import type { AgentRequest } from "./runner.js";
 
 const RUNTIME: DockerRuntime = { image: "review-agent:local", memory: "1536m", cpus: 1, pids: 256, network: null, dockerBin: "docker", containerUser: "host" };
 const KEY = "cle-api-de-la-tache-a-ne-pas-montrer";
+const TOKEN = "jeton-abonnement-de-la-tache-a-ne-pas-montrer";
 const resultMsg = (structured: unknown) => JSON.stringify({ type: "result", subtype: "success", is_error: false, structured_output: structured, total_cost_usd: 0.05, num_turns: 2, session_id: "s1" });
 
 describe("arguments du conteneur d'agent", () => {
@@ -37,6 +38,10 @@ describe("arguments du conteneur d'agent", () => {
     // La clé est nommée, jamais donnée : sa valeur ne peut pas apparaître dans les arguments
     expect(args[args.indexOf("ANTHROPIC_API_KEY") - 1]).toBe("-e");
     expect(args.join(" ")).not.toContain("ANTHROPIC_API_KEY=");
+    // Le jeton d'abonnement suit la même règle : nommé, jamais donné
+    expect(args[args.indexOf("CLAUDE_CODE_OAUTH_TOKEN") - 1]).toBe("-e");
+    expect(args.join(" ")).not.toContain("CLAUDE_CODE_OAUTH_TOKEN=");
+    expect(args).not.toContain("-it"); // pas de terminal pour un agent
     // L'image, puis la commande, puis les arguments de la CLI telle quelle
     expect(args.slice(args.indexOf("review-agent:local"))).toEqual(["review-agent:local", "claude", "-p", "--model", "claude-sonnet-5-5"]);
     expect(args).not.toContain("--network");
@@ -54,6 +59,47 @@ describe("arguments du conteneur d'agent", () => {
     for (const bad of ["relatif/dossier", "/ok,src=/etc,dst=/work", "/avec\nsaut", ""]) {
       expect(() => buildDockerArgs(RUNTIME, { cwd: bad }, "n", [], "1:1")).toThrow(/invalide/);
     }
+  });
+
+  it("terminal du navigateur : pseudo-terminal et type de terminal, mêmes protections que les agents, toujours un seul dossier monté", () => {
+    const args = buildDockerArgs(RUNTIME, { cwd: "/data/terminal" }, "ra-term-abc", [], "1000:1000", "claude", true);
+    expect(args.slice(0, 3)).toEqual(["run", "--rm", "-it"]);
+    expect(args).toContain("TERM=xterm-256color");
+    expect(args).toContain("--read-only");
+    expect(args).toContain("--cap-drop");
+    expect(args.filter((a) => a === "--mount")).toHaveLength(1);
+    expect(args.slice(args.indexOf("review-agent:local"))).toEqual(["review-agent:local", "claude"]);
+  });
+});
+
+describe("identifiants transmis au client docker", () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name];
+    Object.assign(process.env, saved);
+  });
+
+  it("la clé API ou le jeton d'abonnement, selon ce qui est fourni, et rien d'autre de l'outil", () => {
+    process.env.GITLAB_TOKEN = "jeton-gitlab-de-l-outil";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "jeton-du-shell-de-l-outil";
+    process.env.ANTHROPIC_API_KEY = "cle-du-shell-de-l-outil";
+
+    const sub = dockerClientEnv({ oauthToken: TOKEN });
+    expect(sub.CLAUDE_CODE_OAUTH_TOKEN).toBe(TOKEN);
+    expect(sub.ANTHROPIC_API_KEY).toBeUndefined(); // la clé du shell n'est pas reprise : elle passerait devant l'abonnement
+    const api = dockerClientEnv({ apiKey: KEY });
+    expect(api.ANTHROPIC_API_KEY).toBe(KEY);
+    expect(api.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    const none = dockerClientEnv(null);
+    expect(none.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(none.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    for (const env of [sub, api, none]) expect(env.GITLAB_TOKEN).toBeUndefined();
+  });
+
+  it("un conteneur reçoit une clé API ou un jeton, jamais les deux ni aucun", () => {
+    expect(() => dockerLauncher(RUNTIME, { apiKey: KEY, oauthToken: TOKEN })).toThrow(/jamais les deux/);
+    expect(() => dockerLauncher(RUNTIME, {})).toThrow(/jamais les deux/);
+    expect(() => dockerLauncher(RUNTIME, { oauthToken: TOKEN })).not.toThrow();
   });
 });
 
@@ -76,6 +122,7 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
         'if [ "$1" = "rm" ]; then printf \'%s\\n\' "$@" > "$dir/rm-args.txt"; exit 0; fi',
         'printf \'%s\\n\' "$@" > "$dir/run-args.txt"',
         'printenv ANTHROPIC_API_KEY > "$dir/keyval.txt"',
+        'printenv CLAUDE_CODE_OAUTH_TOKEN > "$dir/tokenval.txt"',
         'env > "$dir/env.txt"',
         runBody,
       ].join("\n"),
@@ -114,7 +161,7 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
     process.env.GITLAB_TOKEN = "jeton-gitlab-de-l-outil";
     process.env.SECRETS_MASTER_KEY = "cle-maitre-de-l-outil";
     const runtime = { ...RUNTIME, dockerBin: installFakeDocker() };
-    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, KEY));
+    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, { apiKey: KEY }));
 
     const out = await runner.run(request());
     expect(out).toMatchObject({ structured: { ok: true }, costUsd: 0.05, numTurns: 2, sessionId: "s1" });
@@ -123,6 +170,7 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
     expect(args).not.toContain(KEY);
     expect(args).toContain(`type=bind,src=${dir},dst=/work`);
     expect(read("keyval.txt").trim()).toBe(KEY); // transmise au client docker par l'environnement
+    expect(read("tokenval.txt").trim()).toBe(""); // pas de jeton d'abonnement en mode clé API
     const env = read("env.txt");
     expect(env).not.toContain("jeton-gitlab-de-l-outil"); // les secrets de l'outil ne vont même pas au client docker
     expect(env).not.toContain("cle-maitre-de-l-outil");
@@ -136,7 +184,7 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
 
   it("annulation : le client docker est arrêté et le conteneur supprimé", async () => {
     const runtime = { ...RUNTIME, dockerBin: installFakeDocker("exec sleep 30") };
-    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, KEY));
+    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, { apiKey: KEY }));
     const controller = new AbortController();
 
     const pending = runner.run(request({ signal: controller.signal, timeoutMs: 60_000 }));
@@ -147,7 +195,7 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
 
   it("échec de la CLI dans le conteneur : l'erreur ne contient pas la clé, et le conteneur est quand même supprimé", async () => {
     const runtime = { ...RUNTIME, dockerBin: installFakeDocker(`echo '{"type":"result","subtype":"error_max_turns","is_error":true,"result":"échec avec ${KEY}"}'`) };
-    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, KEY));
+    const runner = new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher(runtime, { apiKey: KEY }));
 
     const err = await runner.run(request()).catch((e: Error) => e);
     expect((err as Error).message).toMatch(/Claude Code a échoué/);
@@ -155,7 +203,7 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
     expect(existsSync(path.join(dir, "rm-args.txt"))).toBe(true);
   });
 
-  it("createRunner : avec AGENT_RUNTIME=docker et la clé API, l'agent passe par docker ; avec l'abonnement, c'est refusé", async () => {
+  it("createRunner : avec AGENT_RUNTIME=docker et la clé API, l'agent passe par docker ; en abonnement sans jeton, c'est refusé", async () => {
     const fake = installFakeDocker();
     const config = loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x", ANTHROPIC_API_KEY: KEY, AGENT_RUNTIME: "docker", DOCKER_BIN: fake, AGENT_IMAGE: "mon-image:1", AGENT_MEMORY: "2g" });
 
@@ -164,9 +212,38 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
     expect(read("run-args.txt")).toContain("mon-image:1");
     expect(read("run-args.txt")).toContain("2g");
 
-    expect(() => createRunner(config, { ...DEFAULT_SETTINGS, agentAuth: "subscription" })).toThrow(/exige le mode « clé API »/);
-    // Par défaut (host) : comportement d'origine, aucun conteneur
-    expect(loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" }).agentRuntime).toMatchObject({ mode: "host", image: "review-agent-sandbox:local", memory: "1536m", cpus: 1, pids: 256, network: null, containerUser: "auto" });
+    // Jamais de repli sur la machine : sans jeton, l'abonnement est refusé avec la marche à suivre
+    expect(() => createRunner(config, { ...DEFAULT_SETTINGS, agentAuth: "subscription" })).toThrow(/claude setup-token/);
+    // Les conteneurs sont le défaut : un .env sans AGENT_RUNTIME ne remet jamais les agents sur la machine
+    expect(loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" }).agentRuntime).toMatchObject({ mode: "docker", image: "review-agent-sandbox:local", memory: "1536m", cpus: 1, pids: 256, network: null, containerUser: "auto" });
+  });
+
+  it("createRunner : en abonnement, le jeton de la personne passe par l'environnement du client docker, jamais par les arguments, et la clé API n'est pas transmise", async () => {
+    process.env.ANTHROPIC_API_KEY = "cle-du-shell-de-l-outil";
+    const config = loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x", AGENT_RUNTIME: "docker", DOCKER_BIN: installFakeDocker(), AGENT_CONTAINER_USER: "host" });
+    config.claudeOauthToken = TOKEN;
+    config.anthropicApiKey = KEY; // une clé définie ailleurs ne doit pas passer devant l'abonnement
+
+    const out = await createRunner(config, { ...DEFAULT_SETTINGS, agentAuth: "subscription" }).run(request());
+    expect(out.structured).toEqual({ ok: true });
+    expect(read("tokenval.txt").trim()).toBe(TOKEN);
+    expect(read("keyval.txt").trim()).toBe("");
+    expect(read("run-args.txt")).not.toContain(TOKEN);
+    expect(read("env.txt")).not.toContain("cle-du-shell-de-l-outil");
+  });
+
+  it("createRunner : une erreur de la CLI en abonnement ne contient pas le jeton", async () => {
+    const runtimeConfig = loadConfig({
+      GITHUB_TOKEN: "github_pat_ENV_123456",
+      DATA_DIR: "/tmp/x",
+      AGENT_RUNTIME: "docker",
+      AGENT_CONTAINER_USER: "host",
+      DOCKER_BIN: installFakeDocker(`echo '{"type":"result","subtype":"error_max_turns","is_error":true,"result":"échec avec ${TOKEN}"}'`),
+    });
+    runtimeConfig.claudeOauthToken = TOKEN;
+    const err = await createRunner(runtimeConfig, { ...DEFAULT_SETTINGS, agentAuth: "subscription" }).run(request()).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/Claude Code a échoué/);
+    expect((err as Error).message).not.toContain(TOKEN);
   });
 
   it("createRunner : l'image du projet est lancée si elle est autorisée, sinon la tâche est refusée avant tout conteneur", async () => {
@@ -205,7 +282,7 @@ describe.skipIf(process.platform === "win32")("exécution dans un conteneur, ave
       return args[args.indexOf(flag) + 1];
     };
     const run = (containerUser: DockerRuntime["containerUser"], bin: string) =>
-      new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher({ ...RUNTIME, dockerBin: bin, containerUser }, KEY)).run(request());
+      new CliRunner("claude", () => claudeEnv(KEY), [KEY], dockerLauncher({ ...RUNTIME, dockerBin: bin, containerUser }, { apiKey: KEY })).run(request());
     const hostUser = `${process.getuid?.()}:${process.getgid?.()}`;
 
     it("auto, Docker sans root détecté : root du conteneur, qui est l'utilisateur de l'outil pour la machine", async () => {

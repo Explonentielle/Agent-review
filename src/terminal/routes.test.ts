@@ -19,7 +19,7 @@ describe("routes du terminal Claude", () => {
     hub = new TerminalHub({ idleMs: 60_000, maxMs: 60_000, backlogBytes: 4096, maxInputChars: 50 });
     const feature: TerminalFeature = {
       hub,
-      launch: () => {
+      launch: async () => {
         if (launchError) throw launchError;
         return fakeLaunch;
       },

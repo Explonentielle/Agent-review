@@ -26,8 +26,8 @@ const EnvSchema = z
     POLL_INTERVAL_SEC: z.coerce.number().int().min(30).default(90),
     /** Nombre maximum de reviews, et de tâches de dev, qui tournent en même temps sur la machine, toutes personnes confondues. */
     MAX_CONCURRENT_AGENTS: z.coerce.number().int().min(1).max(8).default(1),
-    /** Où tournent les agents : sur la machine (host), ou dans un conteneur jetable par tâche (docker, mode clé API seulement). */
-    AGENT_RUNTIME: z.preprocess(blankIsMissing, z.enum(["host", "docker"]).default("host")),
+    /** Où tournent les agents : dans un conteneur jetable par tâche (docker, défaut), ou sur la machine (host : poste local sans comptes seulement). */
+    AGENT_RUNTIME: z.preprocess(blankIsMissing, z.enum(["host", "docker"]).default("docker")),
     /** Image des conteneurs d'agents : doit contenir la CLI Claude Code et les outils du projet. */
     AGENT_IMAGE: z.preprocess(blankIsMissing, z.string().trim().regex(IMAGE_NAME_RE, "nom d'image invalide").default("review-agent-sandbox:local")),
     /** Autres images que les projets peuvent choisir (Paramètres > Projets), séparées par des virgules ou des espaces. */
@@ -47,6 +47,8 @@ const EnvSchema = z
     CLAUDE_BIN: z.string().optional(),
     /** Seulement utilisée si le mode « clé API » est choisi dans les réglages. Jamais affichée ni journalisée. */
     ANTHROPIC_API_KEY: z.string().trim().min(1).optional(),
+    /** Jeton d'abonnement Claude (`claude setup-token`), transmis au conteneur de l'agent en mode abonnement. Jamais affiché ni journalisé. */
+    CLAUDE_CODE_OAUTH_TOKEN: z.preprocess(blankIsMissing, z.string().trim().regex(/^\S+$/, "le jeton ne contient aucun espace").optional()),
 
     HOST: z.string().default("127.0.0.1"),
     PORT: z.coerce.number().int().default(4321),
@@ -110,6 +112,10 @@ const EnvSchema = z
     const mailLogin = Boolean(e.RESEND_API_KEY && e.MAIL_FROM);
     // Les liens des emails pointent vers PUBLIC_URL : sans elle, ils viseraient localhost et ne serviraient à personne
     if (mailLogin && !e.PUBLIC_URL) ctx.addIssue({ code: "custom", path: ["PUBLIC_URL"], message: "l'envoi d'emails demande PUBLIC_URL (adresse que voit le navigateur, utilisée dans les liens)" });
+    // Dès qu'il y a des comptes, d'autres personnes peuvent lancer des agents : sur la machine ils ne seraient isolés de rien
+    if ((gitlabLogin || githubLogin || mailLogin) && e.AGENT_RUNTIME === "host") {
+      ctx.addIssue({ code: "custom", path: ["AGENT_RUNTIME"], message: "AGENT_RUNTIME=host est refusé quand une connexion par compte est configurée : les agents tournent en conteneurs (AGENT_RUNTIME=docker, voir docs/deploiement.md)" });
+    }
     if (gitlabLogin || githubLogin || mailLogin) {
       const ownerByEmail = EMAIL_OWNER.test(e.AUTH_OWNER ?? "");
       if (!e.AUTH_OWNER) {
@@ -178,6 +184,8 @@ export interface Config {
   claudeBin: string;
   /** Clé API Anthropic, ou null. Utilisée uniquement quand les réglages demandent le mode clé API. */
   anthropicApiKey: string | null;
+  /** Jeton d'abonnement Claude (`claude setup-token`) de cette personne, ou null. Utilisé uniquement en mode abonnement, dans un conteneur. */
+  claudeOauthToken: string | null;
   server: { host: string; port: number; /** Derrière un reverse proxy de confiance (X-Forwarded-For lu pour l'adresse du visiteur). */ trustProxy?: boolean };
   dataDir: string;
   databaseUrl: string | null;
@@ -230,6 +238,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agentRuntime: { mode: e.AGENT_RUNTIME, image: e.AGENT_IMAGE, extraImages: e.AGENT_IMAGES ?? [], memory: e.AGENT_MEMORY, cpus: e.AGENT_CPUS, pids: e.AGENT_PIDS, network: e.AGENT_NETWORK ?? null, dockerBin: e.DOCKER_BIN, containerUser: e.AGENT_CONTAINER_USER },
     claudeBin: e.CLAUDE_BIN ?? defaultClaudeBin(),
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
+    claudeOauthToken: e.CLAUDE_CODE_OAUTH_TOKEN ?? null,
     server: { host: e.HOST, port: e.PORT, trustProxy: e.TRUST_PROXY === "true" },
     dataDir: path.resolve(e.DATA_DIR),
     databaseUrl: e.DATABASE_URL ?? null,

@@ -40,35 +40,43 @@ describe("coffre : secrets du dashboard et du .env", () => {
     const vault = await vaultFor(config);
     await vault.store.put(vault.scope, "github.token", "github_pat_DU_COFFRE_1234");
     await vault.store.put(vault.scope, "anthropic.api_key", "sk-ant-DU-COFFRE-1234");
+    await vault.store.put(vault.scope, "anthropic.oauth_token", "sk-ant-oat01-DU-COFFRE-1234");
     expect(config.github).toBeNull();
     expect(config.anthropicApiKey).toBeNull();
+    expect(config.claudeOauthToken).toBeNull();
 
     await applyVaultSecrets(config, vault);
 
     expect(config.github).toEqual({ apiUrl: "https://api.github.com", token: "github_pat_DU_COFFRE_1234" });
     expect(config.anthropicApiKey).toBe("sk-ant-DU-COFFRE-1234");
+    expect(config.claudeOauthToken).toBe("sk-ant-oat01-DU-COFFRE-1234");
     expect(verified).toEqual([{ apiUrl: "https://api.github.com", token: "github_pat_DU_COFFRE_1234" }]);
   });
 
   it("le .env est prioritaire : le coffre n'écrase rien et n'est même pas lu", async () => {
-    const config = loadConfig({ ...GITLAB, GITHUB_TOKEN: "github_pat_DU_ENV_123456", ANTHROPIC_API_KEY: "sk-ant-DU-ENV-123456", DATA_DIR: "/tmp/x" });
+    const config = loadConfig({ ...GITLAB, GITHUB_TOKEN: "github_pat_DU_ENV_123456", ANTHROPIC_API_KEY: "sk-ant-DU-ENV-123456", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-DU-ENV-123456", DATA_DIR: "/tmp/x" });
     const vault = await vaultFor(config);
     await vault.store.put(vault.scope, "github.token", "github_pat_DU_COFFRE_1234");
     await vault.store.put(vault.scope, "anthropic.api_key", "sk-ant-DU-COFFRE-1234");
+    await vault.store.put(vault.scope, "anthropic.oauth_token", "sk-ant-oat01-DU-COFFRE-1234");
 
     await applyVaultSecrets(config, vault);
 
     expect(config.github?.token).toBe("github_pat_DU_ENV_123456");
     expect(config.anthropicApiKey).toBe("sk-ant-DU-ENV-123456");
+    expect(config.claudeOauthToken).toBe("sk-ant-oat01-DU-ENV-123456");
     expect(verified).toEqual([]);
     expect((await describeSecrets(vault)).map((s) => [s.name, s.source])).toEqual([
       ["gitlab.url", "env"],
       ["gitlab.token", "env"],
       ["github.token", "env"],
       ["anthropic.api_key", "env"],
+      ["anthropic.oauth_token", "env"],
     ]);
     await expect(saveManagedSecret(config, vault, "github.token", "autre-jeton-12345")).rejects.toThrow(SecretConflictError);
     await expect(deleteManagedSecret(config, vault, "anthropic.api_key")).rejects.toThrow(SecretConflictError);
+    await expect(saveManagedSecret(config, vault, "anthropic.oauth_token", "sk-ant-oat01-AUTRE-12345678")).rejects.toThrow(SecretConflictError);
+    await expect(deleteManagedSecret(config, vault, "anthropic.oauth_token")).rejects.toThrow(SecretConflictError);
   });
 
   it("un jeton GitHub refusé ou un secret illisible ne bloquent pas le démarrage : la forge est ignorée", async () => {
@@ -94,6 +102,15 @@ describe("coffre : secrets du dashboard et du .env", () => {
     expect(await saveManagedSecret(config, vault, "anthropic.api_key", "  sk-ant-SAISIE-123456  ")).toEqual({ restartRequired: false });
     expect(config.anthropicApiKey).toBe("sk-ant-SAISIE-123456"); // espaces retirés, appliquée sans redémarrage
 
+    // Jeton d'abonnement : appliqué tout de suite aussi, mais refusé s'il contient un espace ou une coupure (collage d'un texte entier) ou s'il est trop court
+    for (const bad of ["court", "deux mots dans le jeton 123456", "ligne1-0123456789\nligne2-0123456789"]) {
+      await expect(saveManagedSecret(config, vault, "anthropic.oauth_token", bad)).rejects.toThrow(/Jeton invalide/);
+    }
+    expect(config.claudeOauthToken).toBeNull();
+    expect(await vault.store.has(vault.scope, "anthropic.oauth_token")).toBe(false);
+    expect(await saveManagedSecret(config, vault, "anthropic.oauth_token", "  sk-ant-oat01-SAISI-123456  ")).toEqual({ restartRequired: false });
+    expect(config.claudeOauthToken).toBe("sk-ant-oat01-SAISI-123456");
+
     expect(await saveManagedSecret(config, vault, "github.token", "github_pat_SAISI_123456")).toEqual({ restartRequired: true });
     expect(verified).toEqual([{ apiUrl: "https://api.github.com", token: "github_pat_SAISI_123456" }]);
     expect(config.github).toBeNull(); // la forge n'est montée qu'au démarrage
@@ -104,6 +121,7 @@ describe("coffre : secrets du dashboard et du .env", () => {
       ["gitlab.token", "env", false],
       ["github.token", "vault", false],
       ["anthropic.api_key", "vault", true],
+      ["anthropic.oauth_token", "vault", true],
     ]);
     expect(status[2]!.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2} /);
     expect(JSON.stringify(status)).not.toContain("SAISI");
@@ -121,13 +139,16 @@ describe("coffre : secrets du dashboard et du .env", () => {
     const config = loadConfig({ ...GITLAB, DATA_DIR: "/tmp/x" });
     const vault = await vaultFor(config);
     await saveManagedSecret(config, vault, "anthropic.api_key", "sk-ant-A-SUPPRIMER-1");
+    await saveManagedSecret(config, vault, "anthropic.oauth_token", "sk-ant-oat01-A-SUPPRIMER-1");
     await saveManagedSecret(config, vault, "github.token", "github_pat_A_SUPPRIMER_1");
 
     expect(await deleteManagedSecret(config, vault, "anthropic.api_key")).toEqual({ deleted: true, restartRequired: false });
     expect(config.anthropicApiKey).toBeNull();
+    expect(await deleteManagedSecret(config, vault, "anthropic.oauth_token")).toEqual({ deleted: true, restartRequired: false });
+    expect(config.claudeOauthToken).toBeNull();
     expect(await deleteManagedSecret(config, vault, "github.token")).toEqual({ deleted: true, restartRequired: true });
     expect(await deleteManagedSecret(config, vault, "github.token")).toEqual({ deleted: false, restartRequired: false });
-    expect((await describeSecrets(vault)).map((s) => s.source)).toEqual(["env", "env", null, null]);
+    expect((await describeSecrets(vault)).map((s) => s.source)).toEqual(["env", "env", null, null, null]);
   });
 
   it("seuls les secrets prévus se gèrent depuis le dashboard", () => {
@@ -145,7 +166,7 @@ describe("coffre : secrets du dashboard et du .env", () => {
       if (token === "glpat-REFUSE-123456") throw new Error("401 Unauthorized");
       return "bob-gitlab";
     });
-    expect((await describeSecrets(vault)).map((s) => [s.name, s.source])).toEqual([["gitlab.url", "env"], ["gitlab.token", null], ["github.token", "env"], ["anthropic.api_key", null]]);
+    expect((await describeSecrets(vault)).map((s) => [s.name, s.source])).toEqual([["gitlab.url", "env"], ["gitlab.token", null], ["github.token", "env"], ["anthropic.api_key", null], ["anthropic.oauth_token", null]]);
 
     await expect(saveManagedSecret(config, vault, "gitlab.token", "glpat-REFUSE-123456")).rejects.toThrow(/401/);
     expect(await vault.store.has(vault.scope, "gitlab.token")).toBe(false);
@@ -162,7 +183,7 @@ describe("coffre : secrets du dashboard et du .env", () => {
     const config = loadConfig({ GITHUB_TOKEN: "github_pat_ENV_123456", DATA_DIR: "/tmp/x" });
     const local = await createAccountRepo(db).localContext();
     const vault = createVault(config, createSecretStore(db, new Keyring([randomBytes(32)])), { workspaceId: local.workspaceId, userId: local.userId }, async () => undefined, async () => "x");
-    expect((await describeSecrets(vault)).map((s) => s.name)).toEqual(["gitlab.url", "github.token", "anthropic.api_key"]);
+    expect((await describeSecrets(vault)).map((s) => s.name)).toEqual(["gitlab.url", "github.token", "anthropic.api_key", "anthropic.oauth_token"]);
     await expect(saveManagedSecret(config, vault, "gitlab.token", "glpat-1234567890")).rejects.toThrow(/adresse de GitLab/);
   });
 
@@ -178,11 +199,11 @@ describe("coffre : secrets du dashboard et du .env", () => {
     });
     const vault = make(config);
 
-    expect((await describeSecrets(vault)).map((s) => [s.name, s.source, s.value])).toEqual([["gitlab.url", null, null], ["github.token", null, null], ["anthropic.api_key", null, null]]);
+    expect((await describeSecrets(vault)).map((s) => [s.name, s.source, s.value])).toEqual([["gitlab.url", null, null], ["github.token", null, null], ["anthropic.api_key", null, null], ["anthropic.oauth_token", null, null]]);
     expect(await saveManagedSecret(config, vault, "gitlab.url", "  https://gitlab.example.com/  ")).toEqual({ restartRequired: true });
     expect(config.gitlabUrl).toBe("https://gitlab.example.com");
     const after = await describeSecrets(vault);
-    expect(after.map((s) => [s.name, s.source, s.value])).toEqual([["gitlab.url", "vault", "https://gitlab.example.com"], ["gitlab.token", null, null], ["github.token", null, null], ["anthropic.api_key", null, null]]);
+    expect(after.map((s) => [s.name, s.source, s.value])).toEqual([["gitlab.url", "vault", "https://gitlab.example.com"], ["gitlab.token", null, null], ["github.token", null, null], ["anthropic.api_key", null, null], ["anthropic.oauth_token", null, null]]);
     expect(after[0]!.secret).toBe(false);
     expect(after[1]!.secret).toBe(true);
 
@@ -197,7 +218,7 @@ describe("coffre : secrets du dashboard et du .env", () => {
 
     expect(await deleteManagedSecret(config, vault, "gitlab.url")).toEqual({ deleted: true, restartRequired: true });
     expect(config.gitlabUrl).toBeNull();
-    expect((await describeSecrets(vault)).map((s) => s.name)).toEqual(["gitlab.url", "github.token", "anthropic.api_key"]);
+    expect((await describeSecrets(vault)).map((s) => s.name)).toEqual(["gitlab.url", "github.token", "anthropic.api_key", "anthropic.oauth_token"]);
   });
 
   it("adresse de GitLab : seules les adresses http(s) sans identifiants sont acceptées, et le .env reste prioritaire", async () => {

@@ -54,7 +54,7 @@ describe("droits par rôle : le serveur", () => {
     const app = buildServer({
       config: h.config, forges: h.forges, costs: h.costs, reviews: h.reviews, settings: h.settings, tasks: h.tasks, vault: h.vault, audit: h.audit, accounts: h.accounts, local: { ...h.local, role },
       enqueueReview: () => undefined, enqueueDev: () => undefined, queueSize: () => 0,
-      ...(terminal ? { terminal: { hub: new TerminalHub(), launch: () => ({ file: process.execPath, args: ["-e", ""], env: {}, cwd: process.cwd() }), status: createClaudeStatusProbe("claude", () => ({}), async () => ({ code: 0, stdout: "ok", stderr: "", missing: false }), 0) } } : {}),
+      ...(terminal ? { terminal: { hub: new TerminalHub(), launch: async () => ({ file: process.execPath, args: ["-e", ""], env: {}, cwd: process.cwd() }), status: createClaudeStatusProbe("claude", () => ({}), async () => ({ code: 0, stdout: "ok", stderr: "", missing: false }), 0) } } : {}),
     });
     apps.push(app);
     return app;

@@ -14,6 +14,7 @@ export const MANAGED_SECRETS = [
   { name: "gitlab.token", label: "Jeton GitLab", live: false, secret: true },
   { name: "github.token", label: "Jeton GitHub", live: false, secret: true },
   { name: "anthropic.api_key", label: "Clé API Anthropic", live: true, secret: true },
+  { name: "anthropic.oauth_token", label: "Jeton d'abonnement Claude", live: true, secret: true },
 ] as const;
 export type ManagedSecretName = (typeof MANAGED_SECRETS)[number]["name"];
 
@@ -96,7 +97,7 @@ export function createVault(
   return {
     store,
     scope,
-    fromEnv: { "gitlab.url": config.gitlabUrl !== null, "gitlab.token": config.gitlab !== null, "github.token": config.github !== null, "anthropic.api_key": config.anthropicApiKey !== null },
+    fromEnv: { "gitlab.url": config.gitlabUrl !== null, "gitlab.token": config.gitlab !== null, "github.token": config.github !== null, "anthropic.api_key": config.anthropicApiKey !== null, "anthropic.oauth_token": config.claudeOauthToken !== null },
     gitlabUrl: config.gitlabUrl,
     verifyGithubToken,
     verifyGitlabToken,
@@ -106,7 +107,7 @@ export function createVault(
 /**
  * Complète la configuration avec les secrets du coffre que le `.env` ne fournit pas. Un secret illisible ou un
  * jeton de forge refusé est signalé au journal et ignoré : l'outil démarre quand même, et on peut le corriger dans le dashboard.
- * @param config Configuration modifiée en place (`gitlabUrl`, `gitlab`, `github`, `anthropicApiKey`).
+ * @param config Configuration modifiée en place (`gitlabUrl`, `gitlab`, `github`, `anthropicApiKey`, `claudeOauthToken`).
  * @param vault Coffre de la personne.
  * @returns Rien.
  */
@@ -121,6 +122,10 @@ export async function applyVaultSecrets(config: Config, vault: Vault): Promise<v
   if (!vault.fromEnv["anthropic.api_key"]) {
     const key = await readQuietly(vault, "anthropic.api_key");
     if (key) config.anthropicApiKey = key;
+  }
+  if (!vault.fromEnv["anthropic.oauth_token"]) {
+    const token = await readQuietly(vault, "anthropic.oauth_token");
+    if (token) config.claudeOauthToken = token;
   }
   if (!vault.fromEnv["github.token"]) {
     const token = await readQuietly(vault, "github.token");
@@ -210,9 +215,9 @@ function cleanGitlabUrl(value: string): string {
 
 /**
  * Enregistre un réglage de connexion saisi dans le dashboard. Un jeton de forge est d'abord contrôlé auprès de la forge (un jeton
- * refusé enregistré empêcherait la forge de démarrer). La clé API est appliquée tout de suite ; une adresse ou un jeton de forge demande de
- * reconstruire les connexions aux forges (`restartRequired` dit si cela passe par un redémarrage).
- * @param config Configuration modifiée en place pour la clé API.
+ * refusé enregistré empêcherait la forge de démarrer). La clé API et le jeton d'abonnement sont appliqués tout de suite ; une adresse ou un jeton
+ * de forge demande de reconstruire les connexions aux forges (`restartRequired` dit si cela passe par un redémarrage).
+ * @param config Configuration modifiée en place pour la clé API et le jeton d'abonnement.
  * @param vault Coffre de la personne.
  * @param name Secret à enregistrer.
  * @param value Valeur saisie.
@@ -232,6 +237,7 @@ export async function saveManagedSecret(config: Config, vault: Vault, name: Mana
     vault.gitlabUrl = url;
     return { restartRequired: true };
   }
+  if (name === "anthropic.oauth_token" && !/^\S{20,}$/.test(clean)) throw new SecretError("Jeton invalide : colle le jeton affiché par « claude setup-token », sans espace ni retour à la ligne");
   registerSecret(clean); // masqué dès maintenant, y compris dans l'erreur d'un contrôle qui échoue
   if (name === "github.token") await vault.verifyGithubToken(config.githubApiUrl, clean);
   if (name === "gitlab.token") {
@@ -240,13 +246,14 @@ export async function saveManagedSecret(config: Config, vault: Vault, name: Mana
   }
   await vault.store.put(vault.scope, name, clean);
   if (name === "anthropic.api_key") config.anthropicApiKey = clean;
-  return { restartRequired: name !== "anthropic.api_key" };
+  if (name === "anthropic.oauth_token") config.claudeOauthToken = clean;
+  return { restartRequired: name !== "anthropic.api_key" && name !== "anthropic.oauth_token" };
 }
 
 /**
- * Supprime un secret saisi dans le dashboard. La clé API cesse d'être utilisée tout de suite ; un jeton de forge
+ * Supprime un secret saisi dans le dashboard. La clé API et le jeton d'abonnement cessent d'être utilisés tout de suite ; un jeton de forge
  * reste utilisé par les connexions déjà construites jusqu'à leur reconstruction.
- * @param config Configuration modifiée en place pour la clé API.
+ * @param config Configuration modifiée en place pour la clé API et le jeton d'abonnement.
  * @param vault Coffre de la personne.
  * @param name Secret à supprimer.
  * @returns Si le secret existait, et si les connexions aux forges doivent être reconstruites pour l'oublier.
@@ -256,9 +263,10 @@ export async function deleteManagedSecret(config: Config, vault: Vault, name: Ma
   if (vault.fromEnv[name]) throw new SecretConflictError("Ce secret est défini dans le .env, qui est prioritaire : retire-le du .env pour le gérer ici");
   const deleted = await vault.store.delete(vault.scope, name);
   if (name === "anthropic.api_key") config.anthropicApiKey = null;
+  if (name === "anthropic.oauth_token") config.claudeOauthToken = null;
   if (name === "gitlab.url") {
     config.gitlabUrl = null;
     vault.gitlabUrl = null;
   }
-  return { deleted, restartRequired: name !== "anthropic.api_key" && deleted };
+  return { deleted, restartRequired: name !== "anthropic.api_key" && name !== "anthropic.oauth_token" && deleted };
 }

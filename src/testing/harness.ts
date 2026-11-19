@@ -89,6 +89,7 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
     GITLAB_USERNAME: "alex",
     DATA_DIR: dataDir,
     CLAUDE_BIN: "/bin/false",
+    AGENT_RUNTIME: "host", // aucun vrai agent ne tourne dans les tests : pas de Docker à joindre
   });
   let db: Db;
   if (backend === "postgres") {

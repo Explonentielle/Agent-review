@@ -7,6 +7,8 @@ export interface TerminalLaunch {
   args: string[];
   env: NodeJS.ProcessEnv;
   cwd: string;
+  /** Appelé quand la session est terminée (arrêtée, fermée ou en échec) : par exemple supprimer un conteneur resté en vie. Ne doit pas lever d'erreur. */
+  cleanup?: () => Promise<void>;
 }
 
 export interface TerminalLimits {
@@ -49,12 +51,14 @@ export class TerminalSession {
   private readonly maxTimer: NodeJS.Timeout;
   private exitCode: number | null = null;
   private ended = false;
+  private readonly cleanup: TerminalLaunch["cleanup"];
 
   constructor(
     launch: TerminalLaunch,
     private readonly limits: TerminalLimits = DEFAULT_TERMINAL_LIMITS,
     spawnFn: SpawnFn = spawn as SpawnFn,
   ) {
+    this.cleanup = launch.cleanup;
     // Groupe de processus à part (hors Windows) : l'arrêt emporte aussi ce que la CLI a lancé
     this.child = spawnFn(launch.file, launch.args, { cwd: launch.cwd, env: launch.env, detached: process.platform !== "win32", windowsHide: true });
     this.child.stdout.on("data", (chunk: Buffer) => this.push(chunk));
@@ -149,6 +153,7 @@ export class TerminalSession {
     this.exitCode = code;
     clearTimeout(this.idleTimer);
     clearTimeout(this.maxTimer);
+    void this.cleanup?.().catch(() => undefined);
     for (const listener of this.listeners) listener({ type: "exit", code });
     this.listeners.clear();
   }

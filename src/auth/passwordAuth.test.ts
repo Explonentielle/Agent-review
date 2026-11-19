@@ -211,7 +211,7 @@ describe("connexion par email et mot de passe", () => {
       expect(blocked.statusCode).toBe(429);
       expect(blocked.headers["retry-after"]).toBeDefined();
       expect((await post("/auth/login", { email: "autre@example.com", password: "faux" })).statusCode).toBe(401); // une autre adresse n'est pas touchée
-    });
+    }, 30_000); // une trentaine de hachages scrypt : le délai par défaut (5 s) ne tient pas quand la machine est chargée
 
     it("toute écriture sans l'en-tête anti-CSRF est refusée, y compris la connexion", async () => {
       await account("Carol", "carol@example.com");

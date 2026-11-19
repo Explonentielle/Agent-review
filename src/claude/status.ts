@@ -72,3 +72,23 @@ export function createClaudeStatusProbe(bin: string, env: () => NodeJS.ProcessEn
 }
 
 export type ClaudeStatusProbe = ReturnType<typeof createClaudeStatusProbe>;
+
+/**
+ * Sonde d'état pour les agents en conteneur : la CLI n'est pas lancée sur la machine, la connexion est celle du jeton d'abonnement transmis aux
+ * conteneurs. L'état se déduit de la présence du jeton, sans lancer de processus : il n'est pas vérifié auprès d'Anthropic.
+ * @param hasToken Dit si un jeton d'abonnement est défini pour la personne (relu à chaque appel : il peut changer dans le dashboard).
+ * @param now Horloge (ms).
+ * @returns Une sonde de même forme que celle de `createClaudeStatusProbe`.
+ */
+export function createDeclaredStatusProbe(hasToken: () => boolean, now: () => number = Date.now): ClaudeStatusProbe {
+  return {
+    async get(): Promise<ClaudeStatus> {
+      const connected = hasToken();
+      const detail = connected
+        ? "Jeton d'abonnement défini, transmis aux conteneurs des agents (non vérifié auprès d'Anthropic)."
+        : "Aucun jeton d'abonnement : lance « claude setup-token » sur ton poste, puis colle le jeton dans Paramètres > Connexion.";
+      return { installed: true, connected, detail, checkedAt: now() };
+    },
+    forget: () => undefined,
+  };
+}

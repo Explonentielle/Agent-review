@@ -163,7 +163,7 @@ export class TenantManager {
     // Hors propriétaire : aucun jeton ni clé du .env, et un dossier de données à part (copies de dépôts, dossiers de travail)
     const config: Config = isOwner
       ? { ...base }
-      : { ...base, dataDir: path.join(base.dataDir, "tenants", `${ctx.workspaceId}-${ctx.userId}`), gitlab: null, github: null, anthropicApiKey: null };
+      : { ...base, dataDir: path.join(base.dataDir, "tenants", `${ctx.workspaceId}-${ctx.userId}`), gitlab: null, github: null, anthropicApiKey: null, claudeOauthToken: null };
 
     const vault = createVault(config, store, { workspaceId: ctx.workspaceId, userId: ctx.userId }, hooks.verifyGithubToken, hooks.verifyGitlabToken);
     await applyVaultSecrets(config, vault);

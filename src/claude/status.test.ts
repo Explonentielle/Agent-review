@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createClaudeStatusProbe, type StatusRunResult } from "./status.js";
+import { createClaudeStatusProbe, createDeclaredStatusProbe, type StatusRunResult } from "./status.js";
 
 function probe(results: StatusRunResult[], ttlMs = 30_000) {
   let clock = 1_000;
@@ -53,5 +53,22 @@ describe("état de la connexion Claude", () => {
     const { probe: p, calls } = probe([ok("ok")]);
     await p.get();
     expect(calls[0]).toEqual(["auth", "status", "--text"]);
+  });
+});
+
+describe("état de la connexion Claude en mode conteneur", () => {
+  it("déduit de la présence du jeton d'abonnement, relue à chaque appel, sans lancer aucun programme", async () => {
+    let token: string | null = null;
+    const p = createDeclaredStatusProbe(() => token !== null, () => 42);
+    const without = await p.get();
+    expect(without).toMatchObject({ installed: true, connected: false, checkedAt: 42 });
+    expect(without.detail).toContain("claude setup-token");
+
+    token = "sk-ant-oat01-DEFINI-12345678";
+    const withToken = await p.get();
+    expect(withToken.connected).toBe(true);
+    expect(withToken.detail).toContain("non vérifié");
+    expect(JSON.stringify(withToken)).not.toContain("DEFINI"); // la valeur du jeton n'est jamais renvoyée
+    expect(p.forget()).toBeUndefined();
   });
 });

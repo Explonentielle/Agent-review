@@ -17,7 +17,7 @@ Faire évoluer review-agent, outil local mono-utilisateur, en une **plateforme h
 
 La plateforme **ne voit, ne stocke et n'utilise jamais** les identifiants claude.ai d'un utilisateur.
 
-- **Abonnement** : l'utilisateur ouvre un terminal web dans **son** conteneur, y lance `claude` puis `/login`. La session est enregistrée dans le volume de son conteneur (`~/.claude/`) et n'est utilisée que pour ses propres tâches, dans son propre environnement, comme dans un Codespace ou un devcontainer.
+- **Abonnement** (variante retenue le 2026-11-19 : un jeton `claude setup-token` par personne, voir la section 8) : l'utilisateur ouvre un terminal web dans **son** conteneur, y lance `claude` puis `/login`. La session est enregistrée dans le volume de son conteneur (`~/.claude/`) et n'est utilisée que pour ses propres tâches, dans son propre environnement, comme dans un Codespace ou un devcontainer.
 - **Clé API** : l'utilisateur la saisit comme secret personnel. Elle est chiffrée au repos et injectée dans son seul conteneur, uniquement pour les processus de l'agent.
 - Aucun conteneur, aucune session, aucune clé n'est partagé entre utilisateurs.
 
@@ -192,13 +192,15 @@ Sources : [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_pla
 | 2026-11-06 | Infos d'entreprise | Rien dans le code : URL et token dans `.env`, le reste dans le dashboard | Dépôt partageable et réutilisable par d'autres équipes |
 | 2026-11-09 | Plateforme sur serveur avec un seul abonnement | Écarté | Un abonnement claude.ai est personnel ; quota épuisé |
 | 2026-11-09 | Saisie login / mot de passe claude.ai dans le front | Écarté | Pas de login par mot de passe (OAuth navigateur), produirait de toute façon un token, schéma d'hameçonnage |
-| 2026-11-09 | Token d'abonnement par utilisateur (`claude setup-token`) stocké ou collé à chaque tâche | Non retenu | Secrets sensibles centralisés, conditions d'utilisation incertaines |
+| 2026-11-09 | Token d'abonnement par utilisateur (`claude setup-token`) stocké ou collé à chaque tâche | Non retenu (**renversé le 2026-11-19**, voir plus bas) | Secrets sensibles centralisés, conditions d'utilisation incertaines |
 | 2026-11-09 | Modèle d'accès à Claude sur la plateforme | **« Ton environnement, ta session Claude »** : `/login` par l'utilisateur dans son propre conteneur, ou clé API personnelle chiffrée | La plateforme ne manipule jamais d'identifiants claude.ai ; à faire valider par Anthropic avant ouverture large |
 | 2026-11-09 | Forge pour tickets internes | Gitea embarqué plutôt qu'une revue de code maison | Coût de construction d'une forge |
 | 2026-11-09 | Accès au code depuis le conteneur | Le plan de contrôle clone et pousse. Le conteneur travaille sur une copie autonome sans identifiants ni accès réseau à la forge, et **seul un patch en sort** (3.4) | Un jeton dans le conteneur est lisible par un agent manipulé, et les forges ne limitent pas un jeton à une branche. Relais à jeton court écarté |
 | 2026-11-09 | Données personnelles du support | Caviardage avant tout prompt, repères stables, table de correspondance dans le plan de contrôle seul, mode strict au départ (3.5) | Le modèle n'a pas besoin des valeurs réelles pour diagnostiquer ; réduit l'exposition RGPD |
 | 2026-11-09 | Validation humaine du support | Obligatoire par défaut. Assouplissement par catégorie après taux d'accord mesuré, jamais pour les catégories sensibles (seuils à confirmer) | Responsabilité sur ce qui part chez le client |
 | 2026-11-09 | Connexion à Claude par clé API | La même CLI avec `ANTHROPIC_API_KEY`, pas le SDK | Mêmes outils, permissions et protections d'isolation, rien de nouveau à sécuriser, testable avec un faux binaire. La clé est masquée partout |
+| 2026-11-19 | Agents et terminal sur la machine | **Écartés dès qu'il y a des comptes** : `AGENT_RUNTIME=docker` par défaut, `host` refusé au démarrage avec une connexion par compte | `host` n'isole rien (même utilisateur, accès à la base, à la clé maître et aux dépôts des autres) ; un `.env` sans la ligne ne doit jamais remettre les agents sur la machine |
+| 2026-11-19 | Jeton d'abonnement par personne (`claude setup-token`) | **Retenu** (renverse le « non retenu » du 2026-11-09) : chiffré dans le coffre de la personne, transmis au seul conteneur de ses tâches par l'environnement du client `docker` | Seul moyen de garder l'abonnement avec des conteneurs partout sans monter un dossier personnel (une session complète lisible par un agent manipulé). Jeton d'un an, limité aux requêtes de modèle (doc officielle de la CLI). Même exposition que la clé API. Conditions d'utilisation toujours à faire valider par Anthropic avant ouverture au-delà de l'équipe |
 | 2026-11-09 | Base de données du mode serveur | PostgreSQL | Cohérence avec les autres projets, écritures concurrentes |
 | 2026-11-09 | Hébergement | Docker (docker compose), serveur à choisir | L'utilisateur connaît Docker |
 | 2026-11-09 | GitHub : type de jeton | Jeton personnel à portée fine en local, application GitHub pour la plateforme | Simple et limité par dépôt en local, voie propre en multi-utilisateur |

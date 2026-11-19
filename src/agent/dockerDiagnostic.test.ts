@@ -60,7 +60,7 @@ describe.skipIf(process.platform === "win32")("diagnostic des conteneurs d'agent
     containerUser: "host",
     ...over,
   });
-  const context = (over: Partial<RuntimeContext> = {}): RuntimeContext => ({ dataDir, agentAuth: "api", apiKeyConfigured: true, ...over });
+  const context = (over: Partial<RuntimeContext> = {}): RuntimeContext => ({ dataDir, agentAuth: "api", apiKeyConfigured: true, oauthTokenConfigured: false, ...over });
   const byId = (checks: RuntimeCheck[], id: RuntimeCheck["id"]) => checks.find((c) => c.id === id);
   /** Lignes des arguments de chaque `docker run`, séparées par bloc. */
   const runs = () => read("runs.txt").split("----\n").filter(Boolean).map((block) => block.split("\n").filter(Boolean));
@@ -136,14 +136,26 @@ describe.skipIf(process.platform === "win32")("diagnostic des conteneurs d'agent
     expect(runs()[0]![runs()[0]!.indexOf("--user") + 1]).toBe("0:0");
   });
 
-  it("mode abonnement ou clé absente : le contrôle de connexion échoue et dit pourquoi, la suite est quand même vérifiée", async () => {
-    const sub = await diagnoseAgentRuntime(runtime(), context({ agentAuth: "subscription" }));
-    expect(byId(sub.checks, "auth")).toMatchObject({ ok: false, detail: expect.stringContaining("mode « Clé API »") });
-    expect(sub.ok).toBe(false);
-    expect(sub.checks.length).toBe(7);
+  it("connexion à Claude manquante : le contrôle échoue et dit pourquoi, la suite est quand même vérifiée", async () => {
+    const noToken = await diagnoseAgentRuntime(runtime(), context({ agentAuth: "subscription" }));
+    expect(byId(noToken.checks, "auth")).toMatchObject({ ok: false, detail: expect.stringContaining("claude setup-token") });
+    expect(noToken.ok).toBe(false);
+    expect(noToken.checks.length).toBe(7);
 
-    const noKey = await diagnoseAgentRuntime(runtime(), context({ apiKeyConfigured: false }));
-    expect(byId(noKey.checks, "auth")).toMatchObject({ ok: false, detail: expect.stringContaining("aucune clé") });
+    // Une clé API ne remplace pas le jeton en mode abonnement, et inversement
+    const keyOnly = await diagnoseAgentRuntime(runtime(), context({ agentAuth: "subscription", apiKeyConfigured: true }));
+    expect(byId(keyOnly.checks, "auth")).toMatchObject({ ok: false });
+    const tokenOnly = await diagnoseAgentRuntime(runtime(), context({ apiKeyConfigured: false, oauthTokenConfigured: true }));
+    expect(byId(tokenOnly.checks, "auth")).toMatchObject({ ok: false, detail: expect.stringContaining("aucune clé") });
+  });
+
+  it("mode abonnement avec un jeton défini : contrôle réussi, sans transmettre le jeton à docker", async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "jeton-a-ne-pas-transmettre-au-diagnostic";
+    const res = await diagnoseAgentRuntime(runtime(), context({ agentAuth: "subscription", oauthTokenConfigured: true }));
+    expect(byId(res.checks, "auth")).toMatchObject({ ok: true, detail: expect.stringContaining("jeton d'abonnement défini") });
+    expect(res.ok).toBe(true);
+    expect(read("env.txt")).not.toContain("jeton-a-ne-pas-transmettre-au-diagnostic");
+    expect(read("runs.txt")).not.toContain("jeton-a-ne-pas-transmettre-au-diagnostic");
   });
 
   it("Docker injoignable : erreur lisible, aucun conteneur lancé", async () => {

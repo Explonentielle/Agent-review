@@ -33,7 +33,7 @@ describe("API de la forge : héros, quêtes et atelier", () => {
         ? {
             terminal: {
               hub: new TerminalHub(),
-              launch: () => ({ file: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"], env: { ...process.env }, cwd: process.cwd() }),
+              launch: async () => ({ file: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"], env: { ...process.env }, cwd: process.cwd() }),
               status: createClaudeStatusProbe("claude", () => ({}), async () => ({ code: claude.connected ? 0 : 1, stdout: "ok", stderr: "", missing: false }), 0),
             },
           }

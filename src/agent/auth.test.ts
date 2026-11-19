@@ -54,6 +54,7 @@ const configWith = (bin: string, withKey = true) =>
     GITLAB_USERNAME: "alex",
     CLAUDE_BIN: bin,
     DATA_DIR: dir,
+    AGENT_RUNTIME: "host", // ces tests contrôlent l'environnement de la CLI lancée sur la machine (poste local sans comptes)
     ...(withKey ? { ANTHROPIC_API_KEY: API_KEY } : {}),
   });
 const review = (runner: ReturnType<typeof createRunner>) => runReviewAgent({ cwd: dir, systemPrompt: "s", prompt: "p", engine: agentRunConfig(DEFAULT_SETTINGS.review), runner });
@@ -94,7 +95,7 @@ describe.skipIf(process.platform === "win32")("connexion à Claude : abonnement 
   it("clé API demandée mais absente du .env : erreur claire, rien n'est lancé", () => {
     const config = configWith(installStub(reviewOk), false);
     expect(config.anthropicApiKey).toBeNull();
-    expect(() => createRunner(config, settingsFor("api"))).toThrow(/ANTHROPIC_API_KEY est absente du \.env/);
+    expect(() => createRunner(config, settingsFor("api"))).toThrow(/aucune clé API Anthropic n'est définie/);
   });
 
   it("la clé n'apparaît jamais dans une erreur", async () => {

@@ -144,6 +144,7 @@ describe("API du dashboard sur le connecteur", () => {
         { name: "gitlab.token", label: "Jeton GitLab", secret: true, value: null, source: "env", updatedAt: null, live: false },
         { name: "github.token", label: "Jeton GitHub", secret: true, value: null, source: null, updatedAt: null, live: false },
         { name: "anthropic.api_key", label: "Clé API Anthropic", secret: true, value: null, source: null, updatedAt: null, live: true },
+        { name: "anthropic.oauth_token", label: "Jeton d'abonnement Claude", secret: true, value: null, source: null, updatedAt: null, live: true },
       ],
     });
 
@@ -164,6 +165,7 @@ describe("API du dashboard sur le connecteur", () => {
       ["gitlab.token", "env"],
       ["github.token", "vault"],
       ["anthropic.api_key", null],
+      ["anthropic.oauth_token", null],
     ]);
     expect(listed.json<{ secrets: { secret: boolean; value: string | null }[] }>().secrets.filter((s) => s.secret).every((s) => s.value === null)).toBe(true);
     for (const url of ["/api/secrets", "/api/stats", "/api/settings"]) expect((await app.inject({ method: "GET", url })).body).not.toContain("SAISIE_AU_DASHBOARD");
@@ -179,6 +181,19 @@ describe("API du dashboard sur le connecteur", () => {
     expect(h.config.anthropicApiKey).toBeNull();
     expect((await app.inject({ method: "POST", url: "/api/secrets/anthropic.api_key/delete" })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/api/secrets/inconnu/delete", headers: WRITE })).statusCode).toBe(400);
+
+    // Jeton d'abonnement : jamais renvoyé, sa présence seule se lit dans les statistiques, appliqué sans redémarrage, refusé s'il est mal formé
+    const stats = async () => (await app.inject({ method: "GET", url: "/api/stats" })).json() as { oauthTokenConfigured: boolean };
+    expect((await stats()).oauthTokenConfigured).toBe(false);
+    expect((await save("anthropic.oauth_token", { value: "trop court" })).statusCode).toBe(400);
+    const token = await save("anthropic.oauth_token", { value: "sk-ant-oat01-SAISI-AU-DASHBOARD-1" });
+    expect(token.json()).toEqual({ restartRequired: false });
+    expect(token.body).not.toContain("SAISI-AU-DASHBOARD");
+    expect((await stats()).oauthTokenConfigured).toBe(true);
+    expect(h.config.claudeOauthToken).toBe("sk-ant-oat01-SAISI-AU-DASHBOARD-1");
+    for (const url of ["/api/secrets", "/api/stats", "/api/settings"]) expect((await app.inject({ method: "GET", url })).body).not.toContain("SAISI-AU-DASHBOARD");
+    expect((await app.inject({ method: "POST", url: "/api/secrets/anthropic.oauth_token/delete", headers: WRITE })).json()).toEqual({ deleted: true, restartRequired: false });
+    expect(h.config.claudeOauthToken).toBeNull();
   });
 
   it("agents en conteneur : réglages sans secret, diagnostic protégé par l'en-tête anti-CSRF, vide hors du mode conteneur", async () => {

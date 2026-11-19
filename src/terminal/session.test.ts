@@ -40,6 +40,27 @@ describe("session de terminal", () => {
     expect(session.alive).toBe(true);
   });
 
+  it("nettoie à la fin de la session, une seule fois : sortie du programme comme arrêt, même si le nettoyage échoue", async () => {
+    let calls = 0;
+    const exited = open(LIMITS, { ...launchOf("process.exit(0)"), cleanup: async () => void (calls += 1) });
+    await waitFor(() => !exited.alive);
+    await waitFor(() => calls === 1);
+    const stopped = open(LIMITS, {
+      ...launchOf(),
+      cleanup: async () => {
+        calls += 10;
+        throw new Error("nettoyage en échec");
+      },
+    });
+    expect(calls).toBe(1); // rien tant que la session vit
+    stopped.stop();
+    await waitFor(() => !stopped.alive);
+    await waitFor(() => calls === 11);
+    stopped.stop();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls).toBe(11);
+  });
+
   it("un abonné tardif reçoit d'abord la sortie déjà produite", async () => {
     const session = open();
     const first = collect(session);

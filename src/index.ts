@@ -1,6 +1,7 @@
+import path from "node:path";
 import { createAuthRuntime } from "./auth/runtime.js";
 import { claudeEnv } from "./claude/process.js";
-import { createClaudeStatusProbe } from "./claude/status.js";
+import { createClaudeStatusProbe, createDeclaredStatusProbe } from "./claude/status.js";
 import { loadConfig, type Config } from "./config.js";
 import { createAccountRepo } from "./db/accounts.js";
 import { openDb } from "./db/index.js";
@@ -10,7 +11,7 @@ import { createSecretStore, hasAnySecret } from "./secrets/store.js";
 import { buildServer } from "./server/app.js";
 import { ConcurrencyLimiter } from "./tenants/limiter.js";
 import { TenantManager } from "./tenants/manager.js";
-import { claudeTerminalLaunch } from "./terminal/launch.js";
+import { claudeTerminalLaunch, containerTerminalLaunch } from "./terminal/launch.js";
 import { TerminalHub } from "./terminal/session.js";
 
 /**
@@ -23,6 +24,7 @@ function registerEnvSecrets(config: Config): void {
     config.gitlab?.token,
     config.github?.token,
     config.anthropicApiKey,
+    config.claudeOauthToken,
     config.planio?.apiKey,
     config.secrets.masterKey,
     ...config.secrets.previousKeys,
@@ -83,12 +85,24 @@ async function main(): Promise<void> {
   });
   const [owner] = await manager.startKnown(local, auth?.policy.multiUser ?? false);
 
-  // Terminal Claude du navigateur : la CLI seule, avec l'environnement filtré des agents (jamais les secrets de l'outil)
+  // Terminal Claude du navigateur (réservé au propriétaire) : la CLI seule. En mode conteneur, dans le même conteneur isolé que les agents, avec le
+  // jeton d'abonnement du propriétaire ; sur la machine (poste local sans comptes), avec l'environnement filtré des agents
   const terminalHub = new TerminalHub();
+  const ownerConfig = owner!.deps.config;
   const terminal = {
     hub: terminalHub,
-    launch: () => claudeTerminalLaunch({ claudeBin: config.claudeBin, env: claudeEnv(), cwd: config.dataDir }),
-    status: createClaudeStatusProbe(config.claudeBin, () => claudeEnv()),
+    launch: () =>
+      config.agentRuntime.mode === "docker"
+        ? containerTerminalLaunch({
+            runtime: config.agentRuntime,
+            credentials: ownerConfig.claudeOauthToken ? { oauthToken: ownerConfig.claudeOauthToken } : null,
+            workDir: path.join(config.dataDir, "terminal"),
+          })
+        : Promise.resolve(claudeTerminalLaunch({ claudeBin: config.claudeBin, env: claudeEnv(), cwd: config.dataDir })),
+    status:
+      config.agentRuntime.mode === "docker"
+        ? createDeclaredStatusProbe(() => ownerConfig.claudeOauthToken !== null)
+        : createClaudeStatusProbe(config.claudeBin, () => claudeEnv()),
   };
 
   const server = buildServer({
@@ -107,7 +121,7 @@ async function main(): Promise<void> {
   });
   await server.listen({ host: config.server.host, port: config.server.port });
 
-  log.info("app.started", { dashboard: `http://localhost:${config.server.port}`, actionMode: (await owner!.deps.settings.get()).actionMode });
+  log.info("app.started", { dashboard: `http://localhost:${config.server.port}`, actionMode: (await owner!.deps.settings.get()).actionMode, agentRuntime: config.agentRuntime.mode });
 
   const shutdown = async () => {
     terminalHub.stopAll();

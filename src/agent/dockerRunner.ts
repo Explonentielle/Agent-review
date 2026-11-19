@@ -37,17 +37,30 @@ const WORKDIR = "/work";
 const AGENT_HOME = "/home/agent";
 
 /**
- * Environnement du client `docker` (pas celui de l'agent) : de quoi joindre le démon et la clé API, que `docker run -e ANTHROPIC_API_KEY`
- * transmet au conteneur sans qu'elle apparaisse dans les arguments (visibles de tous par `ps`). Rien d'autre du processus de l'outil.
- * @param apiKey Clé API Anthropic de la tâche.
+ * Ce que le conteneur reçoit pour se connecter à Claude : une clé API (mode clé API) ou un jeton d'abonnement (mode abonnement, `claude setup-token`).
+ * Un seul des deux : la CLI donne la priorité à la clé API, qui ferait facturer l'API à la place de l'abonnement.
+ */
+export interface ContainerCredentials {
+  /** Clé API Anthropic de la personne. */
+  apiKey?: string;
+  /** Jeton d'abonnement Claude de la personne (variable `CLAUDE_CODE_OAUTH_TOKEN` dans le conteneur). */
+  oauthToken?: string;
+}
+
+/**
+ * Environnement du client `docker` (pas celui de l'agent) : de quoi joindre le démon et les identifiants de connexion à Claude, que
+ * `docker run -e VARIABLE` transmet au conteneur sans qu'ils apparaissent dans les arguments (visibles de tous par `ps`). Rien d'autre du
+ * processus de l'outil.
+ * @param credentials Clé API ou jeton d'abonnement de la tâche, ou null (aucun identifiant : diagnostic, nettoyage).
  * @returns L'environnement du client docker.
  */
-export function dockerClientEnv(apiKey: string | null): NodeJS.ProcessEnv {
+export function dockerClientEnv(credentials: ContainerCredentials | null): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const name of ["PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"]) {
     if (process.env[name] !== undefined) env[name] = process.env[name];
   }
-  if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
+  if (credentials?.apiKey) env.ANTHROPIC_API_KEY = credentials.apiKey;
+  if (credentials?.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = credentials.oauthToken;
   return env;
 }
 
@@ -61,6 +74,7 @@ export function dockerClientEnv(apiKey: string | null): NodeJS.ProcessEnv {
  * @param cliArgs Arguments du programme lancé (par défaut ceux de la CLI Claude Code).
  * @param user Utilisateur du conteneur `uid:gid` : celui du processus de l'outil (Docker classique) ou `0:0` (Docker sans root), voir `resolveContainerUser`.
  * @param program Programme lancé dans le conteneur : la CLI Claude Code, sauf pour le diagnostic des conteneurs (`sh`).
+ * @param tty Vrai pour le terminal du navigateur : le conteneur reçoit un pseudo-terminal (`-it`) et le type de terminal.
  * @returns Les arguments de `docker`.
  * @throws Error Si le dossier de travail n'est pas un chemin absolu sûr.
  */
@@ -71,11 +85,12 @@ export function buildDockerArgs(
   cliArgs: string[],
   user: string,
   program = "claude",
+  tty = false,
 ): string[] {
   // `--mount` sépare ses options par des virgules : un chemin qui en contient pourrait ajouter une option (monter autre chose)
   if (!path.isAbsolute(req.cwd) || /[,\n\r]/.test(req.cwd)) throw new Error(`Dossier de travail invalide pour le conteneur de l'agent : ${req.cwd}`);
   return [
-    "run", "--rm", "-i",
+    "run", "--rm", tty ? "-it" : "-i",
     "--name", name,
     "--pull", "never", // l'image doit déjà exister : aucun téléchargement implicite au lancement d'une tâche
     "--read-only",
@@ -92,7 +107,9 @@ export function buildDockerArgs(
     "--mount", `type=bind,src=${req.cwd},dst=${WORKDIR}`,
     "--workdir", WORKDIR,
     "-e", `HOME=${AGENT_HOME}`,
-    "-e", "ANTHROPIC_API_KEY", // sans valeur : prise dans l'environnement du client docker
+    ...(tty ? ["-e", "TERM=xterm-256color", "-e", "COLORTERM=truecolor"] : []),
+    "-e", "ANTHROPIC_API_KEY", // sans valeur : prise dans l'environnement du client docker, absente du conteneur si le client ne la définit pas
+    "-e", "CLAUDE_CODE_OAUTH_TOKEN", // idem
     runtime.image,
     program,
     ...cliArgs,
@@ -171,19 +188,22 @@ export async function resolveContainerUser(runtime: DockerRuntime): Promise<stri
 
 /**
  * Lanceur qui exécute la CLI Claude Code dans un conteneur jetable au lieu de la machine hôte (voir `buildDockerArgs`).
- * Réservé au mode clé API : l'abonnement de l'utilisateur vit dans son dossier personnel, qu'on ne monte pas dans un conteneur.
+ * Le conteneur ne reçoit que les identifiants de la personne (clé API ou jeton d'abonnement, par l'environnement du client docker) : jamais le
+ * dossier personnel de la machine, où vit une éventuelle session `/login`.
  * @param runtime Réglages de l'exécution en conteneur.
- * @param apiKey Clé API Anthropic transmise au conteneur par l'environnement du client docker.
+ * @param credentials Clé API ou jeton d'abonnement de la personne (un seul des deux).
  * @returns Le lanceur à donner à `CliRunner`.
+ * @throws Error Si ni clé API ni jeton d'abonnement n'est fourni, ou si les deux le sont.
  */
-export function dockerLauncher(runtime: DockerRuntime, apiKey: string): Launcher {
+export function dockerLauncher(runtime: DockerRuntime, credentials: ContainerCredentials): Launcher {
+  if (Boolean(credentials.apiKey) === Boolean(credentials.oauthToken)) throw new Error("Un conteneur d'agent reçoit une clé API ou un jeton d'abonnement, jamais les deux ni aucun.");
   return async (req, cliArgs) => {
     const user = await resolveContainerUser(runtime);
     const name = `ra-agent-${randomBytes(6).toString("hex")}`;
     return {
       bin: runtime.dockerBin,
       args: buildDockerArgs(runtime, req, name, cliArgs, user),
-      env: dockerClientEnv(apiKey),
+      env: dockerClientEnv(credentials),
       cleanup: () => removeContainer(runtime.dockerBin, name),
     };
   };
