@@ -128,7 +128,7 @@ Depuis le 2026-11-19, `docker` est le **défaut** (`AGENT_RUNTIME` absent = cont
 - [ ] Constater : la mémoire utilisée par un agent (`docker stats`) et le temps de démarrage du conteneur.
 
 **Sur le VPS, avec Docker sans root** (`docs/deploiement.md`, section 11, décidée le 2026-11-12 : jamais essayée, c'est ici qu'elle se valide) :
-- [ ] Suivre les étapes 1 à 9 de la section 11. Noter chaque erreur : les plus probables sont la restriction des espaces de noms utilisateur d'Ubuntu récent (étape 3), le plugin `docker compose` absent, et un `node` qui n'est pas dans `/usr/bin`.
+- [ ] Suivre les étapes 1 à 9 de la section 11 (commencée le 2026-11-19 : étapes 1 et 2 faites, voir le « Journal du premier essai » de `docs/deploiement.md` ; entrer dans le compte `review` par `sudo machinectl shell review@`, sans clé SSH). Noter chaque erreur : les plus probables sont la restriction des espaces de noms utilisateur d'Ubuntu récent (étape 3), le plugin `docker compose` absent, et un `node` qui n'est pas dans `/usr/bin`.
 - [ ] `docker info --format '{{.SecurityOptions}}'` contient `name=rootless` ; `docker run --rm --memory 64m alpine cat /sys/fs/cgroup/memory.max` affiche `67108864` (sinon les plafonds sont ignorés : le dire avant de continuer).
 - [ ] Le bouton **Tester les conteneurs** (Paramètres > Agents dans des conteneurs) donne sept pastilles vertes. En cas de rouge, noter la ligne et son message : ils disent quoi corriger (délégation de cgroups, image, `AGENT_CONTAINER_USER`...).
 - [ ] Une review en mode clé API fonctionne : l'agent écrit dans son dossier de travail (c'est le point que seul un vrai Docker sans root peut confirmer : conteneur en `0:0` = utilisateur `review`). Si l'agent échoue sur des droits d'écriture, noter le message exact.

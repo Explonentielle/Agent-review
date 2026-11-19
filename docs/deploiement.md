@@ -168,13 +168,18 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
 
 ## 11. Variante avec les agents en conteneurs : l'outil sur la machine, Docker sans root
 
-**Statut : préparée, jamais essayée sur le VPS.** Le code est testé avec un faux `docker` ; le fichier compose et l'unité systemd sont vérifiés par leurs outils (`docker compose config`, `systemd-analyze verify`) ; rien n'a tourné avec un vrai Docker sans root.
+**Statut (2026-11-19) : commencée sur le VPS, étapes 1 et 2 faites, à reprendre à l'étape 3** (voir « Journal du premier essai » plus bas). Le code est testé avec un faux `docker` ; le fichier compose et l'unité systemd sont vérifiés par leurs outils (`docker compose config`, `systemd-analyze verify`) ; rien n'a encore tourné avec un vrai Docker sans root.
+
+**Comprendre en bref**
+- **Le compte `review` fait tourner l'outil entier** : dashboard, files d'attente, agents de dev **et** agents de review. Son nom n'a aucun lien particulier avec les agents de review : c'est une étiquette (compte de service). Un autre nom marche (l'unité systemd utilise `%h`, le dossier personnel du compte), à condition de remplacer `review` et `/home/review` dans les commandes ci-dessous. Sur le VPS du 2026-11-19, le compte créé s'appelle `review`.
+- **Pourquoi un compte dédié** : l'outil lance des conteneurs, donc il lui faut Docker. Avec un Docker à droits complets (root), qui compromet l'outil ou s'échappe d'un conteneur devient root sur toute la machine. Le compte `review` n'a ni `sudo` ni groupe `docker`, et son Docker « sans root » ne donne que les droits de `review`. Il n'a pas de mot de passe : c'est un compte de service, on y entre depuis une session `ubuntu` (`machinectl`) ou par clé SSH.
+- **Un conteneur par tâche, pas par projet** : chaque tâche (agent de dev ou de review) a son conteneur jetable, détruit à la fin. Un conteneur de projet qui resterait en vie garderait ce qu'un agent manipulé y laisse pour les tâches suivantes (d'autres personnes comprises), garderait le jeton d'une personne pour les tâches des autres, et occuperait de la mémoire (environ 3 Go de marge sur le VPS). Ce qui est **par projet**, c'est l'**image** (les outils : PHP 7.3, PHP 8.4...), voir « Une image par projet » à la section 10 : le conteneur est recréé à chaque tâche à partir de cette image. Un conteneur persistant avec arrêt à l'inactivité est prévu plus tard (`docs/roadmap-plateforme.md`, D2).
 
 **Pourquoi** : avec Docker « sans root » (rootless), le démon tourne sous un utilisateur ordinaire. Une évasion d'un conteneur ou une compromission de l'outil ne donne que les droits de cet utilisateur, pas ceux de root. Le Docker de rag-saas (avec root) n'est pas touché : c'est un second démon, séparé, qui ne voit ni ses conteneurs ni ses volumes.
 
 **Ce qui change** : l'application n'est plus dans un conteneur. `docker-compose.hote.yml` ne contient que la base (publiée sur `127.0.0.1:5433` ; même nom de volume que la variante complète, mais sur le Docker sans root c'est un volume neuf : voir « Migrer depuis le déploiement des sections 1 à 8 » plus bas), l'outil tourne sous systemd (`deploy/review-agent.service`) sous l'utilisateur `review`, et chaque agent tourne dans un conteneur jetable (section 10). Avec `AGENT_CONTAINER_USER=auto` (défaut), l'outil détecte Docker sans root et lance alors le conteneur en « root du conteneur » : pour la machine, c'est l'utilisateur `review`, le seul à pouvoir écrire dans le dossier de travail (l'UID 1000 du conteneur serait un sous-UID sans droit d'écriture). Toutes les capacités Linux sont retirées : ce « root » n'a que les droits de `review` sur ses propres fichiers.
 
-**Mise en place (une fois).** Les étapes 1 et 2 demandent `sudo`, les suivantes se font en tant que `review`.
+**Mise en place (une fois).** Les étapes 1 et 2 demandent `sudo` (depuis la session `ubuntu`), les suivantes se font en tant que `review`, dans une vraie session ouverte comme expliqué à la fin de l'étape 2.
 
 1. **L'utilisateur et ses prérequis** (sudo) :
    ```
@@ -183,14 +188,20 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
    sudo loginctl enable-linger review
    grep '^review:' /etc/subuid /etc/subgid
    ```
-   `adduser` crée `review` sans mot de passe (connexion par clé SSH seulement) : ne l'ajoute **ni à sudo ni au groupe docker**. `uidmap` fournit `newuidmap` et `newgidmap`, dont Docker sans root a besoin pour décaler les UID. `dbus-user-session` permet les services systemd utilisateur. `enable-linger` garde ses services actifs sans session ouverte et les relance au démarrage de la machine. `grep` doit afficher une plage dans chacun des deux fichiers (ex. `review:100000:65536`) ; sinon `sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 review`, avec une plage qui ne chevauche aucune autre (`cat /etc/subuid`).
+   `adduser` crée `review` sans mot de passe (aucune connexion par mot de passe n'est possible : on y entre par `machinectl` ou par clé SSH, voir la fin de l'étape 2) : ne l'ajoute **ni à sudo ni au groupe docker**. `uidmap` fournit `newuidmap` et `newgidmap`, dont Docker sans root a besoin pour décaler les UID. `dbus-user-session` permet les services systemd utilisateur. `enable-linger` garde ses services actifs sans session ouverte et les relance au démarrage de la machine. `grep` doit afficher une plage dans chacun des deux fichiers (ex. `review:100000:65536`) ; sinon `sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 review`, avec une plage qui ne chevauche aucune autre (`cat /etc/subuid`).
 2. **Délégation des plafonds de ressources** (sudo) :
    ```
    sudo mkdir -p /etc/systemd/system/user@.service.d
    printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
    sudo systemctl daemon-reload
+   sudo systemctl restart user@$(id -u review).service
    ```
-   Sans cette délégation, Docker sans root **ignore** les plafonds de mémoire, de processeurs et de processus (il affiche un simple avertissement) : toute la protection contre un agent gourmand disparaît. `mkdir -p` crée le dossier de configuration, `printf ... | sudo tee` écrit le fichier (le `tee` en sudo, car une redirection `>` s'exécuterait sans sudo), `daemon-reload` relit la configuration de systemd. Déconnecte puis reconnecte `review` ensuite.
+   Sans cette délégation, Docker sans root **ignore** les plafonds de mémoire, de processeurs et de processus (il affiche un simple avertissement) : toute la protection contre un agent gourmand disparaît. `mkdir -p` crée le dossier de configuration, `printf ... | sudo tee` écrit le fichier (le `tee` en sudo, car une redirection `>` s'exécuterait sans sudo), `daemon-reload` relit la configuration de systemd. `id -u review` donne le numéro de `review` et `user@<numéro>.service` est son gestionnaire de services : `enable-linger` (étape 1) l'a déjà démarré sans la délégation, et se reconnecter ne le relance pas, d'où le `restart` (inoffensif tant que rien ne tourne sous `review`). Le test de plafond mémoire de l'étape 4 confirme que la délégation est active (non vérifié avant la première mise en place).
+
+   **Ouvrir une session en tant que `review`** (avant l'étape 3). Docker sans root et `systemctl --user` demandent une vraie session de connexion : `su` ou `sudo -u review` ne la donnent pas de façon fiable. Deux façons :
+   - **Sans clé SSH, depuis la session `ubuntu`** (la plus simple) : `sudo apt-get install -y systemd-container` puis `sudo machinectl shell review@`. `systemd-container` fournit `machinectl`, et `shell review@` ouvre une session de connexion de `review` sur cette machine (`exit` pour en sortir). Vérifier dans cette session : `whoami` affiche `review`, et `echo $XDG_RUNTIME_DIR` affiche un dossier du genre `/run/user/1001` (vide : la session n'est pas bonne).
+   - **Par SSH avec une clé** : il faut qu'une clé publique soit dans `/home/review/.ssh/authorized_keys`. Copier celles de `ubuntu` (`sudo install -d -m 700 -o review -g review /home/review/.ssh`, puis `sudo cp ~/.ssh/authorized_keys /home/review/.ssh/authorized_keys`, `sudo chown review:review` et `sudo chmod 600` sur ce fichier) ne marche que si `ubuntu` se connecte lui-même par clé : `sudo wc -c ~/.ssh/authorized_keys` affiche `0` s'il est vide. Sinon, générer une clé sur le poste (`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_review`, la partie `.pub` est la clé publique), l'ajouter avec `echo 'ssh-ed25519 AAAA...' | sudo tee -a /home/review/.ssh/authorized_keys` (`-a` ajoute sans écraser), puis `ssh -i ~/.ssh/id_ed25519_review review@<ip>`.
+   - Ne jamais essayer un mot de passe pour `review` : il n'existe pas, et des essais répétés peuvent faire bannir ton adresse.
 3. **Docker sans root** (en tant que `review`) :
    ```
    curl -fsSL https://get.docker.com/rootless -o rootless-install.sh
@@ -211,7 +222,7 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
    npx tsc -p tsconfig.build.json
    ```
    `npm ci` installe exactement les dépendances du fichier de verrouillage, `tsc` compile vers `dist/`.
-6. **Le `.env`** (`chmod 600`, **tu le remplis toi-même**, je n'y touche pas) : en plus de la section 4, `DATABASE_URL=postgres://review:<POSTGRES_PASSWORD>@127.0.0.1:5433/review_agent` (même mot de passe que `POSTGRES_PASSWORD`), `AGENT_RUNTIME=docker` (c'est le défaut, mais écris-le) et `AGENT_IMAGE=review-agent-sandbox:local`. Pas de `HOST`, `PORT` ni `DATA_DIR` : le service les fixe. Ton jeton d'abonnement (`claude setup-token` sur ton poste) peut s'écrire ici en `CLAUDE_CODE_OAUTH_TOKEN=...`, ou se coller ensuite dans le dashboard.
+6. **Le `.env`** (`chmod 600`, **tu le remplis toi-même**, je n'y touche pas) : en plus de la section 4, `DATABASE_URL=postgres://review:<POSTGRES_PASSWORD>@127.0.0.1:5433/review_agent` (même mot de passe que `POSTGRES_PASSWORD`), `AGENT_RUNTIME=docker` (c'est le défaut, mais écris-le) et `AGENT_IMAGE=review-agent-sandbox:local`. Pas de `HOST`, `PORT` ni `DATA_DIR` : le service les fixe. Ton jeton d'abonnement (`claude setup-token` sur ton poste) peut s'écrire ici en `CLAUDE_CODE_OAUTH_TOKEN=...`, ou se coller ensuite dans le dashboard. Pour partir de l'ancien `.env` (depuis la session `ubuntu`) : `sudo install -o review -g review -m 600 ~/Agent-review/.env /home/review/review-agent/.env`, qui copie le fichier en le donnant à `review`, lisible par lui seul ; puis il se modifie à la main, sans qu'un agent n'y touche.
 7. **La base et l'image des agents** :
    ```
    COMPOSE_FILE=docker-compose.hote.yml docker compose up -d
@@ -228,6 +239,16 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
    ```
    Le fichier est copié dans le dossier des services de l'utilisateur, `daemon-reload` le prend en compte, `enable --now` le lance et le programme au démarrage, `journalctl -f` suit le journal : on y lit `app.started`.
 9. **Contrôles** : `ss -tlnp | grep -E '4321|5433'` ne montre que `127.0.0.1`. Dans le dashboard : Paramètres > Connexion > **Jeton d'abonnement Claude** (ou la clé API si tu choisis ce mode dans Paramètres > Modèles), puis Paramètres > Agents dans des conteneurs > **Tester les conteneurs** (section 10) : les sept contrôles doivent être `ok` (il revérifie l'écriture dans le dossier de travail et les plafonds de l'étape 4, avec la vraie configuration). Lance ensuite une review : `docker ps` montre un conteneur `ra-agent-...` pendant la tâche, et plus rien après.
+
+**Journal du premier essai (2026-11-19)** : VPS sous Ubuntu 26.04, utilisateur `ubuntu` avec Docker classique, ancien déploiement compose dans `~/Agent-review`.
+- **Fait** : sauvegarde de l'ancien déploiement (`~/Agent-review/backups/review_agent_2026-11-19_121346.sql.gz`, 36 Ko), puis `docker compose down` sans `-v` (volumes gardés). Aucun `git pull` dans `~/Agent-review` : ce dossier est le retour arrière.
+- **Fait** : étape 1 (compte `review` créé, `uidmap` installé, `dbus-user-session` déjà présent, `enable-linger`, plage `165536:65536` dans `/etc/subuid` et `/etc/subgid`) et étape 2 (fichier `/etc/systemd/system/user@.service.d/delegate.conf` écrit, `daemon-reload`).
+- **Pas fait** : le `restart` de `user@<numéro>.service` (ajouté à l'étape 2 après coup), l'ouverture de session de `review`, et tout ce qui suit (étapes 3 à 9, puis la migration ci-dessous).
+- **Constaté** : `ubuntu` se connecte par mot de passe, son `~/.ssh/authorized_keys` est vide. La copie des clés vers `review` n'a donc rien donné et `ssh review@<ip>` demande un mot de passe qui n'existe pas. D'où la voie `machinectl shell review@`, sans clé.
+- **Constaté** : après `apt-get install`, `needrestart` signale un noyau en attente (7.0.0-28 en cours, 7.0.0-43 installé) et des redémarrages de services différés, dont `docker.service`. À ignorer pendant la mise en place : ne pas relancer `docker.service` (c'est le Docker à droits complets), redémarrer la machine plus tard, à un moment calme.
+- **Données** : la base n'a pas d'enjeu pour le propriétaire ; la restauration reste conseillée pour garder les réglages et les jetons enregistrés (sinon, les ressaisir dans le dashboard).
+- **Jamais vu** : Docker sans root sous Ubuntu 26.04 (espaces de noms utilisateur, AppArmor), les plafonds de mémoire réellement appliqués, la vraie CLI Claude Code avec le jeton `claude setup-token` dans un conteneur au dossier personnel vide, le terminal en conteneur. Noter le message exact de chaque erreur.
+- **Pour l'agent qui reprend** : ne jamais lire ni modifier le `.env` (le propriétaire le remplit lui-même) ; ne jamais afficher un jeton ou une clé ; les commandes `sudo` sont jouées par le propriétaire, une explication de chaque commande est attendue avant de la lui donner ; pas de commit ni de push sans demande explicite.
 
 **Migrer depuis le déploiement des sections 1 à 8** (application déjà lancée dans son conteneur)
 
