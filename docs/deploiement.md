@@ -168,7 +168,7 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
 
 ## 11. Variante avec les agents en conteneurs : l'outil sur la machine, Docker sans root
 
-**Statut (2026-11-19) : commencée sur le VPS, étapes 1 et 2 faites, à reprendre à l'étape 3** (voir « Journal du premier essai » plus bas). Le code est testé avec un faux `docker` ; le fichier compose et l'unité systemd sont vérifiés par leurs outils (`docker compose config`, `systemd-analyze verify`) ; rien n'a encore tourné avec un vrai Docker sans root.
+**Statut (2026-11-20) : commencée sur le VPS, étapes 1 à 5 faites (Docker sans root, Node 24, code compilé), à reprendre à l'étape 6, le `.env`** (voir les journaux des deux essais plus bas). Le code est testé avec un faux `docker` ; le fichier compose et l'unité systemd sont vérifiés par leurs outils (`docker compose config`, `systemd-analyze verify`) ; Docker sans root a tourné sur le VPS (étapes 3 et 4), mais aucun agent n'a encore tourné dans un conteneur de bout en bout.
 
 **Comprendre en bref**
 - **Le compte `review` fait tourner l'outil entier** : dashboard, files d'attente, agents de dev **et** agents de review. Son nom n'a aucun lien particulier avec les agents de review : c'est une étiquette (compte de service). Un autre nom marche (l'unité systemd utilise `%h`, le dossier personnel du compte), à condition de remplacer `review` et `/home/review` dans les commandes ci-dessous. Sur le VPS du 2026-11-19, le compte créé s'appelle `review`.
@@ -179,7 +179,7 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
 
 **Ce qui change** : l'application n'est plus dans un conteneur. `docker-compose.hote.yml` ne contient que la base (publiée sur `127.0.0.1:5433` ; même nom de volume que la variante complète, mais sur le Docker sans root c'est un volume neuf : voir « Migrer depuis le déploiement des sections 1 à 8 » plus bas), l'outil tourne sous systemd (`deploy/review-agent.service`) sous l'utilisateur `review`, et chaque agent tourne dans un conteneur jetable (section 10). Avec `AGENT_CONTAINER_USER=auto` (défaut), l'outil détecte Docker sans root et lance alors le conteneur en « root du conteneur » : pour la machine, c'est l'utilisateur `review`, le seul à pouvoir écrire dans le dossier de travail (l'UID 1000 du conteneur serait un sous-UID sans droit d'écriture). Toutes les capacités Linux sont retirées : ce « root » n'a que les droits de `review` sur ses propres fichiers.
 
-**Mise en place (une fois).** Les étapes 1 et 2 demandent `sudo` (depuis la session `ubuntu`), les suivantes se font en tant que `review`, dans une vraie session ouverte comme expliqué à la fin de l'étape 2.
+**Mise en place (une fois).** Les étapes 1 et 2, le profil AppArmor de l'étape 3 et l'installation de Node de l'étape 5 demandent `sudo` (depuis la session `ubuntu`) ; le reste se fait en tant que `review`, dans une vraie session ouverte comme expliqué à la fin de l'étape 2. Une session `review` démarre toujours dans `/home/review` : après chaque ouverture, faire `cd ~/review-agent` avant les commandes de l'outil (étapes 5 à 9).
 
 1. **L'utilisateur et ses prérequis** (sudo) :
    ```
@@ -196,7 +196,7 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
    sudo systemctl daemon-reload
    sudo systemctl restart user@$(id -u review).service
    ```
-   Sans cette délégation, Docker sans root **ignore** les plafonds de mémoire, de processeurs et de processus (il affiche un simple avertissement) : toute la protection contre un agent gourmand disparaît. `mkdir -p` crée le dossier de configuration, `printf ... | sudo tee` écrit le fichier (le `tee` en sudo, car une redirection `>` s'exécuterait sans sudo), `daemon-reload` relit la configuration de systemd. `id -u review` donne le numéro de `review` et `user@<numéro>.service` est son gestionnaire de services : `enable-linger` (étape 1) l'a déjà démarré sans la délégation, et se reconnecter ne le relance pas, d'où le `restart` (inoffensif tant que rien ne tourne sous `review`). Le test de plafond mémoire de l'étape 4 confirme que la délégation est active (non vérifié avant la première mise en place).
+   Sans cette délégation, Docker sans root **ignore** les plafonds de mémoire, de processeurs et de processus (il affiche un simple avertissement) : toute la protection contre un agent gourmand disparaît. `mkdir -p` crée le dossier de configuration, `printf ... | sudo tee` écrit le fichier (le `tee` en sudo, car une redirection `>` s'exécuterait sans sudo), `daemon-reload` relit la configuration de systemd. `id -u review` donne le numéro de `review` et `user@<numéro>.service` est son gestionnaire de services : `enable-linger` (étape 1) l'a déjà démarré sans la délégation, et se reconnecter ne le relance pas, d'où le `restart` (inoffensif tant que rien ne tourne sous `review`). Le test de plafond mémoire de l'étape 4 confirme que la délégation est active (vérifié le 2026-11-20 : `cpuset cpu io memory pids` sont délégués et le plafond de 64 Mo est appliqué).
 
    **Ouvrir une session en tant que `review`** (avant l'étape 3). Docker sans root et `systemctl --user` demandent une vraie session de connexion : `su` ou `sudo -u review` ne la donnent pas de façon fiable. Deux façons :
    - **Sans clé SSH, depuis la session `ubuntu`** (la plus simple) : `sudo apt-get install -y systemd-container` puis `sudo machinectl shell review@`. `systemd-container` fournit `machinectl`, et `shell review@` ouvre une session de connexion de `review` sur cette machine (`exit` pour en sortir). Vérifier dans cette session : `whoami` affiche `review`, et `echo $XDG_RUNTIME_DIR` affiche un dossier du genre `/run/user/1001` (vide : la session n'est pas bonne).
@@ -208,20 +208,62 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
    less rootless-install.sh
    sh rootless-install.sh
    ```
-   C'est le script officiel de Docker : on le télécharge, on le lit (`less`), puis on l'exécute, plutôt que de le passer directement à un shell. Il installe les programmes dans `~/bin`, crée le service utilisateur `docker` et affiche deux lignes à ajouter à `~/.bashrc` (`export PATH=$HOME/bin:$PATH` et `export DOCKER_HOST=unix:///run/user/<UID>/docker.sock`). Ensuite `systemctl --user enable --now docker` l'active et le lance. Ubuntu récent restreint les espaces de noms utilisateur non privilégiés : si le démon refuse de démarrer pour cette raison, Docker documente un profil AppArmor pour `rootlesskit` (page « Run the Docker daemon as a non-root user (Rootless mode) »), non essayé ici. Le script n'installe pas toujours `docker compose` : vérifie `docker compose version`, sinon installe le binaire officiel (https://github.com/docker/compose/releases) dans `~/.docker/cli-plugins/docker-compose` (`chmod +x`).
+   C'est le script officiel de Docker : on le télécharge, on le lit (`less`), puis on l'exécute, plutôt que de le passer directement à un shell. Il installe les programmes dans `~/bin`, puis appelle `dockerd-rootless-setuptool.sh install`, qui crée le service utilisateur `docker`, le démarre, l'active au démarrage et crée le contexte CLI `rootless`. À la fin il affiche deux lignes à ajouter à `~/.bashrc`, que l'on ajoute et applique avec :
+   ```
+   echo 'export PATH=/home/review/bin:$PATH' >> ~/.bashrc
+   echo 'export DOCKER_HOST=unix:///run/user/<UID>/docker.sock' >> ~/.bashrc
+   source ~/.bashrc
+   ```
+   (`>>` ajoute à la fin sans écraser ; les guillemets simples empêchent le remplacement de `$PATH` à ce moment-là ; `<UID>` est le numéro donné par `id -u`, 1001 sur le VPS du 2026-11-19.)
+
+   **Ubuntu 26.04 : le script échoue sans profil AppArmor (constaté le 2026-11-20).** Ubuntu récent restreint les espaces de noms utilisateur non privilégiés (`apparmor_restrict_unprivileged_userns=1`). Le script s'arrête sur `[rootlesskit:parent] error: failed to start the child: fork/exec /proc/self/exe: permission denied` et affiche lui-même la correction (profil AppArmor pour `rootlesskit`, documenté par Docker). Depuis la session `ubuntu` (sudo) :
+   ```
+   cat <<EOT | sudo tee "/etc/apparmor.d/home.review.bin.rootlesskit"
+   abi <abi/4.0>,
+   include <tunables/global>
+
+   /home/review/bin/rootlesskit flags=(unconfined) {
+     userns,
+
+     include if exists <local/home.review.bin.rootlesskit>
+   }
+   EOT
+   sudo apparmor_parser -r /etc/apparmor.d/home.review.bin.rootlesskit
+   ```
+   `cat <<EOT | sudo tee` écrit le texte dans `/etc/apparmor.d/` avec les droits root (un `>` simple s'exécuterait sans `sudo`). Le profil ne vise que le programme `/home/review/bin/rootlesskit` : `userns,` lui permet de créer des espaces de noms utilisateur, `flags=(unconfined)` ne lui ajoute aucune autre restriction, et le reste de la machine garde la restriction. Le nom du fichier et le chemin dépendent du compte : pour un autre nom que `review`, les adapter. `apparmor_parser -r` charge ou remplace ce seul profil ; on le préfère au `sudo systemctl restart apparmor.service` suggéré par le script, qui recharge tous les profils de la machine (dont ceux que peut utiliser le Docker avec root). Au prochain démarrage, le profil est rechargé depuis `/etc/apparmor.d/`.
+
+   Relancer ensuite `sh rootless-install.sh` s'arrête sur `Existing rootless Docker detected at /home/review/bin/dockerd` : les programmes de la première tentative sont déjà là. Dans la session `review`, lancer directement l'étape qui avait échoué :
+   ```
+   PATH=$HOME/bin:$PATH dockerd-rootless-setuptool.sh install
+   ```
+   (`PATH=... commande` ajoute `~/bin` au chemin de recherche pour cette seule commande.) Il doit finir sur `Installed docker.service successfully.` et les deux lignes `export` ci-dessus. Alternative proposée par le script : `systemctl --user stop docker`, `rm -f ~/bin/dockerd`, puis relancer `sh rootless-install.sh`. Versions obtenues le 2026-11-20 : Docker 29.10.0, rootlesskit 3.3.0, `docker compose` v5.6.1.
+
+   Le script n'installe pas toujours `docker compose` : vérifie `docker compose version`, sinon installe le binaire officiel (https://github.com/docker/compose/releases) dans `~/.docker/cli-plugins/docker-compose` (`chmod +x`).
 4. **Vérifier que c'est bien sans root et que les plafonds s'appliquent** :
    ```
    docker info --format '{{.SecurityOptions}}'
    docker run --rm --memory 64m alpine cat /sys/fs/cgroup/memory.max
    ```
    La première doit contenir `name=rootless`. La seconde télécharge une petite image et doit afficher `67108864` (64 Mo) : si elle affiche `max`, la délégation de l'étape 2 n'est pas active.
-5. **L'outil** : installe Node 24 en le plaçant dans `/usr/bin` (paquet NodeSource ; sinon adapte `ExecStart` dans l'unité au chemin donné par `which node`), clone le dépôt dans `/home/review/review-agent`, puis :
+5. **L'outil** : Node 24 est requis (`engines` du `package.json`) et l'unité lance `/usr/bin/node` : on l'installe pour toute la machine avec le paquet NodeSource, **depuis la session `ubuntu`** (sudo) ; sinon, adapter `ExecStart` dans l'unité au chemin donné par `which node`.
    ```
+   curl -fsSL https://deb.nodesource.com/setup_24.x -o nodesource_setup.sh
+   less nodesource_setup.sh
+   sudo bash nodesource_setup.sh
+   sudo apt-get install -y nodejs
+   node -v
+   which node
+   ```
+   `deb.nodesource.com` est le serveur NodeSource pour Debian et Ubuntu. Le script ajoute son dépôt de paquets (clé et liste) à `apt`, `apt-get install` installe Node. `node -v` doit afficher `v24.x.x` et `which node` `/usr/bin/node` (constaté le 2026-11-20 sur Ubuntu 26.04 : `v24.22.3`). Puis, **en tant que `review`**, cloner le dépôt et le compiler :
+   ```
+   git clone https://github.com/Explonentielle/Agent-review.git ~/review-agent
    cd ~/review-agent
+   git log -1 --oneline
    npm ci
    npx tsc -p tsconfig.build.json
+   ls dist/index.js
    ```
-   `npm ci` installe exactement les dépendances du fichier de verrouillage, `tsc` compile vers `dist/`.
+   Le clone se fait sans identifiants. `git log` doit montrer le dernier commit attendu (`59d8b10` ou plus récent). `npm ci` installe exactement les dépendances du fichier de verrouillage dans `node_modules`, `tsc` compile vers `dist/` (silencieux si tout va bien) et `ls` confirme le fichier que lance le service. Ne pas oublier le `cd ~/review-agent` : lancé dans `/home/review`, `npm ci` échoue avec `EUSAGE ... can only install with an existing package-lock.json`. Les avertissements de `npm ci` (vulnérabilités signalées, `esbuild` sans script d'installation autorisé) ne bloquent rien ; ne pas lancer `npm audit fix`, qui modifierait `package-lock.json` sur le VPS.
 6. **Le `.env`** (`chmod 600`, **tu le remplis toi-même**, je n'y touche pas) : en plus de la section 4, `DATABASE_URL=postgres://review:<POSTGRES_PASSWORD>@127.0.0.1:5433/review_agent` (même mot de passe que `POSTGRES_PASSWORD`), `AGENT_RUNTIME=docker` (c'est le défaut, mais écris-le) et `AGENT_IMAGE=review-agent-sandbox:local`. Pas de `HOST`, `PORT` ni `DATA_DIR` : le service les fixe. Ton jeton d'abonnement (`claude setup-token` sur ton poste) peut s'écrire ici en `CLAUDE_CODE_OAUTH_TOKEN=...`, ou se coller ensuite dans le dashboard. Pour partir de l'ancien `.env` (depuis la session `ubuntu`) : `sudo install -o review -g review -m 600 ~/Agent-review/.env /home/review/review-agent/.env`, qui copie le fichier en le donnant à `review`, lisible par lui seul ; puis il se modifie à la main, sans qu'un agent n'y touche.
 7. **La base et l'image des agents** :
    ```
@@ -249,6 +291,16 @@ Tant que la section 11 n'est pas appliquée, les agents du déploiement Docker d
 - **Données** : la base n'a pas d'enjeu pour le propriétaire ; la restauration reste conseillée pour garder les réglages et les jetons enregistrés (sinon, les ressaisir dans le dashboard).
 - **Jamais vu** : Docker sans root sous Ubuntu 26.04 (espaces de noms utilisateur, AppArmor), les plafonds de mémoire réellement appliqués, la vraie CLI Claude Code avec le jeton `claude setup-token` dans un conteneur au dossier personnel vide, le terminal en conteneur. Noter le message exact de chaque erreur.
 - **Pour l'agent qui reprend** : ne jamais lire ni modifier le `.env` (le propriétaire le remplit lui-même) ; ne jamais afficher un jeton ou une clé ; les commandes `sudo` sont jouées par le propriétaire, une explication de chaque commande est attendue avant de la lui donner ; pas de commit ni de push sans demande explicite.
+
+**Journal du deuxième essai (2026-11-20)** : même VPS (Ubuntu 26.04, noyau 7.0.0-28 en cours, 7.0.0-43 installé et en attente de redémarrage).
+- **Fait** : délégation systemd vérifiée (`cat /sys/fs/cgroup/user.slice/user-1001.slice/user@1001.service/cgroup.controllers` affiche `cpuset cpu io memory pids`), `systemd-container` installé (sans lui : `sudo: 'machinectl': command not found`), session `review` ouverte par `sudo machinectl shell review@` (`XDG_RUNTIME_DIR=/run/user/1001`).
+- **Étape 3** : blocage AppArmor comme prévu (message exact et correction ci-dessus), puis `dockerd-rootless-setuptool.sh install` lancé directement après le profil. Le démarrage de `dockerd` affiche des lignes `Deleting nftables ... No such file or directory` de niveau `info` : Docker supprime des règles qui n'existent pas encore, sans conséquence.
+- **Étape 4** : `docker info --format '{{.SecurityOptions}}'` donne `[name=seccomp,profile=builtin name=rootless name=cgroupns]` et `docker run --rm --memory 64m alpine cat /sys/fs/cgroup/memory.max` donne `67108864` : le démon est sans root et les plafonds sont appliqués.
+- **Étape 5** : Node 24.22.3 par NodeSource (accepté sur Ubuntu 26.04), git 2.53.0, clone en `59d8b10`, `npm ci` (127 paquets, 6 vulnérabilités signalées, non traitées) et `tsc` sans erreur. `ls dist/index.js` n'a pas été confirmé : la connexion SSH s'est coupée juste après (`client_loop: send disconnect: Connection reset`), le service Docker de `review` n'est pas touché (linger).
+- **Constaté** : `needrestart` signale toujours le noyau et des redémarrages différés : ne pas relancer `docker.service` (c'est le Docker avec root, partagé avec d'autres applications de la machine).
+- **Pas fait** : étapes 6 à 9, restauration de la sauvegarde, jeton d'abonnement, test d'une vraie review. Toujours jamais vu : l'image des agents, la vraie CLI Claude avec le jeton dans un conteneur, le terminal en conteneur.
+- **Pour l'agent qui reprend** : se reconnecter en SSH sous `ubuntu`, `sudo machinectl shell review@`, `cd ~/review-agent`, `ls dist/index.js`, puis l'étape 6. Mêmes consignes qu'au premier essai (jamais lire ni modifier le `.env`, jamais afficher un jeton, expliquer chaque commande avant de la donner, pas de commit ni de push sans demande explicite).
+- **Suite prévue après le déploiement** : une vraie review, puis D7 (liste blanche réseau : `AGENT_NETWORK` existe déjà, le reste est de l'infrastructure), puis G1 (gVisor : une option de runtime reste à ajouter à l'outil, qui n'en a pas ; une machine séparée ne sert qu'à séparer l'exécution de l'outil). Voir `docs/roadmap-plateforme.md`.
 
 **Migrer depuis le déploiement des sections 1 à 8** (application déjà lancée dans son conteneur)
 
