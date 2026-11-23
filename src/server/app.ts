@@ -6,7 +6,9 @@ import { ZodError } from "zod";
 import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 import type { ForgeKind } from "../connectors/types.js";
 import { diagnoseAgentRuntime, type RuntimeDiagnostic } from "../agent/dockerDiagnostic.js";
+import { checkClaudeConnection, createConnectionCheckCache } from "../agent/connectionCheck.js";
 import { allowedImages, imageFor } from "../agent/imageName.js";
+import { createRunner } from "../agent/index.js";
 import { attachmentIds, failAttachment, giveAttachments, planAttachments, registerAttachments } from "../attachments/routes.js";
 import type { AttachmentOwner } from "../attachments/store.js";
 import { BudgetExceededError, UserQuotaError, assertQuotaAvailable } from "../budget.js";
@@ -62,6 +64,8 @@ export interface ServerDeps extends TenantDeps {
   terminal?: TerminalFeature;
   /** Exécuteur d'agent imposé au Scribe (tests). Absent : celui des réglages de la personne. */
   scribeRunner?: AgentRunner;
+  /** Exécuteur imposé au test de la connexion à Claude (tests). Absent : celui des réglages de la personne. */
+  checkRunner?: AgentRunner;
   /** Invitations à rejoindre l'espace. Absent : celles de la connexion par compte, s'il y en a une ; sinon on ne peut inviter personne. */
   invitations?: InvitationRepo;
   /** Appelée quand quelqu'un quitte l'espace ou en est retiré : arrête ses détecteurs et efface ses jetons de cet espace. */
@@ -72,7 +76,7 @@ export interface ServerDeps extends TenantDeps {
  * Propriétés de `ServerDeps` communes à toutes les personnes. Toutes les autres sont celles de la personne servie : une propriété ajoutée
  * plus tard est donc propre à la personne par défaut, jamais partagée par oubli.
  */
-const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal", "scribeRunner", "invitations", "onMemberRemoved"]);
+const SHARED_KEYS = new Set<string | symbol>(["accounts", "local", "auth", "tenants", "terminal", "scribeRunner", "checkRunner", "invitations", "onMemberRemoved"]);
 
 type IdParams = { Params: { id: string } };
 /** Une tâche terminée qui a ouvert une MR : ce qu'il faut pour la reprendre. */
@@ -314,6 +318,31 @@ export function buildServer(base: ServerDeps) {
       return await rebuildForges(await deleteManagedSecret(deps.config, deps.vault, managedName(req.params.name)));
     } catch (err) {
       return fail(reply, err, 400);
+    }
+  });
+
+  // --- Test réel de la connexion à Claude -------------------------------------
+
+  const connectionChecks = createConnectionCheckCache();
+
+  /**
+   * Demande à Anthropic, par une requête minimale sans outil, si le jeton d'abonnement (ou la clé API, selon le mode des réglages) de la personne
+   * est accepté. Consomme un peu de quota : un clic répété pendant dix secondes, ou un test déjà en cours, renvoie le même constat.
+   */
+  app.post("/api/claude/check", async (_req, reply) => {
+    try {
+      const settings = await deps.settings.get();
+      const mode = settings.agentAuth;
+      const credential = (mode === "api" ? deps.config.anthropicApiKey : deps.config.claudeOauthToken) ?? "";
+      const person = `${deps.vault.scope.workspaceId}:${deps.vault.scope.userId}`;
+      const { check, cached } = await connectionChecks.get(person, credential, () => checkClaudeConnection({
+        makeRunner: () => base.checkRunner ?? createRunner(deps.config, settings),
+        mode,
+        model: settings.review.model,
+      }));
+      return { ...check, cached };
+    } catch (err) {
+      return fail(reply, err);
     }
   });
 

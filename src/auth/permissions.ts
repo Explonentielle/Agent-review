@@ -51,6 +51,7 @@ export const ROUTE_LEVELS: Readonly<Record<string, Level>> = {
   // Agir : membre et administrateur
   "GET /api/secrets": "act",
   "GET /api/claude/status": "act",
+  "POST /api/claude/check": "act",
   "GET /api/terminal": "act",
   "GET /api/terminal/stream": "act",
   "POST /api/terminal/start": "act",

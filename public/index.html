@@ -1147,6 +1147,8 @@ function pieceHtml(p, taskId) {
          ${p.readiness.ok ? "" : `<ul class="note" style="margin:8px 0 0 18px">${p.readiness.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`}`;
   return `<p>${stateTag} <code>${esc(p.mr.sourceBranch)}</code> vers <code>${esc(p.mr.targetBranch)}</code></p>
     <p><b>1. Relecture</b> ${reviewTag}${esc(counts)} ${stale ? '<span class="note">La MR a changé depuis la dernière relecture.</span>' : ""}</p>
+    ${rv && rv.status === "error" ? `<p class="note"><code>${esc(String(rv.error || "").slice(0, 300))}</code></p>` : ""}
+    ${rv && rv.status === "error" && (rv.summary || findings) ? `<p class="note"><b>Résultat du run précédent</b> sur le même commit, pas celui de cet échec.</p>` : ""}
     ${rv && rv.summary && !running ? `<p class="note">${esc(rv.summary)}</p>` : ""}${findings}${questions}
     <div class="actions-inline">${fixBtn}${reviewBtn}${rv ? `<a class="btn ghost" href="#reviews/${rv.id}">Lire la revue complète</a>` : ""}</div>
     <p class="note">La relecture ne publie rien sur la MR : c'est un contrôle avant fusion.</p>
@@ -1292,7 +1294,7 @@ function renderReviewEmpty() {
 }
 
 function reviewCallout(r, reasons) {
-  if (r.status === "error") return `<div class="callout err">${ICON.err}<h3>La review a échoué</h3><pre>${esc(r.error)}</pre><p>Tu peux la relancer. Si l'erreur parle d'une limite d'usage, attends que ton quota se libère.</p></div>`;
+  if (r.status === "error") return `<div class="callout err">${ICON.err}<h3>La review a échoué</h3><pre>${esc(r.error)}</pre><p>Tu peux la relancer. Si l'erreur parle d'une limite d'usage, attends que ton quota se libère. Si elle parle d'authentification (401), vérifie le jeton dans Paramètres > Connexion.</p>${r.result ? `<p><b>Le résultat plus bas est celui du run précédent</b> sur ce même commit, pas celui de cet échec. Les tours et le coût affichés sont aussi ceux de ce run.</p>` : ""}</div>`;
   if (r.status === "detected") return `<div class="callout"><h3>Pas encore analysée</h3><p>Cette demande a été détectée, mais le déclenchement des reviews est réglé sur « À la main » : lance l'analyse quand tu veux.</p></div>`;
   if (r.status === "running" || r.status === "queued") return `<div class="callout live"><span class="pulse"></span><h3>${r.status === "running" ? "Analyse en cours" : "En attente d'analyse"}</h3><p>Le résultat apparaîtra ici.</p></div>`;
   if (!r.result) return "";
@@ -1336,7 +1338,7 @@ async function showReview(id) {
       ${r.devTask ? `<div class="callout info">${ICON.info}<h3>MR faite par l'agent dev</h3><p>Cette MR est celle de la tâche <a href="#dev/${r.devTask.id}">#${r.devTask.id}</a> : depuis sa page, tu peux relancer la relecture, <b>corriger avec cette relecture</b> (l'agent dev reçoit ses points) ou fusionner.</p><div class="actions-inline"><a class="btn primary sm" href="#dev/${r.devTask.id}">Ouvrir la tâche de l'agent</a></div></div>` : ""}
       ${reviewCallout(r, reasons)}
       ${res ? `
-        <section class="block"><h2>Résumé ${pill(VERDICT[res.verdict].pill, "Verdict agent : " + VERDICT[res.verdict].label)}</h2><div class="panel md">${md(res.summary)}</div></section>
+        <section class="block"><h2>Résumé ${pill(VERDICT[res.verdict].pill, "Verdict agent : " + VERDICT[res.verdict].label)}${r.status === "error" ? pill("gray", "run précédent") : ""}</h2><div class="panel md">${md(res.summary)}</div></section>
         ${res.questions_for_author.length ? `<section class="block"><h2>Questions pour l'auteur</h2><div class="panel"><ul>${res.questions_for_author.map((q) => `<li>${rich(q)}</li>`).join("")}</ul></div></section>` : ""}
         <section class="block"><h2>Points relevés (${findings.length})</h2>${findings.length ? findings.map(findingHtml).join("") : `<div class="panel"><p>Aucun point négatif relevé.</p></div>`}</section>
         ${res.positives.length ? `<section class="block"><h2>Points positifs</h2><div class="panel"><ul class="positives">${res.positives.map((p) => `<li>${rich(p)}</li>`).join("")}</ul></div></section>` : ""}` : ""}
@@ -1437,6 +1439,32 @@ function claudeStatusRow() {
   return `<div class="claude-row">${badge}${c?.detail ? `<small>${esc(c.detail)}</small>` : ""}</div>`;
 }
 
+/** Résultat du dernier test réel de la connexion : la demande a été faite à Anthropic, la pastille « connecté » ci-dessus ne dit que la présence du jeton. */
+function claudeCheckRow() {
+  const c = state.claudeCheck;
+  if (!c) return "";
+  if (c === "pending") return `<div class="claude-row"><small><span style="display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-2px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:ra-rot .7s linear infinite"></span>Test en cours auprès d'Anthropic (quelques secondes)…</small></div>`;
+  const badge = c.kind === "ok" ? pill("green", "accepté par Anthropic") : c.kind === "refused" ? pill("red", "refusé par Anthropic") : c.kind === "missing" ? pill("orange", "identifiant absent") : pill("orange", "test impossible");
+  const at = new Date(c.checkedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return `<div class="claude-row">${badge}<small>${esc(c.detail)} (test de ${esc(at)})</small></div>`;
+}
+
+/** Teste le jeton (ou la clé API) auprès d'Anthropic. `auto` : lancé après l'enregistrement d'un identifiant, le résultat est aussi annoncé par un message. */
+async function claudeCheck(auto) {
+  const show = () => { const el = document.getElementById("claude-check-result"); if (el) el.innerHTML = claudeCheckRow(); };
+  state.claudeCheck = "pending";
+  show();
+  if (!auto) refreshClaudeStatus(false);
+  try {
+    state.claudeCheck = await api("/api/claude/check", {});
+    if (auto) toast(state.claudeCheck.ok ? "Anthropic accepte la connexion." : state.claudeCheck.detail, !state.claudeCheck.ok);
+  } catch (err) {
+    state.claudeCheck = null;
+    toast(err.message, true);
+  }
+  show();
+}
+
 function claudeBlock() {
   const inContainer = state.runtime?.mode === "docker";
   return `<div id="claude-block"><div class="sub-title">Abonnement Claude</div>
@@ -1444,9 +1472,10 @@ function claudeBlock() {
       ? "Les agents tournent dans des conteneurs isolés et utilisent ton abonnement par le jeton enregistré ci-dessus (<code>claude setup-token</code> sur ton poste). Le terminal ouvre la CLI dans un conteneur du même genre, avec ce jeton."
       : "Les agents utilisent la CLI Claude Code de cette machine. Connecte ton abonnement ici, sans passer par SSH : le terminal ouvre la CLI."}</p>
     <div id="claude-status">${claudeStatusRow()}</div>
+    <div id="claude-check-result">${claudeCheckRow()}</div>
     <div class="actions-inline">
       <button type="button" class="btn sm primary" data-act="term-open">Ouvrir le terminal Claude</button>
-      <button type="button" class="btn sm ghost" data-act="claude-check">Vérifier la connexion</button>
+      <button type="button" class="btn sm ghost" data-act="claude-check" title="Envoie une demande minimale à Anthropic pour vérifier que le jeton (ou la clé API) est accepté. Consomme quelques centimes de quota.">Vérifier la connexion</button>
     </div>
     <div id="term-panel" class="term-panel" hidden>
       <div class="term-head"><b>Terminal Claude</b><span class="spacer"></span>
@@ -1704,6 +1733,10 @@ async function secretAction(act, name) {
     const blocks = { "forges-block": forgesBlock, "secrets-block": secretsBlock, "api-key-state": apiKeyPill, "oauth-token-state": oauthTokenPill };
     for (const [id, render] of Object.entries(blocks)) { const el = document.getElementById(id); if (el) el.innerHTML = render(); }
     document.dispatchEvent(new Event("ra:changed"));
+    if (name === "anthropic.oauth_token" || name === "anthropic.api_key") {
+      if (act === "secret-save") claudeCheck(true); // sans attendre : le test dure quelques secondes, le formulaire reste utilisable
+      else { state.claudeCheck = null; const el = document.getElementById("claude-check-result"); if (el) el.innerHTML = ""; }
+    }
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1904,7 +1937,6 @@ function renderSettings() {
 
       <section class="card-section">
         <h2>Modèles</h2>
-        <p class="desc">Le plafond (Sonnet 5.5, effort élevé) est imposé par le code, quelle que soit la connexion.</p>
         <div class="sub-title">Connexion à Claude</div>
         <div class="radios">
           <label class="radio"><input type="radio" name="agentAuth" value="subscription" ${s.agentAuth === "subscription" ? "checked" : ""}><span><b>Abonnement Claude</b><small>La CLI utilise ton abonnement (Pro, Max...), sans facturation à l'usage. Dans les conteneurs des agents, il passe par le jeton de la section Connexion ci-dessus (<code>claude setup-token</code>). <span id="oauth-token-state">${oauthTokenPill()}</span> Une clé API présente dans ton shell est ignorée.</small></span></label>
@@ -2261,7 +2293,7 @@ document.addEventListener("click", async (e) => {
   if (act === "term-open") return openTerminal();
   if (act === "term-hide") return hideTerminal();
   if (act === "term-stop") return stopTerminal();
-  if (act === "claude-check") return refreshClaudeStatus(true);
+  if (act === "claude-check") return claudeCheck(false);
   if (act === "secret-save" || act === "secret-delete") return secretAction(act, t.dataset.name);
   if (act === "runtime-check") return runRuntimeCheck(t);
   if (act === "game-toggle") return toggleGame(t.checked);
