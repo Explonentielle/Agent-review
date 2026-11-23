@@ -55,6 +55,151 @@
       <details><summary>Comment gagner de l'XP ?</summary><ul>${h.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>`;
   }
 
+  /* ---------- L'Intendant : les plans de l'orchestrateur (la page complète est #tickets/plans, public/plans.js) ---------- */
+  const PLAN_STATUS = {
+    waiting_chat: ["Chat planifié", "warn"], chatting: ["Chat en cours", "warn"], review: ["À valider", "warn"], scheduled: ["Planifié", ""],
+    running: ["En cours", "ok"], paused: ["En pause", "warn"], done: ["Terminé", "ok"], failed: ["En échec", "warn"], cancelled: ["Annulé", ""],
+  };
+  const ITEM_STATUS = {
+    proposed: ["Proposé", "warn"], pending: ["À venir", ""], running: ["En cours", "ok"], done: ["Terminé", "ok"],
+    failed: ["En échec", "warn"], skipped: ["Écarté", ""], cancelled: ["Annulé", ""],
+  };
+  /** Saisie en cours dans la fenêtre : gardée quand elle se redessine (rafraîchissement automatique). */
+  const planDraft = { kind: "feature", key: "", idea: "", chatAt: "", msg: "" };
+  const planTag = (map, status) => { const [label, cls] = map[status] || [status, ""]; return `<span class="fg-tag ${cls}">${esc(label)}</span>`; };
+  const planWhen = (iso) => (iso ? new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "");
+  /** Lien vers la forge : seulement http(s), le reste n'est pas rendu cliquable. */
+  const planLink = (url, text) => (/^https?:\/\//i.test(String(url || "")) ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text));
+
+  /** Liste des plans de la personne et formulaire d'un nouveau chat de cadrage. */
+  async function planList() {
+    const plans = await api("/api/plans");
+    const projects = game.data.armory.weapons.filter((w) => w.devEnabled);
+    const chosen = projects.find((w) => w.key === planDraft.key) ?? projects[0];
+    const rows = plans.map((p) => {
+      const c = p.counts;
+      return `<button type="button" class="fg-ticket link" data-fg-sel="${p.id}"><div><b>${esc(p.title)}</b><small>${esc(p.projectPath)}${c.total ? ` · ${c.done}/${c.total} terminé${c.done > 1 ? "s" : ""}${c.failed ? `, ${c.failed} en échec` : ""}` : ""}</small></div>${planTag(PLAN_STATUS, p.status)}</button>`;
+    }).join("");
+    const form = projects.length
+      ? `<h4>Nouveau plan</h4>
+        <label class="fg-field-in">Ce que tu veux cadrer<select data-fg-pd="kind"><option value="feature" ${planDraft.kind === "feature" ? "selected" : ""}>Une fonctionnalité</option><option value="project" ${planDraft.kind === "project" ? "selected" : ""}>Un projet complet</option></select></label>
+        <label class="fg-field-in">Projet<select data-fg-pd="key">${projects.map((w) => `<option value="${esc(w.key)}" ${w === chosen ? "selected" : ""}>${esc(w.path)}</option>`).join("")}</select></label>
+        <label class="fg-field-in">Ce que tu voudrais<textarea data-fg-pd="idea" rows="3" maxlength="4000" placeholder="Ex. exporter les rapports du mois en Excel">${esc(planDraft.idea)}</textarea></label>
+        <label class="fg-field-in">Lancer le chat à partir de (facultatif, sinon tout de suite)<input type="datetime-local" data-fg-pd="chatAt" value="${esc(planDraft.chatAt)}"></label>
+        <div class="fg-inline"><button type="button" class="fg-btn" data-fg-plan-new>${planDraft.chatAt ? "Planifier le chat" : "Démarrer le chat"}</button></div>`
+      : `<p class="fg-note">Aucun projet n'est autorisé pour l'agent dev : règle-le au râtelier, l'intendant ne planifie que sur ces projets.</p>`;
+    return {
+      title: "L'Intendant : les plans",
+      html: `<p class="fg-note">L'intendant te pose des questions, propose une liste de tickets que tu relis, puis l'apprenti les forge l'un après l'autre. Rien n'est créé chez la forge ni lancé sans ta validation.</p>
+        <h4>Mes plans (${plans.length})</h4>${rows || `<p class="fg-note">Aucun plan pour l'instant.</p>`}${form}
+        <div class="fg-inline"><button type="button" class="fg-btn ghost" data-fg-go="#tickets/plans">Ouvrir la page Plans</button></div>`,
+    };
+  }
+
+  /** Un plan : avancement ticket par ticket, chat de cadrage, pause, reprise et annulation. La relecture détaillée et la validation se font sur la page Plans. */
+  async function planDetail(id) {
+    const d = await api(`/api/plans/${id}`);
+    const p = d.plan, s = p.status;
+    const started = d.items.some((i) => i.status !== "proposed");
+    const done = d.items.filter((i) => i.status === "done").length;
+    const count = (...st) => d.items.filter((i) => st.includes(i.status)).length;
+    const progress = d.items.length
+      ? `${pct((done * 100) / d.items.length)}<p class="fg-note">À venir : <b>${count("proposed", "pending")}</b> · En cours : <b>${count("running")}</b> · Terminés : <b>${done}</b> · En échec : <b>${count("failed")}</b>${count("skipped", "cancelled") ? ` · Écartés : <b>${count("skipped", "cancelled")}</b>` : ""}</p>`
+      : "";
+    const alert = p.error ? `<div class="fg-err">${s === "failed" ? "Le plan s'est arrêté : " : ""}${esc(p.error)}</div>` : "";
+    const pendingOrFailed = (t) => t.status === "pending" || t.status === "failed";
+    const items = d.items.map((t) => {
+      const ref = t.issueIid ? ` · ${planLink(t.issueUrl, `#${t.issueIid}`)}` : "";
+      const mr = t.task?.mrUrl ? ` · ${planLink(t.task.mrUrl, "MR")}` : "";
+      const at = t.runAt ? ` · pas avant le ${esc(planWhen(t.runAt))}` : "";
+      const actions = [
+        t.task ? `<button type="button" class="fg-btn ghost" data-fg-go="#dev/${esc(t.task.id)}">Tâche</button>` : "",
+        t.status === "failed" ? `<button type="button" class="fg-btn" data-fg-plan-item="retry:${t.id}">Relancer</button>` : "",
+        pendingOrFailed(t) ? `<button type="button" class="fg-btn ghost" data-fg-plan-item="skip:${t.id}">Écarter</button>` : "",
+      ].join("");
+      return `<div class="fg-ticket"><div><b>${t.position}. ${esc(t.title)}</b><small>${planTag(ITEM_STATUS, t.status)}${ref}${mr}${at}</small>${t.error ? `<small class="fg-fail">${esc(t.error)}</small>` : ""}</div><div class="fg-inline">${actions}</div></div>`;
+    }).join("");
+    const buttons = [];
+    if (s === "scheduled" || s === "running") buttons.push(`<button type="button" class="fg-btn" data-fg-plan-act="pause">Mettre en pause</button>`);
+    if (s === "paused" || (s === "failed" && !d.items.some((i) => i.status === "failed"))) buttons.push(`<button type="button" class="fg-btn" data-fg-plan-act="resume">Reprendre</button>`);
+    if (!["done", "cancelled"].includes(s)) buttons.push(`<button type="button" class="fg-btn ghost" data-fg-plan-act="cancel">Annuler le plan</button>`);
+    const review = s === "review" && !p.busy
+      ? `<div class="fg-questions"><b>Rien n'est créé tant que tu n'as pas validé.</b> Relis et corrige la liste sur la page Plans : c'est là que tu valides, et que tu choisis l'heure de lancement.<div class="fg-inline"><button type="button" class="fg-btn" data-fg-go="#tickets/plans/${p.id}">Relire et valider</button></div></div>`
+      : "";
+    const schedule = s === "scheduled" && p.runAt ? `<p class="fg-note">Exécution planifiée le <b>${esc(planWhen(p.runAt))}</b>.</p>` : "";
+    const log = d.messages.map((m) => `<div class="fg-ft-prev"><b>${m.role === "user" ? "Toi" : "Intendant"}</b><div class="fg-md">${esc(m.text).replace(/\n/g, "<br>")}</div></div>`).join("");
+    const waiting = s === "waiting_chat" ? `<p class="fg-note">Le chat démarrera le <b>${esc(planWhen(p.chatAt))}</b> (à quelques secondes près).</p><div class="fg-inline"><button type="button" class="fg-btn" data-fg-plan-act="chat-now">Le lancer maintenant</button></div>` : "";
+    const busy = p.busy ? `<p class="fg-note fg-wait">L'intendant réfléchit… (une dizaine de secondes)</p>` : "";
+    const reply = (s === "chatting" || s === "review") && !started && !p.busy
+      ? `<label class="fg-field-in">Ta réponse<textarea data-fg-pd="msg" rows="3" maxlength="4000" placeholder="Réponds aux questions, ou demande un changement du plan">${esc(planDraft.msg)}</textarea></label>
+        <div class="fg-inline"><button type="button" class="fg-btn" data-fg-plan-act="send">Envoyer</button>${d.messages.at(-1)?.role === "user" ? `<button type="button" class="fg-btn ghost" data-fg-plan-act="retry-turn">Relancer la réponse</button>` : ""}</div>`
+      : "";
+    return {
+      title: "L'Intendant : un plan",
+      html: `<div class="fg-inline"><button type="button" class="fg-btn ghost" data-fg-sel="">← Tous les plans</button><button type="button" class="fg-btn ghost" data-fg-go="#tickets/plans/${p.id}">Ouvrir sur la page Plans</button></div>
+        <h4>${esc(p.title)}</h4><p class="fg-note">${planTag(PLAN_STATUS, s)} ${esc(p.kind === "project" ? "Projet complet" : "Fonctionnalité")} · ${esc(p.projectPath)}</p>
+        ${progress}${alert}${review}${schedule}${buttons.length ? `<div class="fg-inline">${buttons.join("")}</div>` : ""}
+        <h4>Tickets du plan (${d.items.length})</h4>${items || `<p class="fg-note">Pas encore de ticket : continue l'échange, l'intendant proposera le plan quand le besoin sera clair.</p>`}
+        <h4>Chat de cadrage</h4>${log}${waiting}${busy}${reply}`,
+    };
+  }
+
+  /** Ouvre un chat de cadrage (tout de suite ou à la date choisie) avec la saisie de la fenêtre, puis affiche le plan. */
+  async function planNew(btn) {
+    const w = game.data.armory.weapons.find((x) => x.devEnabled && x.key === planDraft.key) ?? game.data.armory.weapons.find((x) => x.devEnabled);
+    if (!w) { game.banner("Aucun projet n'est autorisé pour l'agent dev."); return A.sfx.error(); }
+    if (!planDraft.idea.trim()) { game.banner("Décris d'abord ce que tu voudrais."); return A.sfx.error(); }
+    btn.disabled = true;
+    game.banner(planDraft.chatAt ? "Le chat est planifié." : "L'intendant réfléchit à tes premières questions…");
+    try {
+      const out = await api("/api/plans", { kind: planDraft.kind === "project" ? "project" : "feature", source: w.source, projectId: w.projectId, idea: planDraft.idea, chatAt: planDraft.chatAt ? new Date(planDraft.chatAt).toISOString() : null });
+      planDraft.idea = ""; planDraft.chatAt = "";
+      if (out.error) game.banner(out.error);
+      A.sfx.select();
+      if (current?.id === "plans") current.sel = String(out.id);
+    } catch (err) { game.banner(err.message); A.sfx.error(); }
+    render();
+  }
+
+  /** Action sur le plan ouvert : message du chat, pause, reprise ou annulation (après confirmation). */
+  async function planAct(act, btn) {
+    const id = Number(current?.sel);
+    if (!id) return;
+    const base = `/api/plans/${id}`;
+    try {
+      if (act === "cancel") {
+        const ok = await ask({ title: "Annuler ce plan ?", okLabel: "Annuler le plan", html: "<p>Les tickets qui n'ont pas démarré ne seront pas exécutés et l'agent en cours sera arrêté. Les tickets déjà créés chez la forge y restent.</p>" });
+        if (!ok) return;
+      }
+      btn.disabled = true;
+      if (act === "send" || act === "retry-turn") {
+        const text = act === "send" ? planDraft.msg.trim() : "";
+        if (act === "send" && !text) { btn.disabled = false; game.banner("Écris un message."); return A.sfx.error(); }
+        game.banner("L'intendant réfléchit…");
+        const out = await api(`${base}/messages`, { text });
+        planDraft.msg = "";
+        if (out.error) game.banner(out.error);
+      } else if (act === "chat-now") await api(`${base}/schedule`, { chatAt: null });
+      else if (["pause", "resume", "cancel"].includes(act)) await api(`${base}/${act}`, {});
+      else return;
+      A.sfx.select();
+    } catch (err) { game.banner(err.message); A.sfx.error(); }
+    render();
+  }
+
+  /** Relance ou écarte un ticket du plan ouvert. */
+  async function planItem(spec, btn) {
+    const id = Number(current?.sel);
+    const [act, itemId] = spec.split(":");
+    if (!id || !["retry", "skip"].includes(act) || !Number(itemId)) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/plans/${id}/items/${Number(itemId)}/${act}`, {});
+      A.sfx.select();
+    } catch (err) { game.banner(err.message); A.sfx.error(); }
+    render();
+  }
+
   /* ---------- contenus ---------- */
   const defs = {
     /** Un four = une forge connectée : adresse et jeton, les vrais réglages de connexion. */
@@ -137,6 +282,16 @@
             if (pre) { params.prefill = null; openProjectEditor(null, pre.path, pre.source); }
           },
         };
+      },
+    },
+
+    /** L'Intendant : l'orchestrateur. Ses plans, le chat de cadrage et l'avancement ticket par ticket. `sel` : numéro du plan ouvert. */
+    plans: {
+      wide: true,
+      live: true,
+      async render(params, sel) {
+        const id = Number(sel ?? params.select) || 0;
+        return id > 0 ? planDetail(id) : planList();
       },
     },
 
@@ -602,7 +757,11 @@
     back.className = "fg-popup-back";
     back.innerHTML = `<div class="fg-popup ${def.wide ? "wide" : ""}" role="dialog" aria-modal="true"><button type="button" class="fg-x" aria-label="Fermer"></button><h3>…</h3><div class="fg-pbody"><p class="fg-note">Un instant…</p></div></div>`;
     back.addEventListener("click", onClick);
-    back.addEventListener("input", (ev) => { if (ev.target.matches?.("[data-fg-fixnote]")) fixNote = ev.target.value; });
+    back.addEventListener("input", (ev) => {
+      if (ev.target.matches?.("[data-fg-fixnote]")) fixNote = ev.target.value;
+      const field = ev.target.dataset?.fgPd;
+      if (field && Object.hasOwn(planDraft, field)) planDraft[field] = ev.target.value;
+    });
     document.querySelector(".fg-popups").append(back);
     current = { id, params, def, el: back, sel: undefined };
     game.setPopup(true);
@@ -662,6 +821,9 @@
     if ((el = by("data-fg-piece-merge"))) return el.disabled ? undefined : mergePiece(el.dataset.fgPieceMerge, el.dataset.target);
     if ((el = by("data-fg-piece"))) { open("piece", { taskId: el.dataset.fgPiece }, game); return; }
     if (by("data-fg-scribe")) return openScribe();
+    if ((el = by("data-fg-plan-new"))) return planNew(el);
+    if ((el = by("data-fg-plan-act"))) return planAct(el.dataset.fgPlanAct, el);
+    if ((el = by("data-fg-plan-item"))) return planItem(el.dataset.fgPlanItem, el);
     if ((el = by("data-fg-launchraw"))) {
       const [source, projectId, iid] = el.dataset.fgLaunchraw.split(":");
       const w = game.data.armory.weapons.find((x) => x.source === source && String(x.projectId) === projectId);
@@ -750,6 +912,8 @@
       if (!current?.def.live) return;
       // Un formulaire en cours de saisie (éditeur de projet du râtelier) ne doit pas être effacé par le rafraîchissement automatique
       if (current.id === "rack" && document.getElementById("project-editor")?.childElementCount) return;
+      // Idem pour une réponse ou une idée en cours de frappe dans la fenêtre des plans
+      if (current.id === "plans" && current.el.contains(document.activeElement) && document.activeElement.matches("textarea, input, select")) return;
       render();
     },
   };

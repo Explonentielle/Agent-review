@@ -142,7 +142,7 @@ span.fg-type { cursor: default; }
 
 /* Le Scribe : formulaires, étiquettes, droits du jeton */
 .fg-field-in { display: block; margin: 10px 0; font: 700 12.5px "Courier New", monospace; color: var(--text-2); }
-.fg-field-in input[type="text"], .fg-field-in select, .fg-field-in textarea, .fg-ft input[type="text"] { display: block; width: 100%; margin-top: 4px; padding: 7px 10px; border: 2px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font: 400 13.5px / 1.5 ui-sans-serif, system-ui, sans-serif; box-sizing: border-box; }
+.fg-field-in input[type="text"], .fg-field-in input[type="datetime-local"], .fg-field-in select, .fg-field-in textarea, .fg-ft input[type="text"] { display: block; width: 100%; margin-top: 4px; padding: 7px 10px; border: 2px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font: 400 13.5px / 1.5 ui-sans-serif, system-ui, sans-serif; box-sizing: border-box; }
 .fg-field-in textarea { resize: vertical; min-height: 88px; }
 .fg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .fg-chip { display: inline-flex; align-items: center; gap: 5px; border: 2px solid var(--border); border-radius: 14px; padding: 2px 10px; font: 600 12px ui-sans-serif, system-ui, sans-serif; color: var(--text); cursor: pointer; }

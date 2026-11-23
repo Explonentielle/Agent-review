@@ -165,6 +165,7 @@
     apprenti3: { hair: "#8a3b12", tunic: "#8a5cb0", apron: "#6b4423", hat: "cap" },
     gardien: { hair: "#3a2a1c", tunic: "#3a5fa0", apron: "#9aa0ab", hat: "helmet", item: "shield" },
     scribe: { hair: "#8a5a3a", tunic: "#4a3a7a", apron: "#d8cfa8", hat: "scribe", item: "book", skin: "#d9a066" },
+    intendant: { hair: "#3a2a1c", tunic: "#2f5a6a", apron: "#c9a35b", hat: "feather", skin: "#e0b088" },
     marchand: { hair: "#222", tunic: "#2f7a5a", apron: "#d8b04a", hat: "turban", skin: "#d9a066" },
     king: { hair: "#8a6a3a", tunic: "#7a1f2e", apron: "#f0d078", hat: "crown", skin: "#e0b088", beard: true },
     queen: { hair: "#3a2a1c", tunic: "#4a2f8a", apron: "#e8e4da", hat: "crown", skin: "#f2c9a0", long: true },
