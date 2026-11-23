@@ -308,15 +308,18 @@
   .ws-switch[hidden], #role-chip[hidden] { display: none; }
   .team-ws { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 8px; }
   .team-ws .field { min-width: 260px; }
-  .team-member { display: grid; grid-template-columns: minmax(200px, 1.4fr) 150px 170px 150px auto; gap: 10px 14px; align-items: end; padding: 12px 0; border-top: 1px solid var(--border); }
+  .team-member { display: grid; grid-template-columns: minmax(200px, 1.4fr) 150px 190px 190px auto; gap: 10px 14px; align-items: start; padding: 12px 0; border-top: 1px solid var(--border); }
   .team-member:first-child { border-top: 0; }
   .team-who .note { margin: 4px 0 0; }
+  /* Qui et boutons se calent sur la ligne des champs : 21px = hauteur d'une étiquette (13px) + son écart (5px) */
+  .team-member .team-who { padding-top: 21px; }
+  .team-member .team-actions { height: 40px; margin-top: 21px; }
   .team-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .team-invite { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 18px; align-items: end; }
   .team-link { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
   .team-link input { flex: 1; min-width: 260px; height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: 12.5px ui-monospace, Consolas, monospace; }
   .team-pending { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
-  @media (max-width: 900px) { .team-member { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 1100px) { .team-member { grid-template-columns: 1fr 1fr; } .team-member .team-who { grid-column: 1 / -1; padding-top: 0; } .team-member .team-actions { height: auto; margin-top: 0; } }
 
   /* ---------- Dialogue + toasts ---------- */
   /* Pièces jointes (captures, maquettes, données) */
