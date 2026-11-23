@@ -18,7 +18,7 @@ import { ScribeInputError, cleanIdea, cleanProject, cleanTicket, cleanUploadMark
 import { draftProject, draftTicket } from "./engine.js";
 import { ScribeForgeError, explainForgeError } from "./errors.js";
 import { HOURLY, ScribeLimitError, createLimiter } from "./limiter.js";
-import { buildProjectPrompt, buildTicketPrompt } from "./prompt.js";
+import { buildProjectPrompt, buildTicketPrompt, proposableLabels } from "./prompt.js";
 
 /** Ce que les routes du Scribe empruntent au serveur. */
 export interface ScribeContext {
@@ -138,7 +138,7 @@ export function registerScribe(app: FastifyInstance, ctx: ScribeContext): void {
         } catch (err) {
           log.warn("scribe.recent_tickets_failed", { source, projectId, error: errorMessage(err) });
         }
-        const allowedLabels = [...new Set([...settings.workflow.todoLabels, ...recent.flatMap((t) => t.labels)])].filter((l) => l.length > 0 && l.length <= 50 && !l.includes(",")).slice(0, 40);
+        const allowedLabels = proposableLabels(settings.workflow.todoLabels, recent);
         const { draft, costUsd } = await draftTicket({
           systemPrompt,
           prompt: buildTicketPrompt({ idea, project: { path: project.path, description: project.description }, recentTitles: recent.map((t) => t.title), allowedLabels }),

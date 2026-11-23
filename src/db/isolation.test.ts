@@ -12,6 +12,7 @@ import { createAuditRepo } from "./audit.js";
 import { createCostRepo, currentMonth } from "./costs.js";
 import type { Db } from "./db.js";
 import { createDevTaskRepo } from "./devTasks.js";
+import { createPlanRepo } from "./plans.js";
 import { migrate } from "./migrations.js";
 import { postgresFromPglite, type PgliteLike } from "./postgres.js";
 import { createReviewRepo } from "./reviews.js";
@@ -44,7 +45,7 @@ describe.each(backends)("étanchéité entre espaces : $name", ({ open }) => {
     await db.close();
   });
   beforeEach(async () => {
-    for (const table of ["actions", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "invitations", "email_tokens", "credentials", "memberships", "workspaces", "users"]) await db.run(`DELETE FROM ${table}`);
+    for (const table of ["actions", "plan_items", "plan_messages", "plans", "dev_task_events", "dev_tasks", "reviews", "projects", "settings", "secrets", "audit_log", "invitations", "email_tokens", "credentials", "memberships", "workspaces", "users"]) await db.run(`DELETE FROM ${table}`);
     const accounts = createAccountRepo(db);
     const alice = await accounts.createUser({ name: "Alice" });
     const bob = await accounts.createUser({ name: "Bob" });
@@ -177,6 +178,55 @@ describe.each(backends)("étanchéité entre espaces : $name", ({ open }) => {
     expect((await auditB.list(10, newestOfB + 100)).map((e) => e.action)).toEqual(["change_request_approve"]);
   });
 
+  it("plans : lecture, messages, tickets, transitions et réordonnancement limités à l'espace", async () => {
+    const pa = createPlanRepo(db, a);
+    const pb = createPlanRepo(db, b);
+    const plan = { source: "gitlab" as const, projectId: 1, projectPath: "g/p", kind: "feature" as const, title: "Export", firstMessage: "un export", chatAt: null };
+    const item = (title: string) => ({ title, description: "d", labels: [], runAt: null });
+
+    const idA = await pa.insert(plan);
+    const idB = await pb.insert(plan);
+    expect(await pb.get(idA)).toBeUndefined();
+    expect((await pb.list()).map((p) => p.id)).toEqual([idB]);
+    expect((await pb.listActive()).map((p) => p.id)).toEqual([]);
+    expect(await pb.messages(idA)).toEqual([]);
+    expect((await pa.messages(idA)).map((m) => m.text)).toEqual(["un export"]);
+
+    // Écriture : rien ne passe chez l'autre
+    await expect(pb.addMessage(idA, "user", "pirate")).rejects.toThrow(/introuvable dans cet espace/);
+    expect(await pb.replaceProposed(idA, [item("pirate")])).toBe(false);
+    expect(await pb.acquire(idA, ["chatting"])).toBe(false);
+    expect(await pb.transition(idA, ["chatting"], "cancelled")).toBe(false);
+    await pb.update(idA, { title: "pirate", error: "pirate" });
+    expect(await pa.get(idA)).toMatchObject({ title: "Export", error: null, status: "chatting", busy: 0 });
+
+    expect(await pa.replaceProposed(idA, [item("Un"), item("Deux"), item("Trois")])).toBe(true);
+    const [one, two, three] = await pa.items(idA);
+    expect(await pb.items(idA)).toEqual([]);
+    expect(await pb.updateItem(one!.id, { status: "pending" })).toBe(false);
+    expect(await pb.claimItem(one!.id)).toBe(false);
+    expect((await pa.items(idA)).map((i) => i.status)).toEqual(["proposed", "proposed", "proposed"]);
+    expect(await pb.countsByPlan()).toEqual(new Map());
+    expect((await pa.countsByPlan()).get(idA)).toMatchObject({ total: 3, upcoming: 3 });
+
+    // Une liste déjà créée chez la forge ne se réécrit pas ; le réordonnancement ne touche que les tickets en attente de CET espace
+    for (const i of [one!, two!, three!]) await pa.updateItem(i.id, { status: "pending", issue_iid: 10 + i.position }, ["proposed"]);
+    expect(await pa.replaceProposed(idA, [item("Autre")])).toBe(false);
+    expect(await pb.reorderPending(idA, [three!.id, two!.id, one!.id])).toBe(false);
+    expect(await pa.reorderPending(idA, [three!.id, one!.id])).toBe(false); // il manque un ticket
+    expect(await pa.reorderPending(idA, [three!.id, one!.id, two!.id])).toBe(true);
+    expect((await pa.items(idA)).map((i) => i.title)).toEqual(["Trois", "Un", "Deux"]);
+    expect(await pa.claimItem(one!.id)).toBe(true);
+    expect(await pa.claimItem(one!.id)).toBe(false); // un seul lancement par ticket
+
+    // Un plan réservé ne l'est qu'une fois ; seul le plan de son espace est libéré
+    expect(await pa.acquire(idA, ["chatting"])).toBe(true);
+    expect(await pa.acquire(idA, ["chatting"])).toBe(false);
+    expect(await pb.recoverInterrupted()).toBe(0);
+    expect(await pa.recoverInterrupted()).toBe(1);
+    expect(await pa.get(idA)).toMatchObject({ busy: 0 });
+  });
+
   it("secrets : un secret d'un espace n'est lisible ni listé depuis l'autre", async () => {
     const store = createSecretStore(db, new Keyring([randomBytes(32)]));
     await store.put({ workspaceId: a, userId: null }, "github.token", "secret-de-l-espace-a-1");
@@ -197,8 +247,8 @@ describe.each(backends)("étanchéité entre espaces : $name", ({ open }) => {
 });
 
 describe("audit : toute requête sur une table d'un espace nomme workspace_id", () => {
-  const SCOPED_TABLES = ["reviews", "dev_tasks", "projects", "settings", "secrets", "actions", "dev_task_events", "audit_log"];
-  const FILES = ["src/db/reviews.ts", "src/db/devTasks.ts", "src/db/costs.ts", "src/db/audit.ts", "src/settings/store.ts", "src/secrets/store.ts"];
+  const SCOPED_TABLES = ["reviews", "dev_tasks", "projects", "settings", "secrets", "actions", "dev_task_events", "audit_log", "plans", "plan_messages", "plan_items"];
+  const FILES = ["src/db/reviews.ts", "src/db/devTasks.ts", "src/db/plans.ts", "src/db/costs.ts", "src/db/audit.ts", "src/settings/store.ts", "src/secrets/store.ts"];
   const SQL_ON_SCOPED = new RegExp(`\\b(FROM|INTO|UPDATE|JOIN)\\s+(${SCOPED_TABLES.join("|")})\\b`, "i");
 
   /** Chaînes entre guillemets ou apostrophes inverses d'un fichier source. */

@@ -12,6 +12,7 @@ import { createCostRepo, type CostRepo } from "../db/costs.js";
 import { createDevTaskRepo, type DevTaskRepo } from "../db/devTasks.js";
 import type { Db } from "../db/db.js";
 import { openDb } from "../db/index.js";
+import { createPlanRepo, type PlanRepo } from "../db/plans.js";
 import { migrate } from "../db/migrations.js";
 import { postgresFromPglite, type PgliteLike } from "../db/postgres.js";
 import { createReviewRepo, type ReviewRepo } from "../db/reviews.js";
@@ -35,6 +36,8 @@ export interface Harness {
   db: Db;
   settings: SettingsStore;
   tasks: DevTaskRepo;
+  /** Plans de l'orchestrateur de l'utilisateur local. */
+  plans: PlanRepo;
   reviews: ReviewRepo;
   costs: CostRepo;
   workspace: RepoWorkspace;
@@ -117,6 +120,7 @@ export async function createHarness(backend: Backend = "sqlite"): Promise<Harnes
     db,
     settings,
     tasks: createDevTaskRepo(db, local.workspaceId, local.userId),
+    plans: createPlanRepo(db, local.workspaceId, local.userId),
     reviews: createReviewRepo(db, local.workspaceId, local.userId),
     costs: createCostRepo(db, local.workspaceId),
     workspace,

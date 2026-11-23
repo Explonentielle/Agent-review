@@ -56,6 +56,20 @@ export function cancelDevTask(taskId: number): boolean {
   return true;
 }
 
+/**
+ * Arrête une tâche : l'agent en cours est interrompu, une tâche encore en attente passe en « annulée » sans jamais démarrer.
+ * @param tasks Tâches de l'espace.
+ * @param taskId Tâche à arrêter.
+ * @returns Rien (sans effet si la tâche est déjà terminée ou inconnue).
+ */
+export async function cancelTask(tasks: DevTaskRepo, taskId: number): Promise<void> {
+  const task = await tasks.get(taskId);
+  if (!cancelDevTask(taskId) && task?.status === "queued") {
+    await tasks.update(taskId, { status: "cancelled" });
+    await tasks.addEvent(taskId, "step", "Tâche annulée avant démarrage");
+  }
+}
+
 /** `{worktree}` dans une commande autorisée = dossier de travail de l'agent (ex. à monter dans un conteneur de test). */
 export function resolveCommands(commands: string[], worktree: string): string[] {
   return commands.map((c) => c.replaceAll("{worktree}", worktree));

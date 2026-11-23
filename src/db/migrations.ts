@@ -255,6 +255,59 @@ export function migrationsFor(s: Sql): string[] {
 
   ALTER TABLE invitations ADD COLUMN email TEXT;
   `,
+    // Orchestrateur de plans : un chat de cadrage (plans, plan_messages) aboutit à une liste de tickets (plan_items) que la personne valide ; après
+    // validation, les tickets sont créés chez la forge puis lancés un par un, dans l'ordre. chat_at et run_at : dates de lancement du chat et de
+    // l'exécution (texte AAAA-MM-JJ HH:MM:SS en UTC, comme les autres horodatages). busy : un tour de chat ou une validation est en cours.
+    `
+  CREATE TABLE plans (
+    id           ${s.pk},
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    user_id      INTEGER REFERENCES users(id),
+    source       TEXT    NOT NULL,
+    project_id   INTEGER NOT NULL,
+    project_path TEXT    NOT NULL,
+    kind         TEXT    NOT NULL CHECK (kind IN ('feature', 'project')),
+    title        TEXT    NOT NULL,
+    status       TEXT    NOT NULL DEFAULT 'chatting',
+    chat_at      TEXT,
+    run_at       TEXT,
+    busy         INTEGER NOT NULL DEFAULT 0,
+    error        TEXT,
+    cost_usd     ${s.real},
+    created_at   TEXT    NOT NULL ${s.nowDefault},
+    updated_at   TEXT    NOT NULL ${s.nowDefault}
+  );
+  CREATE INDEX idx_plans_workspace ON plans(workspace_id, id);
+
+  CREATE TABLE plan_messages (
+    id           ${s.pk},
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    plan_id      INTEGER NOT NULL REFERENCES plans(id),
+    role         TEXT    NOT NULL CHECK (role IN ('user', 'assistant')),
+    text         TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL ${s.nowDefault}
+  );
+  CREATE INDEX idx_plan_messages_plan ON plan_messages(plan_id, id);
+
+  CREATE TABLE plan_items (
+    id           ${s.pk},
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    plan_id      INTEGER NOT NULL REFERENCES plans(id),
+    position     INTEGER NOT NULL,
+    title        TEXT    NOT NULL,
+    description  TEXT    NOT NULL DEFAULT '',
+    labels       TEXT    NOT NULL DEFAULT '[]',
+    run_at       TEXT,
+    status       TEXT    NOT NULL DEFAULT 'proposed',
+    issue_iid    INTEGER,
+    issue_url    TEXT,
+    task_id      INTEGER REFERENCES dev_tasks(id),
+    error        TEXT,
+    created_at   TEXT    NOT NULL ${s.nowDefault},
+    updated_at   TEXT    NOT NULL ${s.nowDefault}
+  );
+  CREATE INDEX idx_plan_items_plan ON plan_items(plan_id, position);
+  `,
   ];
 }
 

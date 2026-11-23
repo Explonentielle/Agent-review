@@ -21,9 +21,9 @@ export interface ScribeOutput<T> {
 /**
  * Lance l'agent Scribe. Il n'a AUCUN outil (ni lecture, ni commande, ni réseau) et travaille dans un dossier temporaire vide : il ne
  * peut rien lire ni rien écrire, il ne renvoie que son brouillon. Même exécuteur que les autres agents, donc mêmes protections
- * d'isolation (`src/agent/cliRunner.ts`).
+ * d'isolation (`src/agent/cliRunner.ts`). Partagé avec l'orchestrateur de plans (`src/orchestrator/chat.ts`), qui a les mêmes garanties.
  */
-async function runScribe<T>(input: ScribeEngineInput, schema: Record<string, unknown>, parse: (value: unknown) => { success: true; data: T } | { success: false; error: { message: string } }): Promise<ScribeOutput<T>> {
+export async function runScribe<T>(input: ScribeEngineInput, schema: Record<string, unknown>, parse: (value: unknown) => { success: true; data: T } | { success: false; error: { message: string } }): Promise<ScribeOutput<T>> {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "scribe-"));
   try {
     const out = await input.runner.run({
