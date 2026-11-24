@@ -8,6 +8,8 @@ import { createAuditRepo, type AuditRepo } from "../db/audit.js";
 import { createCostRepo } from "../db/costs.js";
 import type { Db } from "../db/db.js";
 import { createDevTaskRepo, type DevTaskRepo } from "../db/devTasks.js";
+import { createPlanRepo, type PlanRepo } from "../db/plans.js";
+import { startPlanScheduler } from "../orchestrator/scheduler.js";
 import { runDevTask, type DevDeps } from "../dev/pipeline.js";
 import { errorMessage, log } from "../logger.js";
 import { SerialQueue } from "../queue.js";
@@ -22,6 +24,8 @@ import type { ConcurrencyLimiter } from "./limiter.js";
 /** Tout ce que les routes du serveur utilisent pour servir UNE personne dans UN espace. */
 export interface TenantDeps extends PipelineDeps {
   tasks: DevTaskRepo;
+  /** Plans de l'orchestrateur de cet espace (chat de cadrage, tickets planifiés). Absent : les routes des plans répondent qu'il n'est pas disponible. */
+  plans?: PlanRepo;
   /** Pièces jointes de cet espace (captures, maquettes, données), rangées dans des fichiers sous le dossier de données de la personne. */
   attachments?: AttachmentStore;
   /** Journal des écritures de cette personne sur les forges. */
@@ -54,6 +58,7 @@ export interface TenantContext {
 export interface TenantHooks {
   createForges?: typeof createForges;
   startPoller?: typeof startReviewPoller;
+  startPlanScheduler?: typeof startPlanScheduler;
   runReview?: typeof runReview;
   runDevTask?: typeof runDevTask;
   verifyGithubToken?: Parameters<typeof createVault>[3];
@@ -187,6 +192,7 @@ export class TenantManager {
     // Chaque review et chaque tâche créées pour cette personne portent son identifiant : c'est ce qui permet de compter sa consommation (quotas)
     const reviews = createReviewRepo(db, ctx.workspaceId, ctx.userId);
     const tasks = createDevTaskRepo(db, ctx.workspaceId, ctx.userId);
+    const plans = createPlanRepo(db, ctx.workspaceId, ctx.userId);
     const settings = createSettingsStore(db, ctx.workspaceId);
     const costs = createCostRepo(db, ctx.workspaceId);
     const attachments = createAttachmentStore(path.join(config.dataDir, "attachments"), ctx.workspaceId);
@@ -207,6 +213,8 @@ export class TenantManager {
       for (const task of await tasks.listInterrupted()) {
         await tasks.update(task.id, { status: "error", error: "Interrompue par un redémarrage de l'outil. Rien n'a été poussé si la MR n'existe pas." });
       }
+      // Un tour de chat ou une validation de plan coupés par l'arrêt : le plan est libéré (les plans planifiés reprennent seuls)
+      await plans.recoverInterrupted();
     }
 
     const stops = forges.all().map((forge) =>
@@ -220,6 +228,9 @@ export class TenantManager {
       }),
     );
 
+    // L'orchestrateur : lance les chats et les exécutions de plans planifiés, et reporte l'avancement des tickets lancés
+    stops.push((hooks.startPlanScheduler ?? startPlanScheduler)({ config, forges, settings, costs, tasks, plans, enqueueDev: (id) => devQueue.push(id) }));
+
     log.info("tenant.started", { userId: ctx.userId, workspaceId: ctx.workspaceId, forges: forges.all().map((f) => f.connector.kind) });
     return {
       key,
@@ -228,6 +239,7 @@ export class TenantManager {
       deps: {
         ...reviewDeps,
         tasks,
+        plans,
         attachments,
         audit,
         vault,

@@ -17,7 +17,7 @@ import { registerAuth, type AuthRuntime } from "../auth/routes.js";
 import type { AccountContext, AccountRepo } from "../db/accounts.js";
 import { currentMonth } from "../db/costs.js";
 import type { ReviewStatus } from "../db/reviews.js";
-import { cancelDevTask } from "../dev/pipeline.js";
+import { cancelTask } from "../dev/pipeline.js";
 import { renderTemplate, slugify } from "../dev/templates.js";
 import { errorMessage, log } from "../logger.js";
 import { PROJECT_ROOT } from "../paths.js";
@@ -35,6 +35,7 @@ import { registerPiece, summarizePieces } from "../dev/pieceRoutes.js";
 import type { DevTaskRow } from "../db/devTasks.js";
 import { followupInstructions } from "../dev/reviewFeedback.js";
 import { ReviewResultSchema } from "../review/schema.js";
+import { registerPlans } from "../orchestrator/routes.js";
 import { registerScribe } from "../scribe/routes.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
 import type { AgentRunner } from "../agent/runner.js";
@@ -62,7 +63,7 @@ export interface ServerDeps extends TenantDeps {
   tenants?: (who: TenantContext) => Promise<TenantDeps>;
   /** Terminal Claude du navigateur (connexion de l'abonnement) et état de la connexion. Absent : routes non montées. */
   terminal?: TerminalFeature;
-  /** Exécuteur d'agent imposé au Scribe (tests). Absent : celui des réglages de la personne. */
+  /** Exécuteur d'agent imposé au Scribe et au chat de cadrage des plans (tests). Absent : celui des réglages de la personne. */
   scribeRunner?: AgentRunner;
   /** Exécuteur imposé au test de la connexion à Claude (tests). Absent : celui des réglages de la personne. */
   checkRunner?: AgentRunner;
@@ -468,6 +469,9 @@ export function buildServer(base: ServerDeps) {
   // --- Scribe : tickets d'un projet, brouillons, création de tickets et de projets ------------------
   registerScribe(app, { deps, whoIs: (req) => req.session ?? base.local, fail, forgeOf, classify: classifyIssue, runner: base.scribeRunner });
 
+  // --- Orchestrateur : chat de cadrage, plan de tickets validé par la personne, exécution planifiée ------
+  registerPlans(app, { deps, whoIs: (req) => req.session ?? base.local, fail, forgeOf, runner: base.scribeRunner });
+
   // --- Agent dev -------------------------------------------------------------
 
   app.get("/api/tasks", async () => (await deps.tasks.list()).map(({ result_json: _r, ...t }) => t));
@@ -633,12 +637,7 @@ export function buildServer(base: ServerDeps) {
   }
 
   app.post<IdParams>("/api/tasks/:id/cancel", async (req) => {
-    const id = Number(req.params.id);
-    const task = await deps.tasks.get(id);
-    if (!cancelDevTask(id) && task?.status === "queued") {
-      await deps.tasks.update(id, { status: "cancelled" });
-      await deps.tasks.addEvent(id, "step", "Tâche annulée avant démarrage");
-    }
+    await cancelTask(deps.tasks, Number(req.params.id));
     return { ok: true };
   });
 

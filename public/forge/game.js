@@ -151,6 +151,7 @@
     add({ id: "apprentice", name: "Apprenti", verb: "Parler", tiles: [[9, 12]], z: 13 * T, lx: 9.5, ly: 11.35, when: () => flag("claude"), draw: (c) => S.person(c, 9 * T, 12 * T, { ...S.LOOKS.apprenti, dir: "right" }), interact: apprenticeTalk });
     add({ id: "guard", name: "Maître juré", verb: "Parler", tiles: [[4, 8]], z: 9 * T, lx: 4.5, ly: 7.35, when: () => flag("project"), draw: (c) => S.person(c, 4 * T, 8 * T, { ...S.LOOKS.gardien, dir: "down" }), interact: guardTalk });
     add({ id: "scribe", name: "Scribe", verb: "Parler", tiles: [[13, 4]], z: 5 * T, lx: 13.5, ly: 3.35, when: () => flag("forge"), draw: (c) => S.person(c, 13 * T, 4 * T, { ...S.LOOKS.scribe, dir: "up" }), interact: scribeTalk });
+    add({ id: "steward", name: "Intendant", verb: "Parler", tiles: [[9, 4]], z: 5 * T, lx: 9.5, ly: 3.35, when: () => flag("forge"), draw: (c) => S.person(c, 9 * T, 4 * T, { ...S.LOOKS.intendant, dir: "down" }), interact: stewardTalk });
     /** Décor plein d'un coin du hall : visible avec la forge, il bloque le passage comme les autres meubles. */
     const deco = (id, tiles, z, draw) => add({ id, tiles, z, when: () => flag("forge"), decor: true, draw });
     const obj = (type, x, y) => (c, t) => S.drawObject(c, { type, x, y }, t);
@@ -423,6 +424,11 @@
     await say("Scribe", ["Tu me dictes une idée, j'écris le ticket. Ou tout un projet, avec ses premiers tickets.", "Je ne pose rien sur la forge sans que tu aies relu, patron.", "Mon bureau est dans « Mes tickets » : je t'y emmène."]);
     window.ForgePopups.close(true);
     go("#tickets/new");
+  }
+  /** L'Intendant est l'orchestrateur de plans : il ouvre la fenêtre des plans (`popups.js`), la page complète est `#tickets/plans`. */
+  async function stewardTalk() {
+    await say("Intendant", ["Une grosse commande ? Dis-moi ce que tu veux, je te pose mes questions, puis je range le travail en tickets, dans l'ordre.", "Je ne crée rien et je ne lance rien tant que tu n'as pas validé, patron.", "Ensuite je lance les tickets un par un à l'apprenti, et tu suis l'avancement ici."]);
+    openPopup("plans");
   }
   async function merchantTalk() {
     const n = g.data.armory.loot.filter((i) => !g.save.sold.includes(i.id)).length;

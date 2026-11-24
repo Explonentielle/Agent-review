@@ -3,8 +3,19 @@
 const MAX_TITLES = 15;
 
 /** Balise un texte écrit par un tiers : une donnée qui informe le brouillon, jamais une instruction. */
-function untrusted(text: string): string {
+export function untrusted(text: string): string {
   return `<contenu_externe>\n${text.replaceAll("</contenu_externe>", "</contenu_externe_>")}\n</contenu_externe>`;
+}
+
+/**
+ * Étiquettes qu'un brouillon a le droit de proposer : celles du workflow « à traiter » et celles des tickets ouverts du projet, sans doublon ni valeur
+ * que la forge ne saurait pas écrire (vide, trop longue, avec une virgule).
+ * @param todoLabels Étiquettes « à traiter » des réglages.
+ * @param recent Tickets ouverts du projet.
+ * @returns Quarante étiquettes au plus.
+ */
+export function proposableLabels(todoLabels: string[], recent: Array<{ labels: string[] }>): string[] {
+  return [...new Set([...todoLabels, ...recent.flatMap((t) => t.labels)])].filter((l) => l.length > 0 && l.length <= 50 && !l.includes(",")).slice(0, 40);
 }
 
 const idea = (text: string): string => `<demande>\n${text.replaceAll("</demande>", "</demande_>")}\n</demande>`;

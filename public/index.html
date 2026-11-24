@@ -297,6 +297,19 @@
   .sc-ft-prev { border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; margin: 5px 0; }
   .sc-ft-prev summary { cursor: pointer; font-weight: 600; }
   .sc-err { color: var(--red); }
+  /* ---------- Plans (orchestrateur) ---------- */
+  .pl-chat { display: grid; gap: 10px; }
+  .pl-msg { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; background: var(--surface-2); }
+  .pl-msg.user { background: var(--accent-soft); border-color: transparent; }
+  .pl-msg .who { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
+  .pl-item { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
+  .pl-item summary { cursor: pointer; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pl-item .actions-inline { display: flex; gap: 8px; margin-top: 8px; }
+  .pl-edit { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; display: grid; gap: 8px; }
+  .pl-edit-head { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 6px; align-items: center; }
+  .pl-edit-head input[type="text"] { height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; }
+  .pl-row { display: flex; gap: 10px; align-items: center; padding: 8px 4px; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; }
+  .pl-row:hover { background: var(--hover); }
   .rights { margin: 14px 0 0; border-top: 1px solid var(--border); padding-top: 10px; font-size: 13px; }
   .rights summary { cursor: pointer; font-weight: 600; color: var(--text-2); }
   .rights h5 { margin: 10px 0 2px; font-size: 13px; }
@@ -487,6 +500,7 @@
 </dialog>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <script src="/scribe.js"></script>
+<script src="/plans.js"></script>
 <script src="/team.js"></script>
 
 <script>
@@ -790,15 +804,16 @@ const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", review
 try { state.ticketSource = localStorage.getItem("ra.ticketSource") || ""; } catch { /* stockage indisponible */ }
 
 function route() {
-  const [tab = "tickets", id] = location.hash.replace(/^#/, "").split("/");
+  const [tab = "tickets", id, sub] = location.hash.replace(/^#/, "").split("/");
   // La forge (jeu) éteinte n'est pas une destination : son adresse ramène aux tickets
   state.tab = ["tickets", "dev", "reviews", "forge", "settings"].includes(tab) && !(tab === "forge" && !state.game.enabled) ? tab : "tickets";
   for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t.dataset.tab === state.tab);
   for (const v of document.querySelectorAll(".view")) v.hidden = v.id !== `view-${state.tab}`;
   document.getElementById("settings-toc").hidden = state.tab !== "settings";
   const scribePage = state.tab === "tickets" && id === "new";
-  document.getElementById("crumb").textContent = scribePage ? "Le Scribe" : { tickets: "Mes tickets", dev: "Agent dev", reviews: "Reviews", forge: "La forge", settings: "Paramètres" }[state.tab];
-  if (state.tab === "tickets") { if (scribePage) window.Scribe.show(); else loadTickets(false); }
+  const plansPage = state.tab === "tickets" && id === "plans";
+  document.getElementById("crumb").textContent = scribePage ? "Le Scribe" : plansPage ? "Plans" : { tickets: "Mes tickets", dev: "Agent dev", reviews: "Reviews", forge: "La forge", settings: "Paramètres" }[state.tab];
+  if (state.tab === "tickets") { if (scribePage) window.Scribe.show(); else if (plansPage) window.Plans.show(sub); else loadTickets(false); }
   if (state.tab === "dev") { if (id) showTask(Number(id)); else { state.taskId = null; renderTaskEmpty(); refreshTasks(); } }
   if (state.tab === "reviews") { if (id) showReview(Number(id)); else { state.reviewId = null; renderReviewEmpty(); refreshReviews(); } }
   if (state.tab !== "forge") stopForge();
@@ -903,6 +918,7 @@ function renderTickets() {
       <span class="spacer"></span>
       <input class="search" id="ticket-search" placeholder="Filtrer (titre, projet, #numéro)" value="${esc(state.ticketSearch)}">
       <button class="btn" data-act="refresh-tickets">Actualiser</button>
+      <a class="btn" href="#tickets/plans" title="Cadrer une fonctionnalité ou un projet avec l'orchestrateur : une liste de tickets que tu valides, puis exécutés dans l'ordre">Plans</a>
       <a class="btn primary" href="#tickets/new" title="Le Scribe rédige un ticket (ou un projet) à partir de ton idée, tu relis avant qu'il soit créé">Nouveau ticket</a>
     </div>
     ${sourceChips}
@@ -2398,7 +2414,7 @@ document.addEventListener("change", (e) => {
    ===================================================================== */
 (async () => {
   await refreshHeader();
-  api("/api/settings").then((s) => { state.settingsCache = s.settings; if (state.tab === "tickets" && state.issues && location.hash !== "#tickets/new") renderTickets(); }).catch(() => undefined);
+  api("/api/settings").then((s) => { state.settingsCache = s.settings; if (state.tab === "tickets" && state.issues && !location.hash.startsWith("#tickets/")) renderTickets(); }).catch(() => undefined);
   await Promise.all([refreshGame(), refreshMe()]);
   route();
   setInterval(() => {

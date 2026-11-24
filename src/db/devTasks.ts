@@ -138,6 +138,17 @@ export function createDevTaskRepo(db: Db, workspaceId: number, userId: number | 
     },
 
     /**
+     * Plusieurs tâches de l'espace en une requête.
+     * @param ids Identifiants des tâches.
+     * @returns Les tâches trouvées dans cet espace, par identifiant (celles d'un autre espace sont absentes).
+     */
+    async getMany(ids: number[]): Promise<Map<number, DevTaskRow>> {
+      if (ids.length === 0) return new Map();
+      const rows = await db.all<DevTaskRow>(`SELECT * FROM dev_tasks WHERE workspace_id = ? AND id IN (${ids.map(() => "?").join(", ")})`, [workspaceId, ...ids]);
+      return new Map(rows.map((r) => [r.id, r]));
+    },
+
+    /**
      * Tâches de l'espace, les plus récentes d'abord.
      * @param limit Nombre maximum de tâches.
      * @returns Les tâches.
