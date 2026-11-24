@@ -55,6 +55,7 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 45 | Plateforme | Compte classique : inscription par email, mot de passe, mot de passe oublié, organisations créées par une personne, invitations envoyées par email (Resend) | Très élevé | ✅ Fait (2026-11-18), voir la section 45. Jamais essayé avec un vrai compte Resend ni dans un navigateur |
 | 46 | Plateforme | Tout en conteneurs : plus jamais d'agent ni de terminal sur la machine dès qu'il y a des comptes, et l'abonnement Claude conservé par un jeton `claude setup-token` par personne | Très élevé | ✅ Fait (2026-11-19), voir la section 46. Jamais essayé avec un vrai Docker sans root ni la vraie CLI avec le jeton |
 | 47 | Agent dev | Orchestrateur de plans : chat de cadrage, liste de tickets relue et validée, création à l'avance, exécution planifiée dans l'ordre, avancement, pause, annulation | Élevé | ✅ Fait (2026-11-23), voir la section 47. Tests écrits, non lancés ; jamais essayé avec un vrai agent ni une vraie forge |
+| 48 | Infra | Déploiement automatisé sur le VPS : script de déploiement, puis déclenchement automatique (minuteur ou CI/CD) | Moyen | Noté (2026-11-24), pas implémenté : attend le feu vert, voir la section 48 |
 
 ---
 
@@ -725,3 +726,24 @@ Demande : vérifier que créer un ticket, lancer l'agent dev, relire sa MR, corr
 - Un plan vise un projet existant et configuré (« projet complet » = plusieurs tickets sur ce projet) ; la création du projet lui-même reste faite par le Scribe.
 - Après validation, le contenu d'un ticket ne se modifie plus depuis l'outil (aucune méthode de modification de ticket dans le connecteur) : le corriger chez la forge, ou écarter le ticket. Annuler un plan ne supprime pas les tickets déjà créés.
 - Un seul ticket à la fois par plan ; plusieurs plans d'une même personne peuvent tourner en parallèle (limités par la file de dev).
+
+### 48. Déploiement automatisé sur le VPS : noté, pas implémenté (2026-11-24)
+
+**Demande** : ne plus déployer à la main (CI/CD ou autre). Noté seulement : rien n'est implémenté avant le feu vert.
+
+**Constat (VPS, 2026-11-24)** : une mise à jour demande aujourd'hui, dans la session `review` : `git pull`, `npx tsc -p tsconfig.build.json` (le service lance `dist/index.js`), `systemctl --user restart review-agent`, puis `systemctl --user status review-agent` (chercher `app.started`). Selon ce qui a changé, il faut en plus `npm ci` (`package.json` ou verrou), `docker build -f Dockerfile.agent ...` (`Dockerfile.agent` : l'image vit dans le Docker sans root de `review`) et `systemctl --user daemon-reload` après avoir recopié `deploy/review-agent.service`. Un oubli donne un état bancal : au pull du 2026-11-24, l'interface (`public/`, lue sur le disque) était à jour mais `dist/` était l'ancien : le popup de l'Intendant affichait « Not Found » (404 de Fastify sur `/api/plans`). Il n'existe ni workflow CI (pas de `.github/`) ni script de déploiement : `scripts/` ne contient que la sauvegarde, la restauration et des essais.
+
+**Pistes**
+1. **Script `scripts/deploy.sh`, lancé à la main** : `git pull --ff-only`, comparaison de l'ancien et du nouveau commit (`git diff --name-only`) pour savoir quoi refaire (`npm ci`, image des agents, unité systemd), compilation, redémarrage, attente de `app.started` dans le journal, retour au commit précédent si le service ne démarre pas. Effort faible, aucune surface d'attaque en plus, et il règle l'erreur réelle (une étape oubliée). **À faire en premier.**
+2. **Déclenchement automatique par tirage (recommandé ensuite)** : un minuteur systemd utilisateur sur le VPS interroge `origin/main` et lance le script quand le nouveau commit a ses vérifications GitHub vertes. Rien n'entre sur le VPS, et aucune clé de déploiement ni aucun secret ne sort vers GitHub.
+3. **Déclenchement automatique par poussée** : GitHub Actions (typecheck, tests) puis connexion SSH. `review` n'a ni mot de passe ni clé SSH (on y entre par `sudo machinectl shell review@` depuis `ubuntu`) : il faudrait une clé dédiée, limitée à une commande forcée (`command="..."` dans `authorized_keys`, sans shell). Cette clé donne l'exécution de code dans le compte qui détient tous les jetons : à n'envisager qu'avec cette restriction.
+4. **Écarté** : registre d'images et déploiement par images (l'outil ne tourne plus en conteneur, voir 46), orchestrateurs type Kubernetes (démesurés pour une machine).
+
+**Points de vigilance, à trancher avant de coder**
+- **Redémarrer annule les agents en cours** : à l'arrêt, l'outil termine ses écritures puis annule ses agents, 30 secondes au plus (`TimeoutStopSec=30` et son commentaire dans `deploy/review-agent.service`). Déployer quand aucun agent ne tourne, ou attendre sa fin.
+- **Migrations** : appliquées à l'ouverture de la base, au démarrage (`openDb`, `src/db/index.ts`). Revenir au commit précédent ne défait pas une migration déjà jouée : lancer `scripts/backup.sh` avant chaque déploiement, et préciser que le retour arrière automatique ne vaut que pour le code.
+- **L'outil se déploie lui-même** : ce dépôt est développé par l'agent dev et fusionné par une personne. Un déploiement automatique met en ligne tout ce qui est fusionné sur `main`, et une régression au démarrage empêcherait l'outil de se réparer. D'où le retour arrière automatique et la condition des vérifications vertes.
+- **Jamais toucher au `.env`** : le script ne le lit ni ne le réécrit. Une variable nouvelle reste à ajouter à la main par la personne, à signaler dans le résultat du déploiement.
+- **Résultat à signaler** : succès, échec ou retour arrière, par exemple via les notifications (item 14).
+
+**Pas fait** : tout. Aucun script, aucun minuteur, aucun workflow n'est écrit.
