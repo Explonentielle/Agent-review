@@ -359,6 +359,10 @@
   .dlg-body .txt p { margin: 0 0 8px; }
   .dlg-body textarea { width: 100%; min-height: 90px; margin-top: 8px; padding: 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: inherit; resize: vertical; }
   .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px 18px; }
+  .help-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+  .help-list li { display: flex; align-items: center; gap: 12px; }
+  .help-list .keys { flex: 0 0 56px; display: flex; justify-content: flex-end; }
+  .kbd { min-width: 24px; padding: 2px 7px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 12px; font-weight: 600; line-height: 1.4; text-align: center; }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 12px; font-size: 13px; }
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; word-break: break-all; }
@@ -497,6 +501,15 @@
       <button class="btn primary" value="ok" id="dlg-ok">Confirmer</button>
     </div>
   </form>
+</dialog>
+<dialog id="help-dialog" aria-labelledby="help-title">
+  <div class="dlg-body">
+    <h3 id="help-title">Raccourcis clavier</h3>
+    <div class="txt" id="help-body"></div>
+  </div>
+  <div class="dlg-actions">
+    <button type="button" class="btn primary" data-act="help-close">Fermer</button>
+  </div>
 </dialog>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <script src="/scribe.js"></script>
@@ -2294,6 +2307,7 @@ document.addEventListener("click", async (e) => {
 
   if (!(t = el("[data-act]"))) return;
   const act = t.dataset.act;
+  if (act === "help-close") return document.getElementById("help-dialog").close();
   if (act === "refresh-tickets") return loadTickets(true);
   if (act === "dev-back") return go("#dev");
   if (act === "rev-back") return go("#reviews");
@@ -2390,6 +2404,51 @@ document.addEventListener("keydown", (e) => {
   }
   const card = e.target.closest?.(".card[data-task], .card[data-review]");
   if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); card.click(); }
+});
+
+/* =====================================================================
+   Raccourcis clavier
+   ===================================================================== */
+const REVIEW_SEARCH_ID = "rev-search";
+
+/** Onglets visibles, dans l'ordre d'affichage : leur rang donne leur touche numérique (1 à 9). */
+const shortcutTabs = () => [...document.querySelectorAll(".nav .tab[data-tab]")].filter((t) => !t.hidden).slice(0, 9);
+
+/** Vrai si la cible reçoit du texte ou un choix au clavier (champ, zone de texte, sélecteur, contenu éditable). */
+function isTypingTarget(el) {
+  if (!el || el.nodeType !== 1) return false;
+  if (el.isContentEditable || el.matches("textarea, select")) return true;
+  return el.matches("input") && !["button", "submit", "reset", "checkbox", "radio", "image", "file", "range", "color"].includes(el.type);
+}
+
+/** Ouvre l'aide : la liste est construite à chaque ouverture depuis les onglets visibles, donc toujours à jour. */
+function openHelp() {
+  const rows = [
+    ...shortcutTabs().map((t, i) => [[String(i + 1)], `Onglet ${t.querySelector(".lbl")?.textContent.trim() || t.dataset.tab}`]),
+    [["/"], "Rechercher dans les reviews"],
+    [["?"], "Afficher cette aide"],
+    [["Échap"], "Fermer l'aide, ou quitter le champ de recherche"],
+  ];
+  document.getElementById("help-body").innerHTML = `<ul class="help-list">${rows.map(([keys, label]) =>
+    `<li><span class="keys">${keys.map((k) => `<kbd class="kbd">${esc(k)}</kbd>`).join("")}</span><span>${esc(label)}</span></li>`).join("")}</ul>`;
+  document.getElementById("help-dialog").showModal();
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.isComposing) return;
+  if (e.key === "Escape" && e.target.id === REVIEW_SEARCH_ID) return e.target.blur();
+  if (e.ctrlKey || e.altKey || e.metaKey || e.repeat) return; // laisse les raccourcis du navigateur
+  if (isTypingTarget(e.target) || document.querySelector("dialog[open]")) return;
+  if (e.key === "?") { e.preventDefault(); return openHelp(); }
+  if (e.key === "/") {
+    e.preventDefault();
+    if (state.tab !== "reviews") go("#reviews");
+    return document.getElementById(REVIEW_SEARCH_ID)?.focus();
+  }
+  if (/^[1-9]$/.test(e.key)) {
+    const tab = shortcutTabs()[Number(e.key) - 1];
+    if (tab) { e.preventDefault(); go(`#${tab.dataset.tab}`); }
+  }
 });
 
 /** Sidebar repliée ou non, mémorisé par navigateur (sans conséquence si le stockage est indisponible). */
