@@ -547,7 +547,11 @@ const MODE = {
   comment: ["Mode commentaire", "Les reviews « mineur / OK » sont commentées automatiquement, jamais approuvées."],
   auto: ["Mode auto", "Les reviews « mineur / OK » sont commentées ET approuvées automatiquement."],
 };
-const EFFORT_LABEL = { low: "Faible", medium: "Moyen", high: "Élevé (plafond)" };
+const EFFORT_LABEL = { low: "Faible", medium: "Moyen", high: "Élevé (défaut)", xhigh: "Très élevé", max: "Maximum" };
+const MODEL_LABEL = {
+  "claude-fable-5-2": "Fable 5.2", "claude-opus-5-5": "Opus 5.5", "claude-sonnet-5-5": "Sonnet 5.5 (défaut)",
+  "claude-haiku-5-5": "Haiku 5.5", "claude-haiku-4-5": "Haiku 4.5",
+};
 const FORGE_NAME = { gitlab: "GitLab", github: "GitHub" };
 const forgeName = (source) => FORGE_NAME[source] || source || "GitLab";
 /** Numéro d'une demande de fusion : !12 chez GitLab, #12 chez GitHub. */
@@ -1658,7 +1662,7 @@ async function loadSettings() {
 function agentFields(prefix, a, title, hint) {
   const opts = settingsData.options;
   return `<div><div class="sub-title">${title}</div><div class="grid2">
-    <label class="field"><span>Modèle</span><select name="${prefix}.model">${opts.models.map((m) => `<option ${m === a.model ? "selected" : ""}>${m}</option>`).join("")}</select></label>
+    <label class="field"><span>Modèle</span><select name="${prefix}.model">${opts.models.map((m) => `<option value="${m}" ${m === a.model ? "selected" : ""}>${MODEL_LABEL[m] || m}</option>`).join("")}</select></label>
     <label class="field"><span>Effort</span><select name="${prefix}.effort">${opts.efforts.map((e) => `<option value="${e}" ${e === a.effort ? "selected" : ""}>${EFFORT_LABEL[e]}</option>`).join("")}</select></label>
     <label class="field"><span>Tours maximum</span><input type="number" min="5" max="300" name="${prefix}.maxTurns" value="${a.maxTurns}"></label>
     <label class="field"><span>Délai maximum (min)</span><input type="number" min="1" max="240" name="${prefix}.timeoutMin" value="${a.timeoutMin}"></label>
@@ -1968,7 +1972,7 @@ function renderSettings() {
           <label class="field"><span>Agents par jour et par personne</span><input type="number" min="0" step="1" name="quotas.perUserDailyRuns" value="${s.quotas.perUserDailyRuns}"><small>0 = sans limite. Reviews et tâches de dev lancées depuis minuit UTC, dans les deux modes : c'est la seule limite qui protège un abonnement.</small></label>
         </div>
         <div style="display:grid;gap:18px;margin-top:22px">
-          ${agentFields("review", s.review, "Review", "Une review lit le dépôt : 40 tours suffisent en général.")}
+          ${agentFields("review", s.review, "Review", "Une review lit le dépôt : 40 tours suffisent en général. Fable, Opus et les efforts « Très élevé » ou « Maximum » consomment nettement plus de quota.")}
           ${agentFields("dev", s.dev, "Agent dev", "Une tâche de dev consomme bien plus qu'une review : surveille ton quota.")}
         </div>
       </section>

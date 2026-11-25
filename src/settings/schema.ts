@@ -3,13 +3,19 @@ import { IMAGE_NAME_RE } from "../agent/imageName.js";
 import { DEFAULT_FORGE, FORGE_KINDS } from "../connectors/forges.js";
 
 /**
- * Modèles autorisés. Plafond volontaire : Sonnet 5.5 au maximum, pour ne pas épuiser le quota
- * de l'abonnement partagé avec l'usage interactif de Claude Code. IDs complets uniquement :
- * un alias comme "sonnet" suivrait automatiquement les futurs modèles.
+ * Modèles choisissables dans les Paramètres (liste blanche : l'API refuse tout autre identifiant). Le défaut reste Sonnet 5.5 :
+ * les modèles plus coûteux sont un choix explicite de l'administrateur, à surveiller sur le quota de l'abonnement ou le budget.
+ * IDs complets uniquement : un alias comme "sonnet" suivrait automatiquement les futurs modèles. Ajouter un modèle = l'ajouter ici.
  */
-export const ALLOWED_MODELS = ["claude-sonnet-5-5", "claude-haiku-4-5"] as const;
-/** Effort plafonné à high (pas de xhigh/max). */
-export const ALLOWED_EFFORTS = ["low", "medium", "high"] as const;
+export const ALLOWED_MODELS = [
+  "claude-fable-5-2",
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-haiku-5-5",
+  "claude-haiku-4-5",
+] as const;
+/** Niveaux d'effort acceptés par `claude --effort`. Le défaut reste `high`. */
+export const ALLOWED_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 const labelList = z.array(z.string().trim().min(1));
 

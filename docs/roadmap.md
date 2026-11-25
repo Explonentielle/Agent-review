@@ -95,7 +95,7 @@ Note : `~/.local/bin` n'est pas dans le PATH des shells non interactifs. La conf
 - `ANTHROPIC_API_KEY` et `ANTHROPIC_AUTH_TOKEN` sont retirées de l'environnement du process enfant.
 - La dépendance `@anthropic-ai/claude-agent-sdk` est supprimée.
 
-**Plafond (demande explicite)** : `REVIEW_MODEL` est limité à `claude-sonnet-5-5` (défaut) ou `claude-haiku-4-5`, et `REVIEW_EFFORT` à `low`/`medium`/`high` (défaut `high`). Le refus se fait à la validation de la config, et seuls les IDs complets sont acceptés (un alias suivrait les futurs modèles).
+**Plafond (demande explicite)** : `REVIEW_MODEL` est limité à `claude-sonnet-5-5` (défaut) ou `claude-haiku-4-5`, et `REVIEW_EFFORT` à `low`/`medium`/`high` (défaut `high`). Le refus se fait à la validation de la config, et seuls les IDs complets sont acceptés (un alias suivrait les futurs modèles). **Levé le 2026-11-24 (demande explicite)** : les Paramètres proposent Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5 et Haiku 4.5, et les efforts `low` à `max` (liste blanche `ALLOWED_MODELS` / `ALLOWED_EFFORTS` de `src/settings/schema.ts`, toujours des IDs complets). Le défaut reste Sonnet 5.5 en effort `high`.
 
 **Testé en réel** (`scripts/smoke-claude.sh`, remplacé depuis par `scripts/smoke-review.ts`, Haiku effort low, ~0,017 $ équivalent API) :
 - toutes les options sont acceptées par la CLI 2.1.294 ;
