@@ -113,6 +113,7 @@
   .list-head .row { display: flex; align-items: baseline; justify-content: space-between; }
   .list-head h2 { margin: 0; font-size: 15px; }
   .list-head .sub { color: var(--muted); font-size: 12px; }
+  .list-head .row-actions { display: flex; align-items: center; gap: 10px; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .fchip { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; display: inline-flex; gap: 6px; align-items: center; }
   .fchip:hover { background: var(--hover); }
@@ -473,7 +474,7 @@
   <div class="split" id="rev-split">
     <div class="pane list-pane">
       <div class="list-head">
-        <div class="row"><h2 id="rev-title">Reviews</h2><span class="sub" id="rev-count"></span></div>
+        <div class="row"><h2 id="rev-title">Reviews</h2><div class="row-actions"><span class="sub" id="rev-count"></span><button class="btn sm" id="rev-export" data-act="export-reviews" title="Télécharge les reviews affichées au format CSV" disabled>Exporter en CSV</button></div></div>
         <div class="chips" id="rev-filters"></div>
       </div>
       <div id="rev-list"></div>
@@ -800,7 +801,7 @@ async function copy(text) {
 /* =====================================================================
    Navigation
    ===================================================================== */
-const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewId: null, taskId: null, ticketSearch: "", ticketSource: "", issues: null, issuesAt: null, game: { enabled: false } };
+const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewRows: [], reviewId: null, taskId: null, ticketSearch: "", ticketSource: "", issues: null, issuesAt: null, game: { enabled: false } };
 try { state.ticketSource = localStorage.getItem("ra.ticketSource") || ""; } catch { /* stockage indisponible */ }
 
 function route() {
@@ -1294,6 +1295,8 @@ async function refreshReviews() {
   }).join("");
   document.getElementById("rev-title").textContent = f ? REVIEW_STATUS[f].label : "Toutes les reviews";
   document.getElementById("rev-count").textContent = `${rows.length} MR`;
+  state.reviewRows = rows;
+  document.getElementById("rev-export").disabled = !rows.length;
   document.getElementById("rev-list").innerHTML = rows.length
     ? rows.map((r) => `
       <div class="card ${r.id === state.reviewId ? "selected" : ""}" data-review="${r.id}" tabindex="0">
@@ -1302,6 +1305,56 @@ async function refreshReviews() {
         <div class="card-bottom"><span class="grow">${esc(r.author)}</span>${cardBadges(r)}</div>
       </div>`).join("")
     : `<div class="empty"><div>${f === "needs_human" ? "Rien ne t'attend. 🎉<br><span class='note'>Les MR où tu es reviewer sont détectées dès qu'elles passent en Ready, puis analysées selon le déclenchement choisi dans Paramètres.</span>" : "Aucune review ici."}</div></div>`;
+}
+
+/**
+ * Met une valeur au format d'une cellule CSV : les valeurs qui commencent par un caractère interprétable
+ * comme formule par un tableur (`=`, `+`, `-`, `@`, tabulation, retour chariot) sont préfixées d'une apostrophe,
+ * puis les valeurs contenant virgule, guillemet ou retour à la ligne sont entourées de guillemets (guillemets doublés).
+ * @param {unknown} value Valeur à écrire (null et undefined donnent une cellule vide).
+ * @returns {string} La cellule prête à être jointe par des virgules.
+ */
+function csvCell(value) {
+  let s = value === null || value === undefined ? "" : String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * Construit le CSV des reviews données : une ligne d'en-tête puis une ligne par review, dans l'ordre reçu,
+ * avec les informations affichées dans la liste. Séparateur virgule, fins de ligne CRLF.
+ * @param {object[]} rows Reviews telles que renvoyées par `/api/reviews`.
+ * @returns {string} Le contenu CSV, sans BOM.
+ */
+function reviewsToCsv(rows) {
+  const head = ["Forge", "Projet", "MR", "Titre", "Auteur", "Statut", "Bloquants", "Importants", "Suggestions", "Manipulation", "Mise à jour"];
+  const lines = rows.map((r) => {
+    const s = r.summary || {};
+    return [
+      forgeName(r.source), r.project_path, `${mrPrefix(r.source)}${r.mr_iid}`, r.mr_title, r.author,
+      REVIEW_STATUS[r.status]?.label ?? r.status, s.blocking ?? "", s.important ?? "", s.suggestion ?? "",
+      r.summary ? (s.injection ? "oui" : "non") : "", r.updated_at,
+    ];
+  });
+  return [head, ...lines].map((cells) => cells.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+/** Télécharge les reviews actuellement affichées (filtres compris) en CSV UTF-8, sans passer par le serveur. */
+function exportReviewsCsv() {
+  const rows = state.reviewRows;
+  if (!rows.length) return toast("Aucune review à exporter.", true);
+  const now = new Date();
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // Le BOM permet à Excel de reconnaître l'UTF-8 (accents).
+  const url = URL.createObjectURL(new Blob(["﻿", reviewsToCsv(rows)], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `reviews-${day}.csv`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`${rows.length} review${rows.length > 1 ? "s" : ""} exportée${rows.length > 1 ? "s" : ""}.`);
 }
 
 function renderReviewEmpty() {
@@ -2297,6 +2350,7 @@ document.addEventListener("click", async (e) => {
   if (act === "refresh-tickets") return loadTickets(true);
   if (act === "dev-back") return go("#dev");
   if (act === "rev-back") return go("#reviews");
+  if (act === "export-reviews") return exportReviewsCsv();
   if (act === "project-add") return openProjectEditor(null);
   if (act === "project-cancel") { editingProject = null; document.getElementById("project-editor").innerHTML = ""; return; }
   if (act === "toggle-sidebar") return setSidebarCollapsed(!document.body.classList.contains("collapsed"));
