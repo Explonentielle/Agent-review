@@ -20,20 +20,19 @@
     --radius: 10px;
     color-scheme: light;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1115; --surface: #171a21; --surface-2: #1c2029; --hover: #222733;
-      --text: #e8eaf0; --text-2: #b4bac7; --muted: #868d9c; --border: #272c37; --border-strong: #353b48;
-      --accent: #7c74ff; --accent-hover: #918aff; --accent-soft: #23233f; --accent-text: #c4c0ff;
-      --red: #ff6b5e; --red-soft: #2c1717; --red-border: #5a2a25;
-      --orange: #ff9f45; --orange-soft: #2c2014; --orange-border: #5a3d1e;
-      --yellow: #e8c547; --yellow-soft: #29250f; --yellow-border: #554a1c;
-      --green: #3ccf8e; --green-soft: #12261d; --green-border: #1f4d37;
-      --gray-soft: #222733;
-      --shadow: 0 1px 2px rgba(0, 0, 0, .3);
-      --shadow-lg: 0 12px 32px rgba(0, 0, 0, .5);
-      color-scheme: dark;
-    }
+  /* Le thème effectif (clair ou sombre) est posé sur <html data-theme> par le script du <head> : choix de la personne, ou réglage du système en mode automatique. */
+  :root[data-theme="dark"] {
+    --bg: #0f1115; --surface: #171a21; --surface-2: #1c2029; --hover: #222733;
+    --text: #e8eaf0; --text-2: #b4bac7; --muted: #868d9c; --border: #272c37; --border-strong: #353b48;
+    --accent: #7c74ff; --accent-hover: #918aff; --accent-soft: #23233f; --accent-text: #c4c0ff;
+    --red: #ff6b5e; --red-soft: #2c1717; --red-border: #5a2a25;
+    --orange: #ff9f45; --orange-soft: #2c2014; --orange-border: #5a3d1e;
+    --yellow: #e8c547; --yellow-soft: #29250f; --yellow-border: #554a1c;
+    --green: #3ccf8e; --green-soft: #12261d; --green-border: #1f4d37;
+    --gray-soft: #222733;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, .5);
+    color-scheme: dark;
   }
 
   * { box-sizing: border-box; }
@@ -79,6 +78,10 @@
   .topbar { height: 52px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--border); }
   .crumb { font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .top-right { display: flex; align-items: center; gap: 8px; }
+  .theme-switch { display: inline-flex; height: 28px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); padding: 2px; gap: 2px; }
+  .theme-switch button { border: 0; border-radius: 999px; background: none; color: var(--text-2); padding: 0 10px; font-size: 12.5px; }
+  .theme-switch button:hover { background: var(--hover); color: var(--text); }
+  .theme-switch button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
   #mode { cursor: pointer; }
   .userchip { padding: 0 10px 0 3px; }
   .userchip small { color: var(--muted); }
@@ -411,6 +414,35 @@
     .crumbs .btn-link { margin-left: 0; }
   }
 </style>
+<script>
+/* Thème : clair, sombre ou automatique (réglage du système). Appliqué dans le <head> pour éviter tout flash du mauvais thème au chargement. */
+(function () {
+  var KEY = "ra.theme";
+  var MODES = ["light", "dark", "auto"];
+  var media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function stored() {
+    try { var v = localStorage.getItem(KEY); return MODES.indexOf(v) >= 0 ? v : "auto"; } catch (e) { return "auto"; }
+  }
+  var mode = stored();
+  function apply() {
+    var dark = mode === "dark" || (mode === "auto" && !!media && media.matches);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  }
+  apply();
+  if (media) {
+    var onChange = function () { if (mode === "auto") apply(); };
+    if (media.addEventListener) media.addEventListener("change", onChange); else if (media.addListener) media.addListener(onChange);
+  }
+  window.raTheme = {
+    get: function () { return mode; },
+    set: function (next) {
+      mode = MODES.indexOf(next) >= 0 ? next : "auto";
+      try { localStorage.setItem(KEY, mode); } catch (e) { /* stockage indisponible */ }
+      apply();
+    }
+  };
+})();
+</script>
 </head>
 <body>
 <aside class="sidebar">
@@ -453,6 +485,11 @@
 <div class="topbar">
   <div class="crumb" id="crumb"></div>
   <div class="top-right">
+    <div class="theme-switch" role="group" aria-label="Thème">
+      <button type="button" data-theme-choice="light" title="Thème clair">Clair</button>
+      <button type="button" data-theme-choice="dark" title="Thème sombre">Sombre</button>
+      <button type="button" data-theme-choice="auto" title="Suit le réglage du système">Auto</button>
+    </div>
     <select class="ws-switch" id="ws-switch" aria-label="Espace de travail" hidden></select>
     <span class="chip" id="role-chip" hidden></span>
     <span class="chip" id="mode" data-tab="settings"><span class="dot"></span><span>…</span></span>
@@ -2401,6 +2438,19 @@ function setSidebarCollapsed(collapsed) {
   try { localStorage.setItem("ra.sidebarCollapsed", collapsed ? "1" : "0"); } catch { /* stockage indisponible */ }
 }
 try { if (localStorage.getItem("ra.sidebarCollapsed") === "1") setSidebarCollapsed(true); } catch { /* stockage indisponible */ }
+
+/** Sélecteur de thème : indique le mode actif (le thème lui-même est géré par le script du <head>). */
+function syncThemeSwitch() {
+  const mode = window.raTheme.get();
+  document.querySelectorAll("[data-theme-choice]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeChoice === mode)));
+}
+document.querySelector(".theme-switch").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-theme-choice]");
+  if (!btn) return;
+  window.raTheme.set(btn.dataset.themeChoice);
+  syncThemeSwitch();
+});
+syncThemeSwitch();
 
 window.addEventListener("hashchange", route);
 document.addEventListener("change", (e) => {
