@@ -120,6 +120,11 @@
   .fchip .n { color: var(--muted); font-variant-numeric: tabular-nums; }
   .fchip .n.hot { background: var(--red); color: #fff; border-radius: 999px; padding: 0 6px; font-weight: 700; }
   .chips.ticket-sources { margin: 0 0 20px; }
+  .rev-search { position: relative; margin-top: 10px; }
+  .rev-search .search { width: 100%; min-width: 0; padding-right: 32px; box-sizing: border-box; }
+  .rev-search-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+  .rev-search-clear:hover { background: var(--hover); color: var(--text); }
+  .rev-search-clear[hidden] { display: none; }
 
   .card { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; }
   .card:hover { background: var(--hover); }
@@ -474,6 +479,10 @@
     <div class="pane list-pane">
       <div class="list-head">
         <div class="row"><h2 id="rev-title">Reviews</h2><span class="sub" id="rev-count"></span></div>
+        <div class="rev-search">
+          <input class="search" id="rev-search" type="search" autocomplete="off" placeholder="Rechercher (projet, titre, numéro)" aria-label="Rechercher une review">
+          <button class="rev-search-clear" id="rev-search-clear" type="button" data-act="rev-search-clear" title="Effacer la recherche" aria-label="Effacer la recherche" hidden>×</button>
+        </div>
         <div class="chips" id="rev-filters"></div>
       </div>
       <div id="rev-list"></div>
@@ -800,7 +809,7 @@ async function copy(text) {
 /* =====================================================================
    Navigation
    ===================================================================== */
-const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewId: null, taskId: null, ticketSearch: "", ticketSource: "", issues: null, issuesAt: null, game: { enabled: false } };
+const state = { tab: "tickets", stats: null, reviewFilter: "needs_human", reviewId: null, taskId: null, ticketSearch: "", reviewSearch: "", reviewRows: [], ticketSource: "", issues: null, issuesAt: null, game: { enabled: false } };
 try { state.ticketSource = localStorage.getItem("ra.ticketSource") || ""; } catch { /* stockage indisponible */ }
 
 function route() {
@@ -1282,9 +1291,41 @@ function cardBadges(r) {
   return out.join("");
 }
 
+// Texte comparable : sans accents ni casse (la recherche est une simple inclusion, jamais une expression régulière)
+const searchKey = (t) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+// Applique la saisie de la recherche : filtre la liste déjà chargée, sans appel serveur
+function setReviewSearch(value, focus) {
+  state.reviewSearch = value;
+  const input = document.getElementById("rev-search");
+  if (input.value !== value) input.value = value;
+  document.getElementById("rev-search-clear").hidden = !value;
+  if (focus) input.focus();
+  renderReviewList();
+}
+
+function renderReviewList() {
+  const f = state.reviewFilter;
+  const all = state.reviewRows || [];
+  const q = searchKey(state.reviewSearch.trim());
+  const rows = q ? all.filter((r) => searchKey(`${r.project_path} ${r.mr_title} ${mrPrefix(r.source)}${r.mr_iid}`).includes(q)) : all;
+  document.getElementById("rev-count").textContent = q ? `${rows.length} / ${all.length} MR` : `${all.length} MR`;
+  document.getElementById("rev-list").innerHTML = rows.length
+    ? rows.map((r) => `
+      <div class="card ${r.id === state.reviewId ? "selected" : ""}" data-review="${r.id}" tabindex="0">
+        <div class="card-top">${forgePill(r.source)}<span class="proj">${esc(r.project_path)}</span><span>·</span><span>${mrPrefix(r.source)}${r.mr_iid}</span><span class="time">${ago(r.updated_at)}</span></div>
+        <div class="card-title">${esc(r.mr_title)}</div>
+        <div class="card-bottom"><span class="grow">${esc(r.author)}</span>${cardBadges(r)}</div>
+      </div>`).join("")
+    : q
+      ? `<div class="empty"><div>Aucune review ne correspond à « ${esc(state.reviewSearch.trim())} ».<br><span class="note">Modifie ou efface la recherche${f ? ", ou change de statut" : ""}.</span></div></div>`
+      : `<div class="empty"><div>${f === "needs_human" ? "Rien ne t'attend. 🎉<br><span class='note'>Les MR où tu es reviewer sont détectées dès qu'elles passent en Ready, puis analysées selon le déclenchement choisi dans Paramètres.</span>" : "Aucune review ici."}</div></div>`;
+}
+
 async function refreshReviews() {
   const f = state.reviewFilter;
   const [rows, stats] = await Promise.all([api(`/api/reviews${f ? `?status=${f}` : ""}`), api("/api/stats")]);
+  state.reviewRows = rows;
   const counts = stats.counts || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   document.getElementById("rev-filters").innerHTML = REVIEW_FILTERS.map((k) => {
@@ -1293,15 +1334,7 @@ async function refreshReviews() {
     return `<button class="fchip ${k === f ? "active" : ""}" data-rfilter="${k}">${k ? REVIEW_STATUS[k].label : "Toutes"}<span class="n ${k === "needs_human" && n ? "hot" : ""}">${n}</span></button>`;
   }).join("");
   document.getElementById("rev-title").textContent = f ? REVIEW_STATUS[f].label : "Toutes les reviews";
-  document.getElementById("rev-count").textContent = `${rows.length} MR`;
-  document.getElementById("rev-list").innerHTML = rows.length
-    ? rows.map((r) => `
-      <div class="card ${r.id === state.reviewId ? "selected" : ""}" data-review="${r.id}" tabindex="0">
-        <div class="card-top">${forgePill(r.source)}<span class="proj">${esc(r.project_path)}</span><span>·</span><span>${mrPrefix(r.source)}${r.mr_iid}</span><span class="time">${ago(r.updated_at)}</span></div>
-        <div class="card-title">${esc(r.mr_title)}</div>
-        <div class="card-bottom"><span class="grow">${esc(r.author)}</span>${cardBadges(r)}</div>
-      </div>`).join("")
-    : `<div class="empty"><div>${f === "needs_human" ? "Rien ne t'attend. 🎉<br><span class='note'>Les MR où tu es reviewer sont détectées dès qu'elles passent en Ready, puis analysées selon le déclenchement choisi dans Paramètres.</span>" : "Aucune review ici."}</div></div>`;
+  renderReviewList();
 }
 
 function renderReviewEmpty() {
@@ -2252,8 +2285,12 @@ let lastLabelField = null;
 
 document.addEventListener("focusin", (e) => { if (e.target.matches?.("[data-labels]")) lastLabelField = e.target; });
 document.addEventListener("input", (e) => {
+  if (e.target.id === "rev-search") setReviewSearch(e.target.value, false);
   if (e.target.id === "ticket-search") { state.ticketSearch = e.target.value; const pos = e.target.selectionStart; renderTickets(); const el = document.getElementById("ticket-search"); el.focus(); el.setSelectionRange(pos, pos); }
   if (e.target.name?.startsWith("templates.")) updatePreview();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.target.id === "rev-search" && e.target.value) setReviewSearch("", true);
 });
 document.addEventListener("submit", (e) => {
   if (e.target.id === "settings-form") { e.preventDefault(); saveSettings(); }
@@ -2297,6 +2334,7 @@ document.addEventListener("click", async (e) => {
   if (act === "refresh-tickets") return loadTickets(true);
   if (act === "dev-back") return go("#dev");
   if (act === "rev-back") return go("#reviews");
+  if (act === "rev-search-clear") return setReviewSearch("", true);
   if (act === "project-add") return openProjectEditor(null);
   if (act === "project-cancel") { editingProject = null; document.getElementById("project-editor").innerHTML = ""; return; }
   if (act === "toggle-sidebar") return setSidebarCollapsed(!document.body.classList.contains("collapsed"));
