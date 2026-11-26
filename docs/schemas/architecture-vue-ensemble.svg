@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 810" width="1200" height="810" role="img" aria-labelledby="t d" font-family="'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif">
+<title id="t">Vue d'ensemble de l'architecture</title>
+<desc id="d">Le navigateur parle au serveur de l'outil. Le serveur lit et écrit chez la forge, stocke ses données en base, et lance pour chaque tâche un conteneur d'agent jetable qui ne voit que son dossier de travail et parle seulement à l'API du modèle.</desc>
+<defs>
+<marker id="arr" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker>
+</defs>
+<rect x="0.75" y="0.75" width="1198.5" height="808.5" rx="20" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="40" y="50" font-size="25" font-weight="700" fill="#0f172a" text-anchor="start">Vue d'ensemble</text>
+<text x="40" y="74" font-size="14" font-weight="400" fill="#475569" text-anchor="start">Qui fait quoi, et où tourne chaque élément</text>
+<rect x="640" y="29" width="14" height="14" rx="4" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.75"/>
+<text x="661" y="40" font-size="12" font-weight="400" fill="#475569" text-anchor="start">Notre outil</text>
+<rect x="750" y="29" width="14" height="14" rx="4" fill="#ecfdf5" stroke="#10b981" stroke-width="1.75"/>
+<text x="771" y="40" font-size="12" font-weight="400" fill="#475569" text-anchor="start">Agent isolé</text>
+<rect x="860" y="29" width="14" height="14" rx="4" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.75"/>
+<text x="881" y="40" font-size="12" font-weight="400" fill="#475569" text-anchor="start">Données</text>
+<rect x="950" y="29" width="14" height="14" rx="4" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.75"/>
+<text x="971" y="40" font-size="12" font-weight="400" fill="#475569" text-anchor="start">Hors de l'outil</text>
+<rect x="300" y="110" width="480" height="385" rx="18" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+<text x="320" y="138" font-size="12.5" font-weight="700" fill="#1e3a8a" text-anchor="start">SERVEUR DE L'OUTIL</text>
+<rect x="300" y="580" width="480" height="160" rx="18" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+<text x="320" y="608" font-size="12.5" font-weight="700" fill="#065f46" text-anchor="start">CONTENEUR D'AGENT JETABLE</text>
+<rect x="40" y="150" width="160" height="90" rx="12" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.75"/>
+<text x="120" y="177" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">Navigateur</text>
+<text x="120" y="200" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">Interface web</text>
+<text x="120" y="217" font-size="12" font-weight="400" fill="#475569" text-anchor="middle">tickets, reviews,</text>
+<text x="120" y="234" font-size="12" font-weight="400" fill="#475569" text-anchor="middle">réglages, jeu</text>
+<path d="M200 195 L320 195" fill="none" stroke="#475569" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#arr)" marker-start="url(#arr)"/>
+<text x="250" y="164" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">HTTP</text>
+<text x="250" y="177" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">tunnel SSH</text>
+<text x="250" y="190" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">ou TLS</text>
+<rect x="320" y="150" width="210" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="425" y="177" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">API et interface web</text>
+<text x="425" y="200" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">comptes et rôles vérifiés</text>
+<text x="425" y="219" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">à chaque requête</text>
+<rect x="550" y="150" width="210" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="655" y="177" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">Relève des demandes</text>
+<text x="655" y="200" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">interroge la forge</text>
+<text x="655" y="219" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">à intervalle régulier</text>
+<rect x="320" y="258" width="210" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="425" y="285" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">Files et planificateur</text>
+<text x="425" y="308" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">review, dev, plans</text>
+<text x="425" y="327" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">agents en parallèle limités</text>
+<rect x="550" y="258" width="210" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="655" y="285" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">Connecteurs de forge</text>
+<text x="655" y="308" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">GitLab, GitHub</text>
+<text x="655" y="327" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">chaque écriture est auditée</text>
+<rect x="320" y="366" width="210" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="425" y="393" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">Coffre à secrets</text>
+<text x="425" y="416" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">chiffré (AES-256-GCM)</text>
+<text x="425" y="435" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">un jeu de secrets par personne</text>
+<rect x="550" y="366" width="210" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="655" y="393" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">Lanceur d'agents</text>
+<text x="655" y="416" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">prépare le dossier de travail</text>
+<text x="655" y="435" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">lance le conteneur</text>
+<text x="540" y="480" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" font-style="italic">tourne sur la machine hôte (systemd) ou dans un conteneur</text>
+<rect x="40" y="360" width="160" height="100" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.75"/>
+<text x="120" y="387" font-size="15" font-weight="700" fill="#78350f" text-anchor="middle">Base de données</text>
+<text x="120" y="410" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">PostgreSQL</text>
+<text x="120" y="427" font-size="12" font-weight="400" fill="#475569" text-anchor="middle">(SQLite en local)</text>
+<text x="120" y="444" font-size="12" font-weight="400" fill="#475569" text-anchor="middle">réglages, tâches, audit</text>
+<path d="M300 410 L200 410" fill="none" stroke="#475569" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#arr)" marker-start="url(#arr)"/>
+<text x="250" y="398" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">SQL</text>
+<rect x="900" y="150" width="260" height="100" rx="12" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.75"/>
+<text x="1030" y="177" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">Forge</text>
+<text x="1030" y="200" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">GitLab ou GitHub</text>
+<text x="1030" y="219" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">tickets, demandes de fusion, CI</text>
+<path d="M780 200 L900 200" fill="none" stroke="#475569" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#arr)" marker-start="url(#arr)"/>
+<text x="840" y="156" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">lit tickets et MR</text>
+<text x="840" y="170" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">pousse la branche,</text>
+<text x="840" y="184" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">ouvre la MR</text>
+<path d="M655 454 L655 580" fill="none" stroke="#475569" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#arr)"/>
+<text x="668" y="512" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">docker run</text>
+<text x="668" y="526" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">monte le dossier de travail</text>
+<text x="668" y="540" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">un conteneur par tâche</text>
+<rect x="320" y="618" width="210" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="425" y="645" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">CLI Claude Code</text>
+<text x="425" y="668" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">mode sécurisé</text>
+<text x="425" y="687" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">outils et commandes limités</text>
+<rect x="550" y="618" width="210" height="88" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.75"/>
+<text x="655" y="645" font-size="15" font-weight="700" fill="#78350f" text-anchor="middle">Dossier de travail</text>
+<text x="655" y="668" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">copie du dépôt</text>
+<text x="655" y="687" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">le seul dossier visible</text>
+<text x="540" y="728" font-size="11.5" font-weight="400" fill="#065f46" text-anchor="middle" font-style="italic">ni la base, ni les secrets, ni la forge ne sont accessibles</text>
+<rect x="900" y="610" width="260" height="100" rx="12" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.75"/>
+<text x="1030" y="637" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">API Anthropic</text>
+<text x="1030" y="660" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">modèles Claude</text>
+<text x="1030" y="679" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">clé API ou jeton d'abonnement</text>
+<path d="M780 660 L900 660" fill="none" stroke="#475569" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#arr)" marker-start="url(#arr)"/>
+<text x="840" y="636" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">requêtes</text>
+<text x="840" y="650" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">au modèle</text>
+<rect x="40" y="756" width="1120" height="36" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="600" y="779" font-size="13.5" font-weight="600" fill="#1e293b" text-anchor="middle">L'agent propose, le code décide : l'agent ne parle jamais à la forge, c'est le serveur qui lit, contrôle, pousse et ouvre la demande de fusion.</text>
+</svg>

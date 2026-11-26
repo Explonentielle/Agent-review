@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 830" width="1200" height="830" role="img" aria-labelledby="t d" font-family="'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif">
+<title id="t">Un agent dans son conteneur</title>
+<desc id="d">Le serveur prépare un dossier de travail, lance un conteneur jetable aux limites strictes qui ne monte que ce dossier, récupère le résultat, le contrôle, puis fait lui-même le commit, le push et la demande de fusion. Le conteneur ne voit ni la base, ni les secrets, ni la forge.</desc>
+<defs>
+<marker id="arr" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker>
+</defs>
+<rect x="0.75" y="0.75" width="1198.5" height="828.5" rx="20" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="40" y="50" font-size="25" font-weight="700" fill="#0f172a" text-anchor="start">Un agent dans son conteneur</text>
+<text x="40" y="74" font-size="14" font-weight="400" fill="#475569" text-anchor="start">Cycle d'une tâche de dev (la review est identique, en lecture seule) et ce qui isole l'agent</text>
+<rect x="40" y="100" width="330" height="625" rx="18" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+<text x="60" y="128" font-size="12.5" font-weight="700" fill="#1e3a8a" text-anchor="start">SERVEUR (hors du conteneur)</text>
+<line x1="78" y1="182" x2="78" y2="240" stroke="#3b82f6" stroke-width="2"/>
+<circle cx="78" cy="165" r="15" fill="#3b82f6"/>
+<text x="78" y="170" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+<text x="106" y="163" font-size="14" font-weight="700" fill="#1e3a8a" text-anchor="start">Prépare le dossier de travail</text>
+<text x="106" y="182" font-size="12" font-weight="400" fill="#475569" text-anchor="start">copie du dépôt à la bonne version</text>
+<line x1="78" y1="274" x2="78" y2="332" stroke="#3b82f6" stroke-width="2"/>
+<circle cx="78" cy="257" r="15" fill="#3b82f6"/>
+<text x="78" y="262" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+<text x="106" y="255" font-size="14" font-weight="700" fill="#1e3a8a" text-anchor="start">Lance le conteneur jetable</text>
+<text x="106" y="274" font-size="12" font-weight="400" fill="#475569" text-anchor="start">image du projet, limites ci-contre</text>
+<line x1="78" y1="366" x2="78" y2="424" stroke="#3b82f6" stroke-width="2"/>
+<circle cx="78" cy="349" r="15" fill="#3b82f6"/>
+<text x="78" y="354" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+<text x="106" y="347" font-size="14" font-weight="700" fill="#1e3a8a" text-anchor="start">Suit l'agent en direct</text>
+<text x="106" y="366" font-size="12" font-weight="400" fill="#475569" text-anchor="start">journal affiché dans l'interface</text>
+<line x1="78" y1="458" x2="78" y2="516" stroke="#3b82f6" stroke-width="2"/>
+<circle cx="78" cy="441" r="15" fill="#3b82f6"/>
+<text x="78" y="446" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+<text x="106" y="439" font-size="14" font-weight="700" fill="#1e3a8a" text-anchor="start">Contrôle ce qu'il a produit</text>
+<text x="106" y="458" font-size="12" font-weight="400" fill="#475569" text-anchor="start">fichiers, secrets, branche autorisée</text>
+<line x1="78" y1="550" x2="78" y2="608" stroke="#3b82f6" stroke-width="2"/>
+<circle cx="78" cy="533" r="15" fill="#3b82f6"/>
+<text x="78" y="538" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+<text x="106" y="531" font-size="14" font-weight="700" fill="#1e3a8a" text-anchor="start">Commit, push, demande de fusion</text>
+<text x="106" y="550" font-size="12" font-weight="400" fill="#475569" text-anchor="start">avec le jeton de forge de la personne</text>
+<circle cx="78" cy="625" r="15" fill="#3b82f6"/>
+<text x="78" y="630" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+<text x="106" y="623" font-size="14" font-weight="700" fill="#1e3a8a" text-anchor="start">Supprime le conteneur</text>
+<text x="106" y="642" font-size="12" font-weight="400" fill="#475569" text-anchor="start">les identifiants transmis disparaissent</text>
+<path d="M370 257 L440 257" fill="none" stroke="#475569" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#arr)"/>
+<text x="405" y="243" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">docker run</text>
+<path d="M440 353 L370 353" fill="none" stroke="#475569" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#arr)"/>
+<text x="405" y="339" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" paint-order="stroke" stroke="#f8fafc" stroke-width="5" stroke-linejoin="round">rapport</text>
+<rect x="440" y="100" width="360" height="625" rx="18" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+<text x="460" y="128" font-size="12.5" font-weight="700" fill="#065f46" text-anchor="start">CONTENEUR D'AGENT (jetable)</text>
+<rect x="460" y="150" width="320" height="100" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="620" y="177" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">CLI Claude Code</text>
+<text x="620" y="200" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">lit, cherche et modifie les fichiers</text>
+<text x="620" y="219" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">lance seulement les commandes autorisées</text>
+<text x="620" y="238" font-size="12.5" font-weight="400" fill="#475569" text-anchor="middle">ne fait ni commit ni push</text>
+<rect x="460" y="268" width="320" height="70" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.75"/>
+<text x="620" y="295" font-size="15" font-weight="700" fill="#78350f" text-anchor="middle">Dossier de travail (/work)</text>
+<text x="620" y="318" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">le seul dossier de la machine visible</text>
+<rect x="460" y="356" width="320" height="70" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="620" y="383" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle">/tmp et dossier personnel</text>
+<text x="620" y="406" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="middle">en mémoire, 256 Mo chacun, perdus à la fin</text>
+<rect x="460" y="444" width="320" height="262" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.75"/>
+<text x="478" y="472" font-size="15" font-weight="700" fill="#1e293b" text-anchor="start">Limites du conteneur (par défaut)</text>
+<circle cx="482" cy="496" r="2.6" fill="#cbd5e1"/>
+<text x="494" y="500" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">Système de fichiers en lecture seule</text>
+<circle cx="482" cy="520" r="2.6" fill="#cbd5e1"/>
+<text x="494" y="524" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">Aucune capacité Linux</text>
+<circle cx="482" cy="544" r="2.6" fill="#cbd5e1"/>
+<text x="494" y="548" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">Pas d'élévation de droits</text>
+<circle cx="482" cy="568" r="2.6" fill="#cbd5e1"/>
+<text x="494" y="572" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">Mémoire plafonnée, sans swap (1,5 Go)</text>
+<circle cx="482" cy="592" r="2.6" fill="#cbd5e1"/>
+<text x="494" y="596" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">1 processeur, 256 processus au plus</text>
+<circle cx="482" cy="616" r="2.6" fill="#cbd5e1"/>
+<text x="494" y="620" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">Utilisateur sans droits</text>
+<circle cx="482" cy="640" r="2.6" fill="#cbd5e1"/>
+<text x="494" y="644" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">Pas de Docker à l'intérieur</text>
+<circle cx="482" cy="664" r="2.6" fill="#cbd5e1"/>
+<text x="494" y="668" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">Réseau sortant permis (filtre à venir)</text>
+<rect x="860" y="100" width="300" height="240" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="1.75"/>
+<text x="878" y="128" font-size="15" font-weight="700" fill="#065f46" text-anchor="start">Ce que le conteneur reçoit</text>
+<circle cx="882" cy="152" r="2.6" fill="#10b981"/>
+<text x="894" y="156" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">le dossier de travail de la tâche</text>
+<circle cx="882" cy="179" r="2.6" fill="#10b981"/>
+<text x="894" y="183" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">les identifiants Claude de la</text>
+<text x="894" y="202" font-size="12.5" font-weight="400" fill="#475569" text-anchor="start">personne, en variable d'environ-</text>
+<text x="894" y="221" font-size="12.5" font-weight="400" fill="#475569" text-anchor="start">nement (jamais dans les arguments)</text>
+<circle cx="882" cy="244" r="2.6" fill="#10b981"/>
+<text x="894" y="248" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">les consignes et le ticket,</text>
+<text x="894" y="267" font-size="12.5" font-weight="400" fill="#475569" text-anchor="start">balisés comme données non fiables</text>
+<rect x="860" y="360" width="300" height="365" rx="12" fill="#fef2f2" stroke="#ef4444" stroke-width="1.75"/>
+<text x="878" y="388" font-size="15" font-weight="700" fill="#7f1d1d" text-anchor="start">Hors de portée de l'agent</text>
+<circle cx="882" cy="412" r="2.6" fill="#ef4444"/>
+<text x="894" y="416" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">la base de données</text>
+<circle cx="882" cy="440" r="2.6" fill="#ef4444"/>
+<text x="894" y="444" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">la clé maître et le coffre à secrets</text>
+<circle cx="882" cy="468" r="2.6" fill="#ef4444"/>
+<text x="894" y="472" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">les jetons de forge</text>
+<circle cx="882" cy="496" r="2.6" fill="#ef4444"/>
+<text x="894" y="500" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">les dossiers des autres personnes</text>
+<circle cx="882" cy="524" r="2.6" fill="#ef4444"/>
+<text x="894" y="528" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">l'environnement du serveur</text>
+<circle cx="882" cy="552" r="2.6" fill="#ef4444"/>
+<text x="894" y="556" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">la session Claude de la machine</text>
+<circle cx="882" cy="580" r="2.6" fill="#ef4444"/>
+<text x="894" y="584" font-size="12.5" font-weight="400" fill="#0f172a" text-anchor="start">les réglages du dépôt analysé :</text>
+<text x="894" y="604" font-size="12.5" font-weight="400" fill="#475569" text-anchor="start">CLAUDE.md, hooks, plugins, MCP</text>
+<text x="894" y="624" font-size="12.5" font-weight="400" fill="#475569" text-anchor="start">(CLI en mode sécurisé)</text>
+<path d="M860 215 L800 215" fill="none" stroke="#475569" stroke-width="2.2" stroke-linejoin="round" stroke-dasharray="7 5" marker-end="url(#arr)"/>
+<line x1="800" y1="540" x2="860" y2="540" stroke="#ef4444" stroke-width="2.2" stroke-dasharray="7 5"/>
+<circle cx="830" cy="540" r="11" fill="#ef4444"/>
+<text x="830" y="545" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">×</text>
+<rect x="40" y="748" width="1120" height="38" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="600" y="772" font-size="13.5" font-weight="600" fill="#1e293b" text-anchor="middle">L'agent propose, le code décide : contrôles, commit, push et demande de fusion sont faits par le serveur, jamais par l'agent.</text>
+</svg>
