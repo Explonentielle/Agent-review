@@ -31,6 +31,7 @@ export const ROUTE_LEVELS: Readonly<Record<string, Level>> = {
   "GET /api/tasks/:id": "read",
   "GET /api/tasks/:id/events": "read",
   "GET /api/tasks/:id/piece": "read",
+  "GET /api/tasks/:id/diff": "read",
   "GET /api/tasks/:id/attachments": "read",
   "GET /api/pieces": "read",
   "GET /api/reviews": "read",
@@ -52,6 +53,7 @@ export const ROUTE_LEVELS: Readonly<Record<string, Level>> = {
 
   // Agir : membre et administrateur
   "GET /api/secrets": "act",
+  "GET /api/notify": "act",
   "GET /api/claude/status": "act",
   "POST /api/claude/check": "act",
   "GET /api/terminal": "act",
@@ -61,6 +63,9 @@ export const ROUTE_LEVELS: Readonly<Record<string, Level>> = {
   "POST /api/terminal/stop": "act",
   "POST /api/secrets/:name": "act",
   "POST /api/secrets/:name/delete": "act",
+  "POST /api/notify/webhook": "act",
+  "POST /api/notify/webhook/delete": "act",
+  "POST /api/notify/test": "act",
   "POST /api/tasks": "act",
   "POST /api/tasks/:id/followup": "act",
   "POST /api/tasks/:id/fix-review": "act",
@@ -83,6 +88,7 @@ export const ROUTE_LEVELS: Readonly<Record<string, Level>> = {
   "POST /api/plans/:id/items": "act",
   "POST /api/plans/:id/validate": "act",
   "POST /api/plans/:id/schedule": "act",
+  "POST /api/plans/:id/wait-for-merge": "act",
   "POST /api/plans/:id/reorder": "act",
   "POST /api/plans/:id/pause": "act",
   "POST /api/plans/:id/resume": "act",

@@ -172,6 +172,31 @@ describe("API : relire puis fusionner la pièce de l'agent", () => {
     expect((await h.audit.list())[0]!.outcome).toBe("error"); // le refus est tracé aussi
   });
 
+  it("le code de la pièce : les fichiers de la MR avec leurs lignes, même après la fusion ; une tâche sans MR ou inconnue est refusée", async () => {
+    const app = await server();
+    const code = (id = taskId) => app.inject({ method: "GET", url: `/api/tasks/${id}/diff` });
+    h.connector.diffs.set(mrIid, [
+      { oldPath: "src/a.php", newPath: "src/a.php", isNew: false, isDeleted: false, isRenamed: false, diff: "@@ -1,2 +1,3 @@\n ligne\n-ancienne\n+nouvelle\n+autre" },
+      { oldPath: "nouveau.php", newPath: "nouveau.php", isNew: true, isDeleted: false, isRenamed: false, diff: "@@ -0,0 +1 @@\n+<?php" },
+    ]);
+
+    const res = await code();
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ files: Array<{ path: string; change: string; added: number; removed: number; diff: string }> }>();
+    expect(res.json()).toMatchObject({ taskId, mrIid, totalFiles: 2, omittedFiles: 0, totalAdded: 3, totalRemoved: 1 });
+    expect(body.files.map((f) => [f.path, f.change, f.added, f.removed])).toEqual([["src/a.php", "modified", 2, 1], ["nouveau.php", "added", 1, 0]]);
+    expect(body.files[0]!.diff).toContain("+nouvelle");
+
+    // Fusionnée : la MR n'est plus à relire, mais son code reste lisible
+    h.connector.changeRequests.set(mrIid, { ...h.connector.changeRequests.get(mrIid)!, state: "merged" });
+    expect((await code()).statusCode).toBe(200);
+
+    const noMr = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 700, issueTitle: "x", issueUrl: "u", extraInstructions: null });
+    await h.tasks.update(noMr, { status: "error" });
+    expect((await code(noMr)).statusCode).toBe(400);
+    expect((await code(9999)).statusCode).toBe(404);
+  });
+
   it("une tâche sans MR ne peut être ni relue ni fusionnée ; tâche inconnue : 404 ; l'en-tête anti-CSRF est exigé", async () => {
     const app = await server();
     const noMr = await h.tasks.insert({ projectId: 1, projectPath: "groupe/projet", issueIid: 700, issueTitle: "x", issueUrl: "u", extraInstructions: null });

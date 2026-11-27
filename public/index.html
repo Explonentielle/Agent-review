@@ -410,6 +410,28 @@
     .page-inner { padding: 16px; }
     .crumbs .btn-link { margin-left: 0; }
   }
+
+  /* Code d'une MR (diff.js) */
+  .cv-head { margin: 0 0 8px; }
+  .cv-plus { color: var(--green); }
+  .cv-minus { color: var(--red); }
+  .cv-file { border: 1px solid var(--border); border-radius: 8px; margin: 8px 0; background: var(--surface); }
+  .cv-file > summary { cursor: pointer; padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .cv-file[open] > summary { border-bottom: 1px solid var(--border); }
+  .cv-stat { margin-left: auto; font-size: 12.5px; }
+  .cv-file .note { padding: 0 12px; }
+  .cv-scroll { overflow-x: auto; }
+  .cv-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace; font-size: 12.5px; line-height: 1.5; }
+  .cv-table td { padding: 0 8px; vertical-align: top; }
+  .cv-no { width: 1%; min-width: 44px; text-align: right; color: var(--muted); user-select: none; white-space: nowrap; }
+  .cv-sign { width: 1%; color: var(--muted); user-select: none; }
+  .cv-code { white-space: pre; }
+  .cv-add { background: var(--green-soft); }
+  .cv-add .cv-sign { color: var(--green); }
+  .cv-del { background: var(--red-soft); }
+  .cv-del .cv-sign { color: var(--red); }
+  .cv-hunk td { background: var(--accent-soft); color: var(--accent-text); padding: 2px 8px; }
+  .cv-meta td { color: var(--muted); font-style: italic; }
 </style>
 </head>
 <body>
@@ -500,6 +522,7 @@
 </dialog>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <script src="/scribe.js"></script>
+<script src="/diff.js"></script>
 <script src="/plans.js"></script>
 <script src="/team.js"></script>
 
@@ -1081,6 +1104,8 @@ async function showTask(id) {
       ` : ""}
       ${res && res.status === "blocked" ? `<section class="block"><h2>Ce que l'agent a compris</h2><div class="panel md">${md(res.summary)}</div></section>` : ""}
 
+      ${t.mr_iid && ["mr_created", "mr_updated"].includes(t.status) && !live ? `<section class="block"><h2>Code généré</h2><div class="panel" id="code-box"><p class="note">Le code de la MR, lu chez la forge à la demande (lecture seule).</p><button class="btn" data-act="code-load" data-id="${t.id}">Afficher le code</button></div></section>` : ""}
+
       ${t.mr_iid && ["mr_created", "mr_updated"].includes(t.status) && !live ? `<section class="block"><h2>Relecture et fusion</h2><div class="panel" id="piece-box"><div class="note">Chargement…</div></div></section>` : ""}
 
       ${t.mr_iid && t.branch && !live ? `<section class="block"><h2>Reprendre avec des consignes</h2><div class="panel">
@@ -1110,6 +1135,26 @@ async function showTask(id) {
   loadPiece(id);
   loadTaskAttachments(id);
   mountFollowupAttachments(id);
+}
+
+/**
+ * Affiche dans « Code généré » le code de la MR de la tâche, lu chez la forge (diff.js). Appelée par le bouton, jamais d'elle-même : chaque lecture est
+ * un appel à la forge.
+ * @param {number|string} taskId Identifiant de la tâche affichée.
+ * @returns {Promise<void>}
+ */
+async function loadCode(taskId) {
+  const box = document.getElementById("code-box");
+  if (!box) return;
+  box.innerHTML = `<p class="note">Lecture du code chez la forge…</p>`;
+  try {
+    const data = await CodeView.load(taskId);
+    if (String(state.taskId) !== String(taskId)) return;
+    box.innerHTML = CodeView.html(data);
+  } catch (err) {
+    if (String(state.taskId) !== String(taskId)) return;
+    box.innerHTML = `<p class="note">Impossible de lire le code : ${esc(err.message)}</p><button class="btn" data-act="code-load" data-id="${esc(taskId)}">Réessayer</button>`;
+  }
 }
 
 /** Fichiers joints à la tâche (captures, maquettes, données que l'agent a reçus), sous le titre. */
@@ -1636,9 +1681,10 @@ async function loadSettings() {
   state.prefillSource = null;
   try {
     // L'équipe et le journal sont réservés aux administrateurs : pour les autres, ces appels répondent 403 et les sections n'apparaissent pas
-    const [s, projects, costs, secrets, me, audit, runtime, team] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), api("/api/me").catch(() => null), api("/api/audit?limit=30").catch(() => null), api("/api/agent-runtime").catch(() => null), api("/api/team").catch(() => null), refreshHeader()]);
+    const [s, projects, costs, secrets, me, audit, runtime, team, notify] = await Promise.all([api("/api/settings"), api("/api/projects"), api("/api/costs").catch(() => null), api("/api/secrets").catch(() => null), api("/api/me").catch(() => null), api("/api/audit?limit=30").catch(() => null), api("/api/agent-runtime").catch(() => null), api("/api/team").catch(() => null), api("/api/notify").catch(() => null), refreshHeader()]);
     settingsData = s;
     state.runtime = runtime;
+    state.notify = notify;
     state.me = me;
     state.team = team;
     state.audit = audit;
@@ -1757,6 +1803,49 @@ async function secretAction(act, name) {
       if (act === "secret-save") claudeCheck(true); // sans attendre : le test dure quelques secondes, le formulaire reste utilisable
       else { state.claudeCheck = null; const el = document.getElementById("claude-check-result"); if (el) el.innerHTML = ""; }
     }
+  } catch (err) { toast(err.message, true); }
+}
+
+/** Section « Notifications » : le webhook Discord ou Slack qui reçoit les messages de l'outil (adresse chiffrée, jamais réaffichée), avec un bouton d'essai. */
+function notifySection() {
+  const n = state.notify;
+  if (!n) return "";
+  const service = n.service === "discord" ? "Discord" : n.service === "slack" ? "Slack" : "";
+  const status = n.configured ? pill("green", `${service ? `${service} : ` : ""}enregistré, chiffré${n.updatedAt ? ` le ${esc(n.updatedAt.slice(0, 10))}` : ""}`) : pill("orange", "non défini");
+  return `<section class="card-section">
+    <h2>Notifications</h2>
+    <p class="desc">L'outil te prévient dans un salon Discord ou Slack quand un plan s'arrête en échec ou se termine, quand une MR attend ta fusion pour que le plan continue, et quand une review demande ton analyse. L'adresse du webhook est un secret : elle est chiffrée en base et jamais réaffichée. Au plus 20 messages par heure.</p>
+    <div class="field"><span>Webhook ${status}</span>
+      <div class="secret-form"><input type="password" autocomplete="new-password" placeholder="${n.configured ? "Nouvelle adresse (remplace l'actuelle)" : "Coller l'adresse du webhook"}" data-notify-input>
+        <button type="button" class="btn sm primary" data-act="notify-save">Enregistrer</button>
+        ${n.configured ? `<button type="button" class="btn sm" data-act="notify-test">Envoyer un message de test</button><button type="button" class="btn sm ghost" data-act="notify-delete">Supprimer</button>` : ""}</div>
+      <small>Discord : Paramètres du salon > Intégrations > Webhooks > Nouveau webhook, puis « Copier l'URL du webhook ». Slack : une application avec « Incoming Webhooks », puis l'adresse en https://hooks.slack.com/services/... . Seules ces deux adresses sont acceptées.</small></div>
+  </section>`;
+}
+
+/**
+ * Enregistre, supprime ou essaie le webhook de notification, puis redessine sa section sans toucher aux autres champs du formulaire.
+ * @param {string} act Action demandée : `notify-save`, `notify-delete` ou `notify-test`.
+ * @returns {Promise<void>}
+ */
+async function notifyAction(act) {
+  try {
+    if (act === "notify-save") {
+      const value = document.querySelector("[data-notify-input]")?.value.trim();
+      if (!value) return toast("Colle d'abord l'adresse du webhook.", true);
+      await api("/api/notify/webhook", { value });
+      toast("Webhook enregistré, chiffré. Envoie un message de test pour vérifier.");
+    } else if (act === "notify-delete") {
+      if (!(await ask({ title: "Supprimer le webhook ?", html: "<p>Les notifications s'arrêtent. Le webhook reste valide chez Discord ou Slack : supprime-le là-bas s'il a fuité.</p>", okLabel: "Supprimer" }))) return;
+      await api("/api/notify/webhook/delete", {});
+      toast("Webhook supprimé.");
+    } else {
+      await api("/api/notify/test", {});
+      return toast("Message de test envoyé : regarde ton salon.");
+    }
+    state.notify = await api("/api/notify");
+    const block = document.getElementById("notify-block");
+    if (block) block.innerHTML = notifySection();
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1938,6 +2027,7 @@ function renderSettings() {
         ${claudeBlock()}
         ${sessionBlock()}
       </section>
+      <div id="notify-block">${notifySection()}</div>
       </fieldset>
 
       <fieldset class="zone" ${lockedFor("admin")}>
@@ -2300,6 +2390,7 @@ document.addEventListener("click", async (e) => {
   const act = t.dataset.act;
   if (act === "refresh-tickets") return loadTickets(true);
   if (act === "dev-back") return go("#dev");
+  if (act === "code-load") return loadCode(t.dataset.id);
   if (act === "rev-back") return go("#reviews");
   if (act === "project-add") return openProjectEditor(null);
   if (act === "project-cancel") { editingProject = null; document.getElementById("project-editor").innerHTML = ""; return; }
@@ -2315,6 +2406,7 @@ document.addEventListener("click", async (e) => {
   if (act === "term-stop") return stopTerminal();
   if (act === "claude-check") return claudeCheck(false);
   if (act === "secret-save" || act === "secret-delete") return secretAction(act, t.dataset.name);
+  if (act === "notify-save" || act === "notify-delete" || act === "notify-test") return notifyAction(act);
   if (act === "runtime-check") return runRuntimeCheck(t);
   if (act === "game-toggle") return toggleGame(t.checked);
   if (act === "logout") {
@@ -2391,6 +2483,10 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.matches?.("[data-secret-input]")) {
     e.preventDefault();
     return document.querySelector(`[data-act="secret-save"][data-name="${e.target.dataset.secretInput}"]`)?.click();
+  }
+  if (e.key === "Enter" && e.target.matches?.("[data-notify-input]")) {
+    e.preventDefault();
+    return document.querySelector('[data-act="notify-save"]')?.click();
   }
   const card = e.target.closest?.(".card[data-task], .card[data-review]");
   if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); card.click(); }

@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentRequest, AgentRunner } from "../agent/runner.js";
+import type { ChangeRequest, ChangeRequestState } from "../connectors/types.js";
 import type { DevTaskStatus } from "../db/devTasks.js";
+import type { NotifyEvent } from "../notify/webhook.js";
 import { loadSystemPrompt } from "../prompts.js";
 import { buildServer } from "../server/app.js";
 import { createHarness, type Harness } from "../testing/harness.js";
@@ -9,7 +11,7 @@ import { PlanInputError } from "./errors.js";
 import type { PlanDeps } from "./deps.js";
 import { buildPlanPrompt } from "./prompt.js";
 import { parseWhen, toDbTime, toIso } from "./schedule.js";
-import { tickPlans } from "./scheduler.js";
+import { MERGE_CHECK_MS, resetMergeChecks, tickPlans } from "./scheduler.js";
 
 describe("dates de lancement", () => {
   const now = new Date("2026-12-01T10:00:00Z");
@@ -82,7 +84,8 @@ describe("orchestrateur de plans", () => {
       return { structured, sessionId: null, costUsd: 0.01, numTurns: 1 };
     },
   };
-  const deps = (): PlanDeps => ({ config: h.config, forges: h.forges, settings: h.settings, costs: h.costs, tasks: h.tasks, plans: h.plans, enqueueDev: (id) => void enqueued.push(id), runner });
+  let notified: NotifyEvent[] = [];
+  const deps = (): PlanDeps => ({ config: h.config, forges: h.forges, settings: h.settings, costs: h.costs, tasks: h.tasks, plans: h.plans, enqueueDev: (id) => void enqueued.push(id), runner, notify: (event) => void notified.push(event) });
 
   async function server(role: "admin" | "viewer" = "admin") {
     const app = buildServer({
@@ -107,13 +110,23 @@ describe("orchestrateur de plans", () => {
   }
   const finish = (taskId: number, status: DevTaskStatus, error?: string) => h.tasks.update(taskId, { status, ...(error ? { error } : {}) });
   const detail = async (app: FastifyInstance, id: number) => (await get(app, `/api/plans/${id}`)).json();
+  const statuses = (d: { items: Array<{ status: string }> }) => d.items.map((i) => i.status);
+  /** Ouvre une MR chez le faux connecteur pour la tâche d'un ticket du plan, et passe la tâche en « MR créée ». */
+  async function openMrFor(taskId: number, targetBranch = "develop"): Promise<ChangeRequest> {
+    const mr = await h.connector.createChangeRequest(1, { sourceBranch: `feature/${taskId}`, targetBranch, title: "Draft: ticket", description: "" });
+    await h.tasks.update(taskId, { status: "mr_created", mr_iid: mr.iid, mr_url: mr.url });
+    return mr;
+  }
+  const setMrState = (mr: ChangeRequest, state: ChangeRequestState) => void h.connector.changeRequests.set(mr.iid, { ...mr, state });
 
   beforeEach(async () => {
+    resetMergeChecks();
     h = await createHarness();
     await h.settings.save({ ...(await h.settings.get()), workflow: { ...(await h.settings.get()).workflow, todoLabels: ["Statut::A traiter"] } });
     seen = [];
     answers = [];
     enqueued = [];
+    notified = [];
   });
   afterEach(async () => {
     for (const app of apps.splice(0)) await app.close();
@@ -425,5 +438,154 @@ describe("orchestrateur de plans", () => {
     expect(h.connector.createdTickets).toEqual([]);
     expect((await get(app, `/api/plans/${id}`)).statusCode).toBe(200);
     expect((await post(app, `/api/plans/${id}/cancel`)).statusCode).toBe(200);
+  });
+
+  describe("attendre la fusion de la MR avant le ticket suivant", () => {
+    const t0 = new Date("2030-01-01T10:00:00Z");
+
+    it("par défaut, le ticket suivant ne part qu'une fois la MR du précédent fusionnée, sans harceler la forge", async () => {
+      const app = await server();
+      const id = await planInReview(app);
+      await post(app, `/api/plans/${id}/validate`, { confirm: true });
+      expect((await detail(app, id)).plan.waitForMerge).toBe(true);
+      const mr = await openMrFor(enqueued[0]!);
+
+      await tickPlans(deps(), t0);
+      let d = await detail(app, id);
+      expect(enqueued).toHaveLength(1);
+      expect(d.plan.status).toBe("running"); // l'attente n'est pas un échec
+      expect(d.plan.error).toContain(`MR !${mr.iid}`);
+      expect(d.plan.error).toContain("Premier ticket");
+      expect(statuses(d)).toEqual(["done", "pending"]);
+      // La personne est prévenue une seule fois : c'est à elle de fusionner
+      expect(notified).toHaveLength(1);
+      expect(notified[0]).toMatchObject({ kind: "plan_waiting_merge", url: mr.url });
+      expect(notified[0]!.detail).toContain("Second ticket");
+
+      // Fusionnée sur la forge : le plan ne le voit qu'au prochain contrôle, au plus tôt MERGE_CHECK_MS après le précédent
+      setMrState(mr, "merged");
+      await tickPlans(deps(), new Date(t0.getTime() + 10_000));
+      expect(enqueued).toHaveLength(1);
+      await tickPlans(deps(), new Date(t0.getTime() + MERGE_CHECK_MS + 1_000));
+      expect(enqueued).toHaveLength(2);
+      d = await detail(app, id);
+      expect(d.plan.error).toBeNull();
+      expect(statuses(d)).toEqual(["done", "running"]);
+      expect(notified).toHaveLength(1);
+    });
+
+    it("une MR fermée sans fusion met son ticket en échec et arrête le plan ; écarter ce ticket libère le suivant", async () => {
+      const app = await server();
+      const id = await planInReview(app);
+      await post(app, `/api/plans/${id}/validate`, { confirm: true });
+      setMrState(await openMrFor(enqueued[0]!), "closed");
+
+      await tickPlans(deps(), t0);
+      let d = await detail(app, id);
+      expect(statuses(d)).toEqual(["failed", "pending"]);
+      expect(d.items[0].error).toContain("fermée sans être fusionnée");
+      await tickPlans(deps(), new Date(t0.getTime() + 1_000));
+      d = await detail(app, id);
+      expect(d.plan.status).toBe("failed");
+      expect(enqueued).toHaveLength(1);
+
+      expect((await post(app, `/api/plans/${id}/items/${d.items[0].id}/skip`)).statusCode).toBe(200);
+      expect((await post(app, `/api/plans/${id}/resume`)).statusCode).toBe(200);
+      expect(enqueued).toHaveLength(2);
+      expect(statuses(await detail(app, id))).toEqual(["skipped", "running"]);
+    });
+
+    it("prévient la personne quand un plan s'arrête en échec puis quand un autre se termine, une seule fois chacun", async () => {
+      const app = await server();
+      const failing = await planInReview(app);
+      await post(app, `/api/plans/${failing}/validate`, { confirm: true, waitForMerge: false });
+      await finish(enqueued[0]!, "error", "Les tests échouent");
+      await tickPlans(deps(), t0);
+      await tickPlans(deps(), new Date(t0.getTime() + 1_000));
+      expect(notified.map((e) => e.kind)).toEqual(["plan_failed"]);
+      expect(notified[0]!.title).toContain("Plan en échec");
+      expect(notified[0]!.detail).toContain("Les tests échouent");
+      expect((await post(app, `/api/plans/${failing}/cancel`)).statusCode).toBe(200);
+
+      notified = [];
+      enqueued = [];
+      const finished = await planInReview(app);
+      await post(app, `/api/plans/${finished}/validate`, { confirm: true, waitForMerge: false });
+      await finish(enqueued[0]!, "mr_created");
+      await tickPlans(deps(), t0);
+      await finish(enqueued[1]!, "mr_created");
+      await tickPlans(deps(), new Date(t0.getTime() + 1_000));
+      await tickPlans(deps(), new Date(t0.getTime() + 2_000));
+      expect(notified.map((e) => e.kind)).toEqual(["plan_done"]);
+      expect(notified[0]!.detail).toContain("2 tickets sur 2 traités");
+    });
+
+    it("sans l'option, le ticket suivant part dès que la MR est ouverte, sans interroger la forge", async () => {
+      const app = await server();
+      const id = await planInReview(app);
+      await post(app, `/api/plans/${id}/validate`, { confirm: true, waitForMerge: false });
+      expect((await detail(app, id)).plan.waitForMerge).toBe(false);
+      // MR inconnue du faux connecteur : une question à la forge échouerait
+      await h.tasks.update(enqueued[0]!, { status: "mr_created", mr_iid: 4242, mr_url: "https://forge.example/mr/4242" });
+
+      await tickPlans(deps(), t0);
+      expect(enqueued).toHaveLength(2);
+    });
+
+    it("une MR qui ne vise pas la branche d'où partent les tickets laisse le plan en attente, et couper l'option le libère", async () => {
+      const app = await server();
+      const id = await planInReview(app);
+      await post(app, `/api/plans/${id}/validate`, { confirm: true });
+      setMrState(await openMrFor(enqueued[0]!, "main"), "merged"); // les tickets partent de « develop » (réglages du projet)
+
+      await tickPlans(deps(), t0);
+      let d = await detail(app, id);
+      expect(enqueued).toHaveLength(1);
+      expect(d.plan.error).toContain("vise « main »");
+      expect(d.plan.error).toContain("« develop »");
+
+      expect((await post(app, `/api/plans/${id}/wait-for-merge`, { enabled: false })).statusCode).toBe(200);
+      d = await detail(app, id);
+      expect(d.plan).toMatchObject({ waitForMerge: false, status: "running", error: null });
+      expect(enqueued).toHaveLength(2);
+    });
+
+    it("une forge qui ne répond pas ne fait pas échouer le plan : il attend, puis repart au contrôle suivant", async () => {
+      const app = await server();
+      const id = await planInReview(app);
+      await post(app, `/api/plans/${id}/validate`, { confirm: true });
+      const mr = await openMrFor(enqueued[0]!);
+      await h.tasks.update(enqueued[0]!, { mr_iid: 4242 }); // MR inconnue du faux connecteur : sa lecture lève une erreur
+
+      await tickPlans(deps(), t0);
+      const d = await detail(app, id);
+      expect(d.plan.status).toBe("running");
+      expect(d.plan.error).toContain("la forge n'a pas répondu");
+      expect(enqueued).toHaveLength(1);
+
+      h.connector.changeRequests.set(4242, { ...mr, iid: 4242, state: "merged" });
+      await tickPlans(deps(), new Date(t0.getTime() + MERGE_CHECK_MS + 1_000));
+      expect(enqueued).toHaveLength(2);
+    });
+
+    it("l'option se règle à la validation et pendant l'exécution ; une valeur invalide, un lecteur ou un plan terminé sont refusés", async () => {
+      const app = await server();
+      const id = await planInReview(app);
+      expect((await post(app, `/api/plans/${id}/validate`, { confirm: true, waitForMerge: "oui" })).statusCode).toBe(400);
+      expect(h.connector.createdTickets).toEqual([]);
+
+      expect((await post(app, `/api/plans/${id}/wait-for-merge`, { enabled: false })).statusCode).toBe(200); // possible dès la relecture
+      expect((await detail(app, id)).plan.waitForMerge).toBe(false);
+      expect((await post(app, `/api/plans/${id}/wait-for-merge`, { enabled: "non" })).statusCode).toBe(400);
+      expect((await post(await server("viewer"), `/api/plans/${id}/wait-for-merge`, { enabled: true })).statusCode).toBe(403);
+
+      expect((await post(app, `/api/plans/${id}/validate`, { confirm: true })).statusCode).toBe(200);
+      expect((await detail(app, id)).plan.waitForMerge).toBe(false); // une validation sans le champ garde le choix
+      expect((await post(app, `/api/plans/${id}/wait-for-merge`, { enabled: true })).statusCode).toBe(200);
+      expect((await detail(app, id)).plan.waitForMerge).toBe(true);
+
+      expect((await post(app, `/api/plans/${id}/cancel`)).statusCode).toBe(200);
+      expect((await post(app, `/api/plans/${id}/wait-for-merge`, { enabled: false })).statusCode).toBe(409);
+    });
   });
 });

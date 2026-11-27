@@ -4,6 +4,7 @@ import type { ForgeRegistry } from "../connectors/registry.js";
 import type { CostRepo } from "../db/costs.js";
 import type { DevTaskRepo } from "../db/devTasks.js";
 import type { PlanRepo } from "../db/plans.js";
+import type { NotifyEvent } from "../notify/webhook.js";
 import type { SettingsStore } from "../settings/store.js";
 
 /** Ce que l'orchestrateur emprunte à la personne servie : ses dépôts, ses connexions aux forges et sa file de tâches de dev. */
@@ -19,6 +20,8 @@ export interface PlanDeps {
   enqueueDev: (taskId: number) => void;
   /** Exécuteur d'agent imposé (tests). Absent : celui des réglages de la personne. */
   runner?: AgentRunner | undefined;
+  /** Prévient la personne (webhook) quand un plan s'arrête, se termine ou attend une fusion. Absent : aucune notification. */
+  notify?: ((event: NotifyEvent) => void) | undefined;
 }
 
 /** Tickets d'un plan au plus : au-delà, la validation créerait trop de tickets d'un coup. */

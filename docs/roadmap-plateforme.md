@@ -77,7 +77,7 @@ Plan d'exécution de `docs/vision-plateforme.md` (architecture, décisions) et `
 | F4 | Interne | MR liée à un ticket interne | M | F1, F3 | ⬜ |
 | G1 | Industrialisation | Isolation renforcée (gVisor ou Sysbox) | L | D2 | ⬜ |
 | G2 | Industrialisation | Supervision et alertes | M | C9 | ⬜ |
-| G3 | Industrialisation | Sauvegardes et restauration testées | M | C9 | ⬜ |
+| G3 | Industrialisation | Sauvegardes et restauration testées | M | C9 | 🟡 2026-11-27 minuteur quotidien préparé (`deploy/review-agent-backup.*`, jamais essayé) ; restauration validée sur le VPS lors du déploiement ; copie hors du VPS non faite |
 | G4 | Industrialisation | Évaluation de Coder et de Kubernetes | M | D2 | ⬜ |
 | G5 | Industrialisation | Notifications email, Slack, Teams | M | C4 | ⬜ |
 | G6 | Industrialisation | Export des données et suppression de compte | M | C4 | ⬜ |

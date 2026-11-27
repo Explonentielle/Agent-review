@@ -8,6 +8,7 @@ import type { ReviewRepo, ReviewRow } from "../db/reviews.js";
 import type { ForgeRegistry } from "../connectors/registry.js";
 import type { Ticket } from "../connectors/types.js";
 import { errorMessage, log } from "../logger.js";
+import type { NotifyEvent } from "../notify/webhook.js";
 import { loadSystemPrompt } from "../prompts.js";
 import { compileRules, type SettingsStore } from "../settings/store.js";
 import { buildReviewPrompt, countChangedLines, filterDiffs, findLinkedIssueIids } from "./context.js";
@@ -32,8 +33,17 @@ export interface PipelineDeps {
   forceShadow?: boolean;
   /** Exécuteur d'agent imposé (tests). Par défaut : celui qui correspond aux réglages. */
   runner?: AgentRunner;
+  /** Prévient la personne (webhook) quand une review demande son analyse. Absent : aucune notification (ligne de commande, tests). */
+  notify?: (event: NotifyEvent) => void;
 }
 
+/**
+ * Fait la review d'une MR : lit son code et son contexte, lance l'agent de review, enregistre le résultat et la décision, puis, selon le mode d'action,
+ * publie le commentaire ou approuve. Prévient la personne quand la review demande son analyse. Ne lève pas d'erreur : un échec est enregistré sur la review.
+ * @param reviewId Review à traiter.
+ * @param deps Dépôts, forges et réglages de la personne.
+ * @returns Rien.
+ */
 export async function runReview(reviewId: number, deps: PipelineDeps): Promise<void> {
   const { config, reviews } = deps;
   const row = await reviews.get(reviewId);
@@ -116,6 +126,9 @@ export async function runReview(reviewId: number, deps: PipelineDeps): Promise<v
       numTurns,
     });
     log.info("review.done", { reviewId, outcome: decision.outcome, reasons: decision.reasons, costUsd, numTurns });
+    if (decision.outcome === "needs_human") {
+      deps.notify?.({ kind: "review_needs_human", title: `Review à analyser : ${mr.title}`, detail: `${row.project_path} !${row.mr_iid}${decision.reasons.length ? ` : ${decision.reasons.join(" ; ")}` : ""}`, url: mr.url });
+    }
 
     if (decision.outcome === "auto_ok" && actionMode !== "shadow") {
       try {

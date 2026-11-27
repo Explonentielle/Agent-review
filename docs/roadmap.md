@@ -21,7 +21,7 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 11 | Review | Re-review : reprise du thread précédent et des réponses du dev | Moyen | Item 6 (logique existante dans l'outil d'origine) |
 | 12 | Publication | Commentaires inline positionnés sur les lignes du diff | Moyen | Item 6 |
 | 13 | Automatisation | Passage en mode `comment` puis `auto` (réglage du dashboard) | Faible (code) | Item 10 + accord de l'équipe |
-| 14 | Notifications | Alerte quand une review passe en `needs_human` (Discord DM / Windows) | Faible | Item 9 |
+| 14 | Notifications | Alerte quand une review passe en `needs_human` (Discord DM / Windows) | Faible | ✅ Fait (2026-11-27) par un webhook Discord ou Slack, voir l'item 51 ; pas de notification Windows |
 | 15 | Déclencheur | Filtrer sur le label du ticket `Statut::Validation technique` (optionnel) | Faible | Item 4 ; labels désormais réglables (item 27) |
 | 16 | Qualité | Coût par review affiché + budget journalier plafonné | Faible | Item 6 (coût déjà enregistré) |
 | 17 | Infra | Démarrage automatique avec la WSL (service systemd utilisateur) | Faible | Item 2 |
@@ -55,7 +55,11 @@ Convention : quand un item est fait, sa section reçoit un paragraphe **Impléme
 | 45 | Plateforme | Compte classique : inscription par email, mot de passe, mot de passe oublié, organisations créées par une personne, invitations envoyées par email (Resend) | Très élevé | ✅ Fait (2026-11-18), voir la section 45. Jamais essayé avec un vrai compte Resend ni dans un navigateur |
 | 46 | Plateforme | Tout en conteneurs : plus jamais d'agent ni de terminal sur la machine dès qu'il y a des comptes, et l'abonnement Claude conservé par un jeton `claude setup-token` par personne | Très élevé | ✅ Fait (2026-11-19), voir la section 46. Jamais essayé avec un vrai Docker sans root ni la vraie CLI avec le jeton |
 | 47 | Agent dev | Orchestrateur de plans : chat de cadrage, liste de tickets relue et validée, création à l'avance, exécution planifiée dans l'ordre, avancement, pause, annulation | Élevé | ✅ Fait (2026-11-23), voir la section 47. Tests écrits, non lancés ; jamais essayé avec un vrai agent ni une vraie forge |
-| 48 | Infra | Déploiement automatisé sur le VPS : script de déploiement, puis déclenchement automatique (minuteur ou CI/CD) | Moyen | Noté (2026-11-24), pas implémenté : attend le feu vert, voir la section 48 |
+| 48 | Infra | Déploiement automatisé sur le VPS : script de déploiement, puis déclenchement automatique (minuteur ou CI/CD) | Moyen | Piste 1 faite (2026-11-27) : `scripts/deploy.sh`, jamais essayé sur le VPS ; déclenchement automatique pas fait, voir la section 48 |
+| 49 | Plateforme | Essayer la connexion OAuth GitHub sur le VPS (test à faire par le propriétaire) | Faible | Noté (2026-11-27), reporté par le propriétaire : rien à coder, voir la section 49 |
+| 50 | Dashboard | Visualiseur de code : voir dans l'outil le code que l'agent a écrit (diff de la MR) | Faible | ✅ Fait (2026-11-27), voir la section 50. Jamais essayé avec une vraie forge ni dans un navigateur |
+| 51 | Notifications | Prévenir la personne par un webhook Discord ou Slack : plan en échec, plan terminé, MR à fusionner, review à analyser | Faible | ✅ Fait (2026-11-27), voir la section 51 (reprend l'item 14). Jamais essayé avec un vrai Discord ou Slack |
+| 52 | Validation | Essais réels du lot du 2026-11-27 (déploiement, sauvegarde nocturne, attente de fusion, visualiseur, notifications) et des reports (OAuth, review en conteneur) | Moyen | À faire par le propriétaire, voir la section 52 : rien n'est codé, tout est écrit et testé sans forge ni navigateur |
 
 ---
 
@@ -675,7 +679,7 @@ Demande : vérifier que créer un ticket, lancer l'agent dev, relire sa MR, corr
 - Le propriétaire déjà connecté par une forge et qui s'inscrit ensuite par email avec la même adresse obtient un compte distinct, pas la fusion avec le sien.
 - Un blocage de 10 essais par adresse peut être provoqué par un tiers qui connaît l'adresse : choix assumé (il dure 15 minutes).
 
-**Pas fait** : page « Mon compte » (changer de mot de passe ou d'adresse, ajouter un email à un compte de forge, lier une forge à un compte par email), quitter une organisation soi-même, supprimer une organisation, renvoyer une invitation en un clic, SSO d'entreprise (OIDC), authentification à deux facteurs, journal d'audit des actions d'administration.
+**Pas fait** : page « Mon compte » (changer de mot de passe ou d'adresse, ajouter un email à un compte de forge, lier une forge à un compte par email), supprimer une organisation (quitter une organisation soi-même est fait depuis : bouton « Quitter l'espace », Paramètres > Équipe), renvoyer une invitation en un clic, SSO d'entreprise (OIDC), authentification à deux facteurs, journal d'audit des actions d'administration.
 
 ### 46. Tout en conteneurs, et l'abonnement Claude conservé (2026-11-19)
 
@@ -722,10 +726,20 @@ Demande : vérifier que créer un ticket, lancer l'agent dev, relire sa MR, corr
 **Testé** : `src/orchestrator/orchestrator.test.ts` (dates, prompt, chat, validation, exécution dans l'ordre, échec, pause, annulation, planification, correction, reprise après refus de la forge, droits) et un test d'étanchéité à deux espaces (`src/db/isolation.test.ts`), écrits mais **non lancés** (aucune commande de test autorisée pendant le développement) : `npm run typecheck` et `npm test` restent à passer.
 **Pas testé** : un vrai agent (le chat et les tâches), une vraie forge, le tableau de bord dans un navigateur.
 **Limites connues**
-- Un ticket est « terminé » quand l'agent a ouvert sa MR Draft, pas quand elle est fusionnée : les tickets suivants partent de la branche de base du projet et ne voient pas le code des MR précédentes tant qu'elles ne sont pas fusionnées. À prévoir : attendre la fusion avant le ticket suivant (fusion manuelle seulement, voir les règles du projet), ou empiler les branches.
+- Un ticket est « terminé » quand l'agent a ouvert sa MR Draft, pas quand elle est fusionnée. Depuis le 2026-11-27, l'option « attendre la fusion » (cochée par défaut sur les nouveaux plans, voir plus bas) retient le ticket suivant jusqu'à la fusion de cette MR ; sans elle, les tickets suivants partent de la branche de base du projet et ne voient pas le code des MR non fusionnées. Empiler les branches reste à faire.
 - Un plan vise un projet existant et configuré (« projet complet » = plusieurs tickets sur ce projet) ; la création du projet lui-même reste faite par le Scribe.
 - Après validation, le contenu d'un ticket ne se modifie plus depuis l'outil (aucune méthode de modification de ticket dans le connecteur) : le corriger chez la forge, ou écarter le ticket. Annuler un plan ne supprime pas les tickets déjà créés.
 - Un seul ticket à la fois par plan ; plusieurs plans d'une même personne peuvent tourner en parallèle (limités par la file de dev).
+
+**Attendre la fusion avant le ticket suivant (2026-11-27)**
+- **Option du plan** `wait_for_merge` (migration : colonne sur `plans`, 0 pour les plans déjà ouverts, 1 pour les nouveaux). Case cochée par défaut dans la validation (page Plans), réglable ensuite sur un plan en cours (`POST /api/plans/:id/wait-for-merge`, bouton « Ne plus attendre »).
+- **Logique** (`mergeGate`, `src/orchestrator/scheduler.ts`) : avant de lancer le ticket suivant, le planificateur lit la MR du dernier ticket terminé (`getChangeRequest`). Ouverte : le plan attend, avec l'explication sur le plan (ce n'est pas un échec). Fusionnée : le ticket part depuis une base à jour. Fermée sans fusion : le ticket passe en échec (relancer ou écarter). Une forge qui ne répond pas fait attendre et réessayer. Au plus une question à la forge par plan toutes les 30 secondes (`MERGE_CHECK_MS`, en mémoire), donc une fusion est vue en 45 secondes au plus.
+- **Garde-fou** : si la MR ne vise pas la branche d'où partent les tickets (`targetBranch` différente de la branche de base du projet), le plan attend avec un message qui nomme les deux branches : sa fusion ne donnerait pas son code aux tickets suivants. « Ne plus attendre » libère le plan.
+- **Limites** : seule la MR du dernier ticket terminé est contrôlée (activer l'option en cours de plan ne vérifie pas les MR plus anciennes) ; l'outil ne fusionne jamais seul ; un ticket sans MR connue ne retient pas le suivant.
+- **Fenêtre de l'Intendant** : l'explication d'attente d'un plan qui avance s'affiche en note, plus en rouge ; le réglage de l'option se fait sur la page Plans.
+
+**Testé** : 5 tests de plus dans `src/orchestrator/orchestrator.test.ts` (attente puis fusion avec le délai entre deux questions, MR fermée puis ticket écarté, option coupée, branche cible différente, forge muette, réglage et refus) ; `npm run typecheck` propre, 989 tests passent.
+**Pas testé** : un vrai agent, une vraie forge, la page dans un navigateur.
 
 ### 48. Déploiement automatisé sur le VPS : noté, pas implémenté (2026-11-24)
 
@@ -746,4 +760,69 @@ Demande : vérifier que créer un ticket, lancer l'agent dev, relire sa MR, corr
 - **Jamais toucher au `.env`** : le script ne le lit ni ne le réécrit. Une variable nouvelle reste à ajouter à la main par la personne, à signaler dans le résultat du déploiement.
 - **Résultat à signaler** : succès, échec ou retour arrière, par exemple via les notifications (item 14).
 
-**Pas fait** : tout. Aucun script, aucun minuteur, aucun workflow n'est écrit.
+**Fait (2026-11-27)** : la piste 1.
+- `scripts/deploy.sh` (`--dry-run` pour simuler, `--force` pour déployer malgré un agent en cours) : refuse si un conteneur `ra-agent-*` tourne, si le dépôt du VPS est modifié ou si un autre déploiement est en cours ; sauvegarde ; `git merge --ff-only` ; `npm ci`, reconstruction de l'image des agents et recopie de l'unité systemd seulement si leurs fichiers ont changé (l'unité n'est jamais écrasée si la copie installée a été adaptée à la main) ; `tsc` ; redémarrage ; attente de `app.started` ; retour au commit précédent (`git reset --hard`, recompilation, redémarrage) si la compilation ou le démarrage échoue. Ne lit jamais le `.env` : rappel seulement si `src/config.ts` a changé.
+- `deploy/review-agent.service` : `PrivateTmp=true` retiré (il coupait l'accès au Docker sans root, constaté le 2026-11-23).
+- Documenté dans `docs/deploiement.md` (section 11, « Au quotidien ») et `docs/a-tester.md` (section 8).
+**Pas testé** : tout le script en réel. Seule la syntaxe est vérifiée (`bash -n`) ; aucune exécution, ni `--dry-run`, ni déploiement, ni retour arrière. Le premier passage se fait sur le VPS, en commençant par `--dry-run`.
+**Pas fait** : le déclenchement automatique (pistes 2 et 3), l'annulation d'une reconstruction d'image lors d'un retour arrière (l'image reste celle du nouveau commit), l'alerte en cas d'échec (item 14).
+
+**Sauvegarde automatique (2026-11-27)** : `deploy/review-agent-backup.service` (une exécution de `scripts/backup.sh`, 5 minutes au plus) et `deploy/review-agent-backup.timer` (chaque nuit vers 3 h 30, décalage aléatoire de 5 minutes, rattrapage au redémarrage du VPS si l'heure a été manquée). Les 30 plus récentes sont gardées dans `backups/`, le dossier qui reçoit aussi la sauvegarde faite avant chaque déploiement. Installation : `docs/deploiement.md`, section 11, « Au quotidien ».
+**Pas testé** : les deux fichiers ne sont ni validés par `systemd-analyze verify` ni jamais lancés. **Limites** : les sauvegardes sont sur le même disque que la base (une panne du VPS les emporte, copie hors du VPS à faire, item G3 de `docs/roadmap-plateforme.md`), et un échec de sauvegarde ne prévient personne.
+
+### 49. Connexion OAuth GitHub sur le VPS : à essayer par le propriétaire (noté 2026-11-27)
+
+**Demande** : le propriétaire n'a pas eu le temps de l'essayer le 2026-11-26 et la reporte. Noté seulement : rien à coder.
+
+**À faire** : créer l'application OAuth sur GitHub (adresse de retour `http://localhost:4321/auth/github/callback`), ajouter dans le `.env` du VPS `PUBLIC_URL`, `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` et `AUTH_OWNER=github:<login>`, puis `git pull`, `npx tsc -p tsconfig.build.json` et `systemctl --user restart review-agent`. Étapes détaillées et vérifications : `docs/a-tester.md`, section 5.
+
+**État en attendant** : le VPS tourne sans connexion (mode local : aucune session, aucun bouton « Se déconnecter »), et n'est joignable que par le tunnel SSH. Ne pas inviter d'autre personne avant ce test (liste de vérification de `docs/deploiement.md`, section 12).
+
+**Pas testé** : tout le parcours, jamais essayé avec un vrai compte GitHub ni dans un navigateur.
+
+### 50. Visualiseur de code (2026-11-27)
+
+**Demande** : voir dans l'outil le code que l'agent a généré, sans ouvrir la MR sur la forge (le tableau de bord n'affichait que « N fichier(s) »).
+
+**Implémenté**
+- **Route** `GET /api/tasks/:id/diff` (`src/dev/pieceRoutes.ts`, droit « lecture ») : lit les diffs de la MR de la tâche chez la forge par le connecteur (`getChangeRequestDiffs`, GitLab et GitHub), y compris après la fusion. Seule une tâche qui a ouvert une MR est concernée.
+- **Bornage** (`src/dev/codeView.ts`) : 80 fichiers dont le contenu est renvoyé, 60 000 caractères par fichier, 400 000 pour la MR ; au-delà, les fichiers gardent leur nom et leurs compteurs (lignes ajoutées et supprimées) sans contenu, et l'affichage renvoie vers la forge. Les compteurs portent toujours sur le diff entier.
+- **Affichage** (`public/diff.js`, styles `cv-*` dans `index.html`) : liste de fichiers repliables avec type de changement (ajouté, supprimé, renommé, modifié), lignes ajoutées en vert et supprimées en rouge, numéros de ligne, blocs « @@ ». Tout le texte est échappé. Les premiers fichiers courts sont dépliés, les gros s'ouvrent à la demande.
+- **Où** : section « Code généré » de la page d'une tâche (bouton « Afficher le code », une lecture à la demande), et bouton « Voir le code » sur chaque ticket d'un plan qui a ouvert une MR (page Plans). La page Plans ne se redessine plus tant que le plan n'a pas changé, et garde les tickets dépliés : un affichage de code ne se referme plus tout seul.
+
+**Testé** : `src/dev/codeView.test.ts` (types de changement, compteurs, coupures par fichier et par MR, plafond du nombre de fichiers, fichier binaire), un test de route dans `src/server/piece.test.ts` ; typecheck propre, 1008 tests passent.
+**Pas testé** : la page dans un navigateur (rendu, couleurs en mode sombre, gros diff), une vraie forge. Un fichier de plus de 60 000 caractères de diff est coupé : la forge reste la référence.
+**Pas fait** : coloration syntaxique, diff côte à côte, commentaires sur les lignes, affichage dans la fenêtre de l'Intendant (elle renvoie vers la tâche), code d'une tâche qui n'a pas encore ouvert de MR (le dossier de travail local n'est pas lu).
+
+### 51. Notifications (2026-11-27)
+
+**Demande** : être prévenu quand quelque chose demande ton attention, au lieu d'ouvrir le tableau de bord (reprend l'item 14).
+
+**Implémenté**
+- **Canal** : un webhook Discord ou Slack, choisi pour ne demander ni domaine vérifié ni compte d'envoi d'emails. L'adresse est un secret chiffré dans le coffre de la personne (`notify.webhook`), enregistrée dans Paramètres > Notifications, jamais renvoyée par l'API. Seules les adresses `discord.com/api/webhooks/...` (et `ptb`, `canary`, `discordapp.com`) et `hooks.slack.com/services/...` en https, sans identifiants ni port, sont acceptées : l'outil ne peut pas être dirigé vers une adresse quelconque, réseau interne compris.
+- **Messages** (`src/notify/`) : plan en échec (avec la raison), plan terminé, MR à fusionner (une seule fois par MR attendue, avec son lien : c'est le signal pour que le plan continue), review à analyser (titre de la MR, projet, motifs de la décision). Discord : aucune mention n'est permise (`allowed_mentions`), donc un titre de MR écrit par quelqu'un d'autre ne peut pas « @everyone ». Slack : `&`, `<` et `>` échappés. Caractères de contrôle retirés, textes coupés.
+- **Garde-fous** : 20 messages automatiques par heure au plus (le message de test ne compte pas), délai maximal de 5 secondes, aucune redirection suivie, jamais d'erreur remontée à ce qui déclenche l'envoi, l'adresse du webhook n'apparaît ni dans les erreurs ni dans les journaux (le coffre la déclare secrète).
+- **Interface** : section « Notifications » de Paramètres > Connexion : enregistrer, supprimer, « Envoyer un message de test » (l'erreur du service est affichée telle quelle : webhook supprimé, refus...).
+
+**Testé** : `src/notify/notify.test.ts` (adresses acceptées et refusées, corps des messages Discord et Slack, envoi, refus, redirection, panne, plafond horaire, routes, droits) et 2 tests dans `src/orchestrator/orchestrator.test.ts` (plan en échec, terminé, MR à fusionner une seule fois) ; 1008 tests passent.
+**Pas testé** : un vrai webhook Discord ou Slack, le rendu des messages, la section dans un navigateur.
+**Pas fait** : l'email (demande un domaine vérifié chez Resend), le choix des événements à recevoir, une échéance quand une MR attend trop longtemps, l'alerte d'échec d'une sauvegarde (`systemd` ne connaît pas le webhook, enregistré dans la base), les tâches de dev lancées à la main (seuls les plans et les reviews préviennent).
+
+### 52. Essais réels du lot du 2026-11-27 (à faire par le propriétaire)
+
+**Contexte** : les items 47 (attente de fusion), 48 (script de déploiement et sauvegarde nocturne), 50 (visualiseur) et 51 (notifications) sont écrits et couverts par des tests automatiques (typecheck propre, 1008 tests), mais **aucun n'a été essayé en vrai** : ni forge réelle, ni Discord ou Slack, ni navigateur, ni exécution sur le VPS. Les recettes détaillées, case par case, sont dans `docs/a-tester.md` ; cette section dit dans quel ordre les faire et ce qu'un échec veut dire.
+
+**Ordre conseillé** (du plus rapide et indépendant au plus long)
+1. **Mise en ligne du lot** (`docs/a-tester.md`, section 8) : sur le VPS, session `review`, `bash scripts/deploy.sh --dry-run` d'abord (rien n'est changé), puis `bash scripts/deploy.sh` sans agent en cours. La migration `wait_for_merge` (colonne de `plans`) s'applique au démarrage, la sauvegarde est faite avant. Un échec ici est le plus utile à connaître : c'est le premier passage réel du script. Si le script lui-même est en cause, déployer à la main (`git pull`, `npx tsc -p tsconfig.build.json`, `systemctl --user restart review-agent`) et noter l'erreur.
+2. **Notifications** (section 11 septies) : créer un webhook Discord, l'enregistrer, « Envoyer un message de test ». Dix minutes, aucune dépendance. Sans ce test, les messages de plan et de review ne sont jamais vus en vrai.
+3. **Visualiseur de code** (section 11 septies) : « Afficher le code » sur une tâche qui a une MR, en clair et en mode sombre, sur une petite et une grosse MR. Le point à regarder : lisibilité des couleurs et défilement des lignes longues, que les tests ne voient pas.
+4. **Attente de fusion** (section 11 sexies) : un plan de deux petits tickets sur un projet dont la branche de base et la branche cible sont la même. C'est le test le plus long (un vrai agent, une vraie MR à fusionner) mais le plus risqué : il fait avancer ou retient un plan tout seul. Vérifier en particulier que le ticket 2 part dans les 45 secondes qui suivent la fusion et que sa branche contient le code du ticket 1.
+5. **Sauvegarde nocturne** (section 8) : installer le minuteur, lancer `systemctl --user start review-agent-backup.service`, vérifier le fichier, puis le lendemain matin. Les fichiers `systemd` n'ont jamais été validés : une faute de syntaxe se voit à `systemctl --user status`.
+
+**Reports à ne pas oublier**
+- **Connexion OAuth GitHub** (item 49, `docs/a-tester.md` section 5) : tant qu'elle n'est pas essayée, le VPS reste sans connexion et sans autre personne invitée.
+- **Review réelle dans un conteneur** (section 11 de `docs/deploiement.md`, étape 9) : `docker ps` pendant la tâche et `free -h`.
+- **Mode d'action** : vérifier dans Paramètres qu'il n'est pas resté sur `auto` après la restauration de la base.
+- **Mode ombre** (item 10) : environ 30 reviews comparées à tes décisions avant d'envisager `comment` puis `auto`.
+
+**À signaler après chaque essai** : ce qui a marché, ce qui a surpris, et le message d'erreur exact en cas d'échec. Un essai raté devient une ligne dans la section « Limites » de l'item concerné, pas un oubli.

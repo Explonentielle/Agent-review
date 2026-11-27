@@ -41,6 +41,8 @@ export interface PlanRow {
   run_at: string | null;
   /** 1 pendant un tour de chat ou une validation : empêche d'en lancer un deuxième en même temps. */
   busy: number;
+  /** 1 : le ticket suivant n'est lancé qu'une fois la MR du précédent fusionnée ; 0 : il part dès que cette MR est ouverte. */
+  wait_for_merge: number;
   error: string | null;
   cost_usd: number | null;
   created_at: string;
@@ -84,7 +86,7 @@ export interface NewPlanItem {
   runAt: string | null;
 }
 
-type PlanFields = "title" | "chat_at" | "run_at" | "error";
+type PlanFields = "title" | "chat_at" | "run_at" | "wait_for_merge" | "error";
 type ItemFields = "position" | "title" | "description" | "labels" | "run_at" | "status" | "issue_iid" | "issue_url" | "task_id" | "error";
 
 /** Avancement d'un plan, ticket par ticket. */
@@ -129,16 +131,17 @@ export function createPlanRepo(db: Db, workspaceId: number, userId: number | nul
   const repo = {
     /**
      * Ouvre un plan avec le premier message de la personne.
-     * @param p Projet visé, nature du plan, premier message, et date de lancement du chat (null : le chat commence tout de suite).
+     * @param p Projet visé, nature du plan, premier message, date de lancement du chat (null : le chat commence tout de suite), et attente de la fusion de
+     * la MR de chaque ticket avant le suivant (`waitForMerge`, vrai par défaut).
      * @returns L'id du plan.
      */
-    insert(p: { source: ForgeKind; projectId: number; projectPath: string; kind: PlanKind; title: string; firstMessage: string; chatAt: string | null }): Promise<number> {
+    insert(p: { source: ForgeKind; projectId: number; projectPath: string; kind: PlanKind; title: string; firstMessage: string; chatAt: string | null; waitForMerge?: boolean }): Promise<number> {
       return db.transaction(async (tx) => {
         const row = await tx.get<{ id: number }>(
-          `INSERT INTO plans (workspace_id, user_id, source, project_id, project_path, kind, title, status, chat_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO plans (workspace_id, user_id, source, project_id, project_path, kind, title, status, chat_at, wait_for_merge)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING id`,
-          [workspaceId, userId, p.source, p.projectId, p.projectPath, p.kind, p.title, p.chatAt ? "waiting_chat" : "chatting", p.chatAt],
+          [workspaceId, userId, p.source, p.projectId, p.projectPath, p.kind, p.title, p.chatAt ? "waiting_chat" : "chatting", p.chatAt, p.waitForMerge === false ? 0 : 1],
         );
         await tx.run("INSERT INTO plan_messages (workspace_id, plan_id, role, text) VALUES (?, ?, 'user', ?)", [workspaceId, row!.id, p.firstMessage]);
         return row!.id;

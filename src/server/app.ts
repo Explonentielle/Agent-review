@@ -35,6 +35,7 @@ import { registerPiece, summarizePieces } from "../dev/pieceRoutes.js";
 import type { DevTaskRow } from "../db/devTasks.js";
 import { followupInstructions } from "../dev/reviewFeedback.js";
 import { ReviewResultSchema } from "../review/schema.js";
+import { registerNotify } from "../notify/routes.js";
 import { registerPlans } from "../orchestrator/routes.js";
 import { registerScribe } from "../scribe/routes.js";
 import { registerTerminal, type TerminalFeature } from "../terminal/routes.js";
@@ -471,6 +472,7 @@ export function buildServer(base: ServerDeps) {
 
   // --- Orchestrateur : chat de cadrage, plan de tickets validé par la personne, exécution planifiée ------
   registerPlans(app, { deps, whoIs: (req) => req.session ?? base.local, fail, forgeOf, runner: base.scribeRunner });
+  registerNotify(app, { deps, fail });
 
   // --- Agent dev -------------------------------------------------------------
 

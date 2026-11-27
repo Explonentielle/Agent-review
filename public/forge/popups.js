@@ -106,7 +106,10 @@
     const progress = d.items.length
       ? `${pct((done * 100) / d.items.length)}<p class="fg-note">À venir : <b>${count("proposed", "pending")}</b> · En cours : <b>${count("running")}</b> · Terminés : <b>${done}</b> · En échec : <b>${count("failed")}</b>${count("skipped", "cancelled") ? ` · Écartés : <b>${count("skipped", "cancelled")}</b>` : ""}</p>`
       : "";
-    const alert = p.error ? `<div class="fg-err">${s === "failed" ? "Le plan s'est arrêté : " : ""}${esc(p.error)}</div>` : "";
+    // Un plan qui avance a une explication d'attente (fusion d'une MR, quota), pas une erreur : elle ne s'affiche pas en rouge
+    const alert = p.error
+      ? (["scheduled", "running", "paused"].includes(s) ? `<p class="fg-note">${esc(p.error)}</p>` : `<div class="fg-err">${s === "failed" ? "Le plan s'est arrêté : " : ""}${esc(p.error)}</div>`)
+      : "";
     const pendingOrFailed = (t) => t.status === "pending" || t.status === "failed";
     const items = d.items.map((t) => {
       const ref = t.issueIid ? ` · ${planLink(t.issueUrl, `#${t.issueIid}`)}` : "";

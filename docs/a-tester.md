@@ -50,15 +50,40 @@ Jamais essayé sur un vrai dépôt. Prérequis : un dépôt privé de test (un R
 
 ## 5. Connexion OAuth (C2), seulement si tu veux l'essayer
 
-Dormante par défaut : sans les variables `AUTH_*` dans le `.env`, rien ne change. À essayer sur ton GitLab (`gitlab.speedmedia.fr`).
+Dormante par défaut : sans les variables `AUTH_*` dans le `.env`, rien ne change (pas de session, pas de bouton « Se déconnecter »). Deux forges possibles, ensemble ou seules : GitHub (github.com) et GitLab (ton instance, `GITLAB_URL`). Section mise à jour le 2026-11-26 : variables relues dans `src/config.ts`, étapes GitHub ajoutées.
+
+**Variables du `.env`** (tu les écris toi-même ; seules `PUBLIC_URL` et `AUTH_SIGNUP` ont une valeur par défaut) :
+
+| Variable | Rôle |
+|---|---|
+| `PUBLIC_URL` | Adresse que voit ton navigateur, base de l'adresse de retour. Défaut `http://localhost:4321`. Avec le tunnel SSH du VPS : `http://localhost:4321` |
+| `AUTH_GITHUB_CLIENT_ID` et `AUTH_GITHUB_CLIENT_SECRET` | Identifiant et secret de l'application OAuth GitHub : les deux ensemble, sinon l'outil refuse de démarrer |
+| `AUTH_GITLAB_CLIENT_ID` et `AUTH_GITLAB_CLIENT_SECRET` | Idem pour GitLab, avec en plus `GITLAB_URL` |
+| `AUTH_OWNER` | Propriétaire, **obligatoire** dès qu'une connexion est configurée : `github:<login>` ou `gitlab:<login>`, ou une adresse email (connexion par email, voir la section 11 quinquies). Il reprend le compte local avec toutes ses données à sa première connexion. Doit viser une forge configurée |
+| `AUTH_ALLOWED_USERS` | Autres personnes admises, `forge:login` séparés par des virgules (ancien mode, voir la section 6) |
+| `AUTH_SIGNUP` | `invite` (défaut) ou `open` |
+| `AGENT_RUNTIME` | Ne doit pas valoir `host` : refusé au démarrage dès qu'une connexion est configurée |
+
+**Adresse de retour** : `<PUBLIC_URL>/auth/<forge>/callback`, c'est-à-dire `http://localhost:4321/auth/github/callback` ou `http://localhost:4321/auth/gitlab/callback`. Elle doit être identique, au caractère près, dans la forge et dans `PUBLIC_URL`. Une application GitHub n'en accepte qu'une.
+
+### GitHub
+
+- [ ] Créer l'application : github.com > ta photo > Settings > Developer settings > OAuth Apps > **New OAuth App** (https://github.com/settings/developers). Application name libre, Homepage URL `http://localhost:4321`, Authorization callback URL `http://localhost:4321/auth/github/callback`, « Enable Device Flow » décoché. **Register application**.
+- [ ] Sur la page de l'application : copier le **Client ID**, puis **Generate a new client secret** et copier le secret tout de suite (GitHub ne le réaffiche plus ; en cas de perte, en générer un autre). L'outil ne demande que le droit `read:user` (lire ton profil), jamais l'accès à tes dépôts.
+- [ ] Dans le `.env` : `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET`, `AUTH_OWNER=github:<ton login GitHub>` (celui de github.com/<login>, majuscules sans importance), `PUBLIC_URL`. Redémarrer l'outil (VPS : `systemctl --user restart review-agent`, qui annule les agents en cours). Le journal doit contenir `auth.enabled` ; une valeur invalide fait échouer le démarrage avec le message exact (`AUTH_OWNER est obligatoire...`, `AUTH_GITHUB_CLIENT_ID et AUTH_GITHUB_CLIENT_SECRET vont ensemble`...).
+
+### GitLab (facultatif)
 
 - [ ] Créer une application sur GitLab : Profil > Applications, nom libre, URL de retour `http://localhost:4321/auth/gitlab/callback`, **décocher « Confidential » seulement si GitLab le refuse**, portée `read_user` uniquement.
-- [ ] Dans le `.env` (tu le fais toi-même) : `AUTH_GITLAB_CLIENT_ID`, `AUTH_GITLAB_CLIENT_SECRET`, `AUTH_OWNER=gitlab:<ton identifiant GitLab>`. Redémarrer l'outil. Le journal doit contenir `auth.enabled`.
-- [ ] Ouvrir http://localhost:4321 : redirection vers la page de connexion, bouton « Se connecter avec GitLab ». Après l'accord chez GitLab, retour sur le dashboard avec **toutes tes données d'avant** (reviews, tâches, projets).
-- [ ] Paramètres > Connexion : bloc « Session » avec ton nom ; « Se déconnecter » te ramène à la page de connexion, et http://localhost:4321/api/stats répond 401.
+- [ ] Dans le `.env` : `AUTH_GITLAB_CLIENT_ID`, `AUTH_GITLAB_CLIENT_SECRET`, `GITLAB_URL`, `AUTH_OWNER=gitlab:<ton identifiant GitLab>`. Redémarrer l'outil.
+
+### Vérifications (quelle que soit la forge)
+
+- [ ] Ouvrir http://localhost:4321 : redirection vers la page de connexion, bouton « Se connecter avec GitHub » (ou GitLab). Après l'accord chez la forge, retour sur le dashboard avec **toutes tes données d'avant** (reviews, tâches, projets, plans).
+- [ ] Paramètres > Connexion, tout en bas : bloc « Session » (« Connecté comme <ton nom> ») et bouton « Se déconnecter » qui te ramène à la page de connexion. Ensuite http://localhost:4321/api/stats répond 401 : c'est normal, les appels directs (`curl`) demandent désormais la session.
 - [ ] Dans les outils du navigateur (Application > Cookies) : le cookie `ra_session` est HttpOnly et SameSite=Lax ; il n'est « Secure » qu'en https.
-- [ ] Se connecter avec un autre compte GitLab : message « Ce compte n'est pas autorisé », aucune session.
-- [ ] Une URL de retour mal saisie dans GitLab donne une erreur côté GitLab, pas une session.
+- [ ] Se connecter avec un autre compte de la forge : message « Ce compte n'est pas autorisé sur cette installation. », aucune session ; le journal contient `auth.refused`.
+- [ ] Une adresse de retour mal saisie dans la forge donne une erreur côté forge, pas une session. Si la page de connexion affiche « La connexion a échoué. Réessaie. », la cause est dans le journal (`auth.failed`, avec le message d'erreur de la forge ou de l'outil).
 - [ ] Revenir au mode sans connexion : retirer les variables `AUTH_*` du `.env` et redémarrer.
 
 ## 6. Plusieurs personnes (seulement si tu ouvres à ton collègue)
@@ -80,7 +105,17 @@ Les agents ne reçoivent plus tout l'environnement de l'outil, seulement PATH, H
 - [ ] Lancer l'agent dev sur un ticket, et une review : ils démarrent, lisent le dépôt, produisent un résultat comme avant (en mode abonnement, donc la connexion Claude passe toujours).
 - [ ] Si les tests d'un projet (`allowedCommands`) échouent maintenant alors qu'ils passaient, une variable d'environnement qu'ils utilisaient n'est plus transmise : la lister, je l'ajoute à `AGENT_ENV_NAMES` dans `src/claude/process.ts`.
 
-## 8. Déploiement sur le VPS (C9, jamais essayé)
+## 8. Déploiement sur le VPS (C9)
+
+**Mis à jour le 2026-11-26 : le VPS tourne avec la variante de la section 11 de `docs/deploiement.md`** (outil sous systemd, Docker sans root, en service depuis le 2026-11-23), pas avec la pile compose complète. Les cases ci-dessous (`docker compose build` et `up`) ne concernent que cette pile complète, jamais relancée depuis le 2026-11-19. Pour le VPS actuel, le test à faire est celui de l'étape 9 de cette section 11 : une vraie review dans un conteneur avec `docker ps` pendant la tâche, et `free -h`.
+
+**Script de déploiement et sauvegarde automatique (préparés le 2026-11-27, jamais essayés)**, sur le VPS, session `review`, dans `~/review-agent` :
+- [ ] `bash scripts/deploy.sh --dry-run` : affiche « Déjà à jour » ou les commits reçus, les fichiers modifiés et les étapes prévues, sans rien changer (`git status` reste propre, le service n'est pas redémarré).
+- [ ] Avec un conteneur `ra-agent-*` en cours (`docker ps`), `bash scripts/deploy.sh` refuse et le dit ; `--force` passe outre.
+- [ ] Un vrai `bash scripts/deploy.sh` sur un commit reçu : sauvegarde écrite dans `backups/`, compilation, redémarrage, ligne finale « Terminé ». Le dashboard répond et `docker ps` ne montre aucun agent.
+- [ ] Retour arrière (à ne tenter que sur un commit de test qui casse volontairement la compilation) : le script revient à l'ancien commit, recompile, redémarre le service sur l'ancien code et sort en erreur.
+- [ ] Minuteur : suivre « Sauvegarde automatique » de la section 11 de `docs/deploiement.md`. `systemctl --user start review-agent-backup.service` crée un fichier `.sql.gz` non vide, `list-timers` donne une échéance vers 3 h 30, et le lendemain matin un nouveau fichier est là.
+- [ ] Une sauvegarde se restaure bien sur une pile d'essai (`scripts/restore.sh`, `docs/deploiement.md` section 11).
 
 Suivre `docs/deploiement.md`. À noter ce qui se passe réellement :
 - [ ] `docker compose build` aboutit (durée, erreurs éventuelles de la CLI Claude Code ou de `npm ci`).
@@ -243,6 +278,37 @@ Après `git pull && docker compose up -d --build`, dans la forge (aucune migrati
 - [ ] Changer d'onglet en plein combat ferme l'arène et rend le clavier.
 - [ ] La porte de fer de la salle te ramène devant la herse.
 - [ ] **Équilibrage** : trop facile ? trop dur ? dis-le, c'est quelques nombres dans `public/forge/combat.js`.
+
+## 11 sexies. Plans : attendre la fusion de la MR avant le ticket suivant (2026-11-27)
+
+Prérequis : un projet configuré pour l'agent dev dont la branche de base et la branche cible sont **la même**, et un plan de deux tickets au moins. Les tests automatiques passent (1008), mais **aucun essai avec un vrai agent ni une vraie forge**.
+
+- [ ] Relecture d'un plan : la case « Attendre la fusion de la MR de chaque ticket avant de lancer le suivant » est cochée par défaut. La décocher puis valider : la fenêtre de confirmation dit que chaque ticket part dès que la MR du précédent est ouverte.
+- [ ] Plan validé avec la case cochée : le ticket 1 se termine (MR ouverte) et le ticket 2 ne part pas. La page Plans affiche « À noter : En attente de la fusion de la MR !N... » ; la fenêtre de l'Intendant affiche la même phrase en note, pas en rouge.
+- [ ] Fusionner cette MR (sur la forge, ou depuis la tâche : publier la review puis le bouton de fusion) : en 45 secondes au plus, le ticket 2 part et l'explication disparaît. Sa branche contient le code du ticket 1.
+- [ ] Fermer une MR sans la fusionner : le ticket passe en échec (« fermée sans être fusionnée »), le plan s'arrête ; « Écarter » puis « Reprendre » lance le suivant.
+- [ ] Projet dont la branche de base et la branche cible diffèrent : le plan attend avec un message qui nomme les deux branches ; « Ne plus attendre » le libère.
+- [ ] Sur un plan en cours, le bouton « Ne plus attendre » (ou « Attendre la fusion ») sous le plan change le réglage tout de suite.
+
+## 11 septies. Visualiseur de code et notifications (2026-11-27)
+
+Les tests automatiques passent (1008), mais **aucun essai avec une vraie forge, un vrai Discord ou Slack, ni dans un navigateur**.
+
+**Code généré**
+- [ ] Page d'une tâche qui a ouvert une MR : la section « Code généré » propose « Afficher le code ». Un clic lit le diff chez la forge : liste de fichiers repliables, lignes ajoutées en vert et supprimées en rouge, numéros de ligne, totaux en tête, lien « ouvrir la MR ».
+- [ ] Mode sombre : les couleurs restent lisibles. Une ligne très longue défile horizontalement sans casser la page.
+- [ ] Une MR avec de nombreux ou de gros fichiers : les premiers sont dépliés, les gros s'ouvrent à la demande, et un message renvoie vers la forge pour ce qui dépasse les limites.
+- [ ] Une MR déjà fusionnée : le code s'affiche encore. Un texte comme `<script>` dans le code s'affiche tel quel, sans s'exécuter.
+- [ ] Page Plans : « Voir le code » sur un ticket qui a ouvert une MR ; la page se rafraîchit seule mais le ticket reste déplié et le code reste affiché.
+
+**Notifications**
+- [ ] Créer un webhook dans un salon Discord (Paramètres du salon > Intégrations > Webhooks > Nouveau webhook > Copier l'URL), le coller dans Paramètres > Connexion > Notifications, Enregistrer : la pastille devient verte « Discord : enregistré, chiffré ».
+- [ ] « Envoyer un message de test » : le message arrive dans le salon. Une adresse qui n'est pas un webhook Discord ou Slack est refusée à l'enregistrement.
+- [ ] Supprimer le webhook côté Discord puis refaire un test : l'outil affiche « Discord a refusé le message (HTTP 404) ».
+- [ ] Plan avec un ticket en échec : un message « Plan en échec » avec la raison. Plan terminé : un message « Plan terminé ».
+- [ ] Plan avec l'attente de fusion : un seul message « MR à fusionner » par MR, avec son lien. Après la fusion, le plan repart sans nouveau message.
+- [ ] Review qui passe en « à analyser » : un message avec le titre de la MR et les motifs. Un titre de MR contenant `@everyone` ne mentionne personne.
+- [ ] Enregistrer l'adresse puis chercher un morceau de l'adresse dans `data/logs` et dans la réponse de `GET /api/notify` : nulle part.
 
 ## 12. Pas testé du tout
 

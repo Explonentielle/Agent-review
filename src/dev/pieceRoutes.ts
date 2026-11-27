@@ -8,6 +8,7 @@ import { GitlabError } from "../gitlab/client.js";
 import { errorMessage, log } from "../logger.js";
 import type { ReviewResult } from "../review/schema.js";
 import type { SettingsStore } from "../settings/store.js";
+import { summarizeDiffs } from "./codeView.js";
 import { REVIEW_OK, mergeReadiness, type Readiness } from "./merge.js";
 
 /**
@@ -236,6 +237,25 @@ export function registerPiece(app: FastifyInstance, ctx: PieceContext): void {
         },
         readiness,
       };
+    } catch (err) {
+      return failPiece(reply, err);
+    }
+  });
+
+  /**
+   * Le code de la pièce : les fichiers de la MR avec leurs lignes ajoutées et supprimées, lus chez la forge (aussi après la fusion). Lecture seule ;
+   * le contenu est borné (`codeView.ts`) pour ne pas figer le navigateur, la forge reste la référence pour un très gros diff.
+   */
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/diff", async (req, reply) => {
+    try {
+      const task = await pieceTask(Number(req.params.id));
+      const diffs = await deps.forges
+        .get(task.source)
+        .connector.getChangeRequestDiffs(task.project_id, task.mr_iid)
+        .catch((err: unknown) => {
+          throw new PieceError(`Impossible de lire le code chez la forge : ${errorMessage(explainMergeError(task.source, err))}`, 502);
+        });
+      return { taskId: task.id, mrIid: task.mr_iid, mrUrl: task.mr_url, ...summarizeDiffs(diffs) };
     } catch (err) {
       return failPiece(reply, err);
     }

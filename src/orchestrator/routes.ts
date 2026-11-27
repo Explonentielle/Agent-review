@@ -49,7 +49,7 @@ export function registerPlans(app: FastifyInstance, ctx: PlanContext): void {
   const planDeps = (): PlanDeps => {
     const d = ctx.deps;
     if (!d.plans) throw new PlanConflictError("L'orchestrateur n'est pas disponible sur cette installation.");
-    return { config: d.config, forges: d.forges, settings: d.settings, costs: d.costs, tasks: d.tasks, plans: d.plans, enqueueDev: d.enqueueDev, runner: ctx.runner };
+    return { config: d.config, forges: d.forges, settings: d.settings, costs: d.costs, tasks: d.tasks, plans: d.plans, enqueueDev: d.enqueueDev, runner: ctx.runner, notify: d.notify };
   };
   /** Fait avancer le plan tout de suite, sans attendre le prochain passage de l'orchestrateur. Une erreur est journalisée : l'action de la personne a réussi. */
   const kick = (deps: PlanDeps, planId: number): Promise<void> =>
@@ -86,6 +86,7 @@ export function registerPlans(app: FastifyInstance, ctx: PlanContext): void {
     status: plan.status,
     chatAt: toIso(plan.chat_at),
     runAt: toIso(plan.run_at),
+    waitForMerge: plan.wait_for_merge === 1,
     busy: plan.busy === 1,
     error: plan.error,
     costUsd: plan.cost_usd,
@@ -235,14 +236,15 @@ export function registerPlans(app: FastifyInstance, ctx: PlanContext): void {
 
   /**
    * Valide le plan : la personne a relu la liste, `confirm` doit être vrai. Les tickets sont créés chez la forge, dans l'ordre, puis leur exécution est
-   * planifiée (à `runAt`, ou tout de suite). Si la création échoue en route, les tickets déjà créés sont gardés, le plan reste en relecture et la
-   * validation peut être relancée : elle reprend où elle s'est arrêtée.
+   * planifiée (à `runAt`, ou tout de suite). `waitForMerge` (facultatif) fixe si chaque ticket attend la fusion de la MR du précédent. Si la création
+   * échoue en route, les tickets déjà créés sont gardés, le plan reste en relecture et la validation peut être relancée : elle reprend où elle s'est arrêtée.
    */
   app.post<{ Params: { id: string } }>("/api/plans/:id/validate", async (req, reply) => {
     try {
       const deps = planDeps();
       const b = body(req);
       if (b.confirm !== true) throw new PlanInputError("Il faut confirmer explicitement la validation du plan.");
+      if (b.waitForMerge !== undefined && typeof b.waitForMerge !== "boolean") throw new PlanInputError("Option d'attente de la fusion invalide.");
       const plan = await planOf(deps.plans, req.params.id, req);
       const runAt = b.runAt === undefined ? plan.run_at : parseWhen(b.runAt);
       if (plan.status !== "review") throw new PlanConflictError("Seul un plan en relecture peut être validé.");
@@ -271,7 +273,7 @@ export function registerPlans(app: FastifyInstance, ctx: PlanContext): void {
             throw new PlanConflictError(`Création interrompue après ${done} ticket${done > 1 ? "s" : ""} sur ${items.length} : ${errorMessage(err)} Les tickets déjà créés sont gardés : valide à nouveau pour reprendre.`);
           }
         }
-        await deps.plans.update(plan.id, { run_at: runAt });
+        await deps.plans.update(plan.id, { run_at: runAt, ...(typeof b.waitForMerge === "boolean" ? { wait_for_merge: b.waitForMerge ? 1 : 0 } : {}) });
         const due = !runAt || runAt <= toDbTime(new Date());
         await deps.plans.release(plan.id, { status: due ? "running" : "scheduled", error: null });
         log.info("plan.validated", { planId: plan.id, tickets: items.length, created, runAt });
@@ -314,6 +316,27 @@ export function registerPlans(app: FastifyInstance, ctx: PlanContext): void {
       // Un chat qui démarre dure le temps d'une réponse de l'agent : on n'attend pas sa fin pour répondre
       if (chatAt !== undefined) void kick(deps, plan.id);
       else await kick(deps, plan.id);
+      return { ok: true };
+    } catch (err) {
+      return failPlan(reply, err);
+    }
+  });
+
+  /**
+   * Active ou coupe l'attente de la fusion de la MR de chaque ticket avant le suivant (`enabled`), tant que le plan n'est ni terminé ni annulé. La couper
+   * libère un plan qui attendait : le ticket suivant part tout de suite, depuis la branche de base telle qu'elle est.
+   */
+  app.post<{ Params: { id: string } }>("/api/plans/:id/wait-for-merge", async (req, reply) => {
+    try {
+      const deps = planDeps();
+      const plan = await planOf(deps.plans, req.params.id, req);
+      const enabled = body(req).enabled;
+      if (typeof enabled !== "boolean") throw new PlanInputError("Dis si l'attente de la fusion doit être active.");
+      if (!["review", "scheduled", "running", "paused", "failed"].includes(plan.status)) throw new PlanConflictError("Ce réglage ne peut plus changer à ce stade du plan.");
+      // L'explication de l'attente ne vaut plus quand on la coupe (sauf sur un plan arrêté ou en relecture, dont le message est autre)
+      const clearsWaiting = !enabled && ["scheduled", "running", "paused"].includes(plan.status);
+      await deps.plans.update(plan.id, { wait_for_merge: enabled ? 1 : 0, ...(clearsWaiting ? { error: null } : {}) });
+      await kick(deps, plan.id);
       return { ok: true };
     } catch (err) {
       return failPlan(reply, err);

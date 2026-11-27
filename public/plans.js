@@ -20,6 +20,12 @@
     id: null, plans: null, detail: null, projects: null, err: "", busy: false,
     form: { kind: "feature", source: null, key: null, idea: "", chatAt: "" },
     msg: "", runAt: "", edit: null, timer: null,
+    /** Case « attendre la fusion » cochée par la personne avant la validation ; null : la valeur enregistrée sur le plan. */
+    wait: null,
+    /** Code des MR déjà demandé, par tâche : { loading } pendant la lecture, { data } ou { err } ensuite. */
+    code: {},
+    /** Tickets dépliés, pour que la page se redessinant seule ne les referme pas. */
+    open: new Set(),
   };
 
   const isOpen = () => state.tab === "tickets" && location.hash.startsWith("#tickets/plans");
@@ -49,9 +55,41 @@
     if (repaint) paint();
   }
 
+  /**
+   * Relit le plan. Une page rafraîchie seule ne se redessine que si le plan a changé : sinon elle refermerait les fichiers du code affiché.
+   * @param {boolean} [repaint] Faux pour laisser l'appelant redessiner.
+   * @returns {Promise<void>}
+   */
   async function loadDetail(repaint = true) {
+    const before = pl.detail ? JSON.stringify(pl.detail) : null;
     try { pl.detail = await api(`/api/plans/${pl.id}`); } catch (err) { pl.err = err.message; pl.detail = null; }
-    if (repaint) paint();
+    if (repaint && (before === null || before !== JSON.stringify(pl.detail))) paint();
+  }
+
+  /**
+   * Lit le code de la MR d'un ticket chez la forge (diff.js) et le garde pour les prochains affichages de la page.
+   * @param {number} taskId Tâche de l'agent qui a ouvert la MR.
+   * @returns {Promise<void>}
+   */
+  async function loadCode(taskId) {
+    pl.code[taskId] = { loading: true };
+    paint();
+    try { pl.code[taskId] = { data: await window.CodeView.load(taskId) }; } catch (err) { pl.code[taskId] = { err: err.message }; }
+    paint();
+  }
+
+  /**
+   * Zone « code » d'un ticket qui a ouvert une MR : le bouton, la lecture en cours, l'erreur ou le code.
+   * @param {number} taskId Tâche de l'agent.
+   * @returns {string} Le HTML de la zone.
+   */
+  function codeHtml(taskId) {
+    const c = pl.code[taskId];
+    const button = (label) => `<button type="button" class="btn sm" data-pl-code="${taskId}">${label}</button>`;
+    if (!c) return button("Voir le code");
+    if (c.loading) return `<p class="note">Lecture du code chez la forge…</p>`;
+    if (c.err) return `<p class="note">Impossible de lire le code : ${esc(c.err)}</p>${button("Réessayer")}`;
+    return window.CodeView.html(c.data);
   }
 
   /** Ouvre un chat de cadrage : tout de suite, ou à la date choisie. */
@@ -73,19 +111,20 @@
     paint();
   }
 
-  /** Valide le plan après une confirmation explicite : c'est ce clic qui crée les tickets chez la forge. */
+  /** Valide le plan après une confirmation explicite : c'est ce clic qui crée les tickets chez la forge, avec le choix d'attendre ou non la fusion des MR. */
   async function validate() {
     const d = pl.detail;
     const n = d.items.length;
     const date = toIso(pl.runAt);
+    const wait = pl.wait ?? d.plan.waitForMerge;
     const ok = await ask({
       title: `Valider ce plan et créer ${n} ticket${n > 1 ? "s" : ""} ?`,
-      html: `<p>Les ${n} ticket${n > 1 ? "s" : ""} seront créés chez ${esc(forgeName(d.plan.source))} dans le projet <b>${esc(d.plan.projectPath)}</b>, puis l'agent dev les traitera <b>l'un après l'autre</b>, dans l'ordre${date ? `, à partir du <b>${esc(when(date))}</b>` : ", tout de suite"}.</p><p>Tu pourras mettre le plan en pause ou l'annuler ; les tickets déjà créés restent chez la forge.</p>`,
+      html: `<p>Les ${n} ticket${n > 1 ? "s" : ""} seront créés chez ${esc(forgeName(d.plan.source))} dans le projet <b>${esc(d.plan.projectPath)}</b>, puis l'agent dev les traitera <b>l'un après l'autre</b>, dans l'ordre${date ? `, à partir du <b>${esc(when(date))}</b>` : ", tout de suite"}.</p><p>${wait ? "Chaque ticket <b>attend la fusion de la MR du précédent</b> : le plan avance à la vitesse de tes fusions." : "Chaque ticket part <b>dès que la MR du précédent est ouverte</b>, sans attendre sa fusion : il ne voit pas le code des MR non fusionnées."}</p><p>Tu pourras mettre le plan en pause ou l'annuler ; les tickets déjà créés restent chez la forge.</p>`,
       okLabel: "Valider et lancer",
     });
     if (!ok) return;
     await act(async () => {
-      await api(`/api/plans/${pl.id}/validate`, { confirm: true, runAt: date });
+      await api(`/api/plans/${pl.id}/validate`, { confirm: true, runAt: date, waitForMerge: wait });
       state.issues = null;
       toast("Plan validé : les tickets sont créés.");
     });
@@ -174,9 +213,10 @@
         t.status === "failed" ? `<button type="button" class="btn sm" data-pl-retry="${t.id}">Relancer</button>` : "",
         t.status === "pending" || t.status === "failed" ? `<button type="button" class="btn sm" data-pl-skip="${t.id}">Écarter</button>` : "",
       ].join("");
-      return `<details class="pl-item"><summary>${pill(ITEM_STATUS, t.status)} <b>${t.position}. ${esc(t.title)}</b>${ref}${task}${at}</summary>
+      const code = t.task?.mrUrl ? `<div class="pl-code">${codeHtml(t.task.id)}</div>` : "";
+      return `<details class="pl-item" data-pl-item="${t.id}" ${pl.open.has(t.id) ? "open" : ""}><summary>${pill(ITEM_STATUS, t.status)} <b>${t.position}. ${esc(t.title)}</b>${ref}${task}${at}</summary>
         ${labels ? `<div class="labels">${labels}</div>` : ""}${t.error ? `<p class="sc-err">${esc(t.error)}</p>` : ""}
-        <div class="md">${window.Scribe.preview(t.description) || "<p><i>(description vide)</i></p>"}</div>${actions ? `<div class="actions-inline">${actions}</div>` : ""}</details>`;
+        <div class="md">${window.Scribe.preview(t.description) || "<p><i>(description vide)</i></p>"}</div>${code}${actions ? `<div class="actions-inline">${actions}</div>` : ""}</details>`;
     }).join("");
     const canEdit = (d.plan.status === "review" || d.plan.status === "chatting") && !started && !d.plan.busy;
     return `<div class="panel"><div class="sc-card-head">Tickets du plan (${d.items.length})</div>${rows || `<p class="note">Pas encore de ticket : continue l'échange, l'orchestrateur proposera le plan quand le besoin sera clair.</p>`}
@@ -191,6 +231,8 @@
       return `<div class="callout info">${ICON.info}<h3>Rien n'est créé tant que tu n'as pas validé</h3>
         <p>Relis la liste, corrige-la si besoin, puis valide : les tickets sont alors créés chez ${esc(forgeName(d.plan.source))} et l'agent dev les traite dans l'ordre.</p>
         <label class="field"><span>Lancer l'exécution à partir de (facultatif, sinon tout de suite)</span><input type="datetime-local" data-pl="runAt" value="${esc(pl.runAt)}"></label>
+        <label class="check"><input type="checkbox" data-pl="wait" ${(pl.wait ?? d.plan.waitForMerge) ? "checked" : ""}> Attendre la fusion de la MR de chaque ticket avant de lancer le suivant</label>
+        <p class="note">À garder coché quand les tickets dépendent les uns des autres : sinon le suivant part d'une base sans le code de la MR précédente. L'outil ne fusionne jamais seul : le plan avance à la vitesse de tes fusions (sur la forge, ou depuis la tâche).</p>
         <div class="actions-inline"><button type="button" class="btn primary" data-pl-act="validate" ${pl.busy || pl.edit ? "disabled" : ""}>Valider le plan</button>${pl.edit ? "<small>Enregistre ou abandonne tes corrections d'abord.</small>" : ""}</div></div>`;
     }
     if (s === "scheduled" || s === "running") buttons.push(`<button type="button" class="btn" data-pl-act="pause">Mettre en pause</button>`);
@@ -198,7 +240,11 @@
     if (s === "failed" && !d.items.some((i) => i.status === "failed")) buttons.push(`<button type="button" class="btn primary" data-pl-act="resume">Reprendre</button>`);
     if (!["done", "cancelled"].includes(s)) buttons.push(`<button type="button" class="btn danger" data-pl-act="cancel">Annuler le plan</button>`);
     const schedule = s === "scheduled" && d.plan.runAt ? `<p>Exécution planifiée le <b>${esc(when(d.plan.runAt))}</b>.</p>` : "";
-    return buttons.length || schedule ? `<div class="panel">${schedule}<div class="actions-inline">${buttons.join("")}</div></div>` : "";
+    const wait = d.plan.waitForMerge;
+    const waitLine = ["scheduled", "running", "paused", "failed"].includes(s)
+      ? `<p class="note">${wait ? "Chaque ticket attend la fusion de la MR du précédent." : "Les tickets s'enchaînent sans attendre la fusion des MR."} <button type="button" class="btn sm" data-pl-act="${wait ? "wait-off" : "wait-on"}" ${pl.busy ? "disabled" : ""}>${wait ? "Ne plus attendre" : "Attendre la fusion"}</button></p>`
+      : "";
+    return buttons.length || schedule || waitLine ? `<div class="panel">${schedule}${waitLine}<div class="actions-inline">${buttons.join("")}</div></div>` : "";
   }
 
   function progressHtml(d) {
@@ -277,7 +323,7 @@
     if (!state.stats) await refreshHeader();
     if (!pl.projects) pl.projects = await api("/api/projects").catch(() => []);
     const id = Number(sub);
-    if (pl.id !== (id > 0 ? id : null)) { pl.edit = null; pl.msg = ""; pl.runAt = ""; pl.detail = null; }
+    if (pl.id !== (id > 0 ? id : null)) { pl.edit = null; pl.msg = ""; pl.runAt = ""; pl.wait = null; pl.detail = null; pl.code = {}; pl.open = new Set(); }
     pl.id = id > 0 ? id : null;
     pl.err = "";
     paint();
@@ -295,6 +341,7 @@
     if (!k) return;
     if (k === "msg") pl.msg = t.value;
     else if (k === "runAt") pl.runAt = t.value;
+    else if (k === "wait") pl.wait = t.checked;
     else if (k === "source") { pl.form.source = t.value; pl.form.key = null; paint(); }
     else if (k === "key") pl.form.key = t.value;
     else pl.form[k] = t.value;
@@ -310,6 +357,7 @@
     if ((el = q("data-pl-del"))) { pl.edit.splice(Number(el.dataset.plDel), 1); paint(); return; }
     if ((el = q("data-pl-pend-up"))) return void movePending(Number(el.dataset.plPendUp), -1);
     if ((el = q("data-pl-pend-down"))) return void movePending(Number(el.dataset.plPendDown), 1);
+    if ((el = q("data-pl-code"))) return void loadCode(Number(el.dataset.plCode));
     if ((el = q("data-pl-skip"))) return void act(() => api(`/api/plans/${pl.id}/items/${Number(el.dataset.plSkip)}/skip`, {}));
     if ((el = q("data-pl-retry"))) return void act(() => api(`/api/plans/${pl.id}/items/${Number(el.dataset.plRetry)}/retry`, {}));
     el = q("data-pl-act");
@@ -326,6 +374,8 @@
       case "chat-now": void act(() => api(`/api/plans/${pl.id}/schedule`, { chatAt: null })); break;
       case "pause": void act(() => api(`/api/plans/${pl.id}/pause`, {})); break;
       case "resume": void act(() => api(`/api/plans/${pl.id}/resume`, {})); break;
+      case "wait-on": void act(() => api(`/api/plans/${pl.id}/wait-for-merge`, { enabled: true })); break;
+      case "wait-off": void act(() => api(`/api/plans/${pl.id}/wait-for-merge`, { enabled: false })); break;
       case "cancel":
         void ask({ title: "Annuler ce plan ?", html: "<p>Les tickets qui n'ont pas démarré ne seront pas exécutés et l'agent en cours sera arrêté. Les tickets déjà créés chez la forge y restent.</p>", okLabel: "Annuler le plan" })
           .then((ok) => { if (ok) return act(() => api(`/api/plans/${pl.id}/cancel`, {})); });
@@ -333,6 +383,13 @@
       default: break;
     }
   });
+
+  /* Retient les tickets dépliés (l'événement « toggle » ne remonte pas : écoute en capture) */
+  document.addEventListener("toggle", (ev) => {
+    const id = ev.target?.dataset?.plItem;
+    if (id === undefined) return;
+    if (ev.target.open) pl.open.add(Number(id)); else pl.open.delete(Number(id));
+  }, true);
 
   window.Plans = { show };
 })();

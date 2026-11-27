@@ -308,6 +308,11 @@ export function migrationsFor(s: Sql): string[] {
   );
   CREATE INDEX idx_plan_items_plan ON plan_items(plan_id, position);
   `,
+    // Plans : wait_for_merge = 1, le ticket suivant n'est lancé qu'une fois la MR du précédent fusionnée (sinon il partirait d'une base sans son code).
+    // Les plans déjà ouverts gardent leur comportement d'avant (0) ; les nouveaux plans reçoivent 1 à leur ouverture.
+    `
+  ALTER TABLE plans ADD COLUMN wait_for_merge INTEGER NOT NULL DEFAULT 0;
+  `,
   ];
 }
 

@@ -12,6 +12,8 @@ import { createPlanRepo, type PlanRepo } from "../db/plans.js";
 import { startPlanScheduler } from "../orchestrator/scheduler.js";
 import { runDevTask, type DevDeps } from "../dev/pipeline.js";
 import { errorMessage, log } from "../logger.js";
+import { createNotifier, type Notifier } from "../notify/notifier.js";
+import type { NotifyEvent } from "../notify/webhook.js";
 import { SerialQueue } from "../queue.js";
 import { runReview, type PipelineDeps } from "../review/pipeline.js";
 import { createReviewRepo } from "../db/reviews.js";
@@ -31,6 +33,8 @@ export interface TenantDeps extends PipelineDeps {
   /** Journal des écritures de cette personne sur les forges. */
   audit: AuditRepo;
   vault: Vault;
+  /** Envoi des notifications de cette personne vers son webhook (route d'essai des Paramètres). Absent : les notifications ne sont pas disponibles. */
+  notifier?: Notifier;
   enqueueReview: (reviewId: number) => void;
   enqueueDev: (taskId: number) => void;
   queueSize: () => number;
@@ -197,7 +201,11 @@ export class TenantManager {
     const costs = createCostRepo(db, ctx.workspaceId);
     const attachments = createAttachmentStore(path.join(config.dataDir, "attachments"), ctx.workspaceId);
 
-    const reviewDeps: PipelineDeps = { config, forges, costs, reviews, settings, tasks };
+    // Les messages partent vers le webhook de CETTE personne ; un envoi raté ne remonte jamais à ce qui l'a déclenché
+    const notifier = createNotifier(vault);
+    const notify = (event: NotifyEvent): void => void notifier.send(event);
+
+    const reviewDeps: PipelineDeps = { config, forges, costs, reviews, settings, tasks, notify };
     const devDeps: DevDeps = { config, forges, costs, settings, tasks, attachments };
     // Deux files séparées : une review n'attend pas la fin d'une tâche de dev (et inversement) ; la limite commune borne la machine entière
     const reviewQueue = new SerialQueue((id) => limits.review.run(() => (hooks.runReview ?? runReview)(id, reviewDeps)));
@@ -229,7 +237,7 @@ export class TenantManager {
     );
 
     // L'orchestrateur : lance les chats et les exécutions de plans planifiés, et reporte l'avancement des tickets lancés
-    stops.push((hooks.startPlanScheduler ?? startPlanScheduler)({ config, forges, settings, costs, tasks, plans, enqueueDev: (id) => devQueue.push(id) }));
+    stops.push((hooks.startPlanScheduler ?? startPlanScheduler)({ config, forges, settings, costs, tasks, plans, enqueueDev: (id) => devQueue.push(id), notify }));
 
     log.info("tenant.started", { userId: ctx.userId, workspaceId: ctx.workspaceId, forges: forges.all().map((f) => f.connector.kind) });
     return {
@@ -243,6 +251,7 @@ export class TenantManager {
         attachments,
         audit,
         vault,
+        notifier,
         enqueueReview: (id) => reviewQueue.push(id),
         enqueueDev: (id) => devQueue.push(id),
         queueSize: () => reviewQueue.size + devQueue.size,
