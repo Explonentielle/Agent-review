@@ -1,0 +1,16 @@
+# Sauvegarde de la base (scripts/backup.sh), lancée chaque jour par review-agent-backup.timer (voir docs/deploiement.md, section 11).
+# À copier dans ~/.config/systemd/user/ de l'utilisateur dédié, avec le .timer. Une exécution manuelle : systemctl --user start review-agent-backup.service
+[Unit]
+Description=Sauvegarde de la base de review-agent
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/review-agent
+# Un service systemd n'hérite rien de ta session : Docker sans root (client dans ~/bin, socket dans le dossier d'exécution) et le fichier compose de la variante
+Environment=PATH=%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DOCKER_HOST=unix://%t/docker.sock
+Environment=COMPOSE_FILE=docker-compose.hote.yml
+# Nombre de sauvegardes gardées (les plus récentes), partagé avec celles que scripts/deploy.sh fait avant chaque déploiement
+Environment=BACKUP_KEEP=30
+ExecStart=/usr/bin/bash scripts/backup.sh
+TimeoutStartSec=300

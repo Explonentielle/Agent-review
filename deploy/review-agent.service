@@ -25,9 +25,9 @@ Restart=on-failure
 RestartSec=5
 # Arrêt propre : laisse l'outil finir ses écritures puis annuler ses agents
 TimeoutStopSec=30
-# Aucune élévation de droits pour l'outil et ses sous-processus ; /tmp privé
+# Aucune élévation de droits pour l'outil et ses sous-processus
+# Pas de PrivateTmp=true : avec lui l'outil n'atteint pas le Docker sans root (constaté sur le VPS, voir docs/deploiement.md étape 8)
 NoNewPrivileges=true
-PrivateTmp=true
 # Plafonds de l'outil lui-même (les agents ont les leurs, AGENT_MEMORY et AGENT_PIDS) ; exige la délégation de cgroups, voir docs/deploiement.md
 MemoryMax=1G
 TasksMax=512

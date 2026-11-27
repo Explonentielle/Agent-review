@@ -1,0 +1,13 @@
+# Minuteur de la sauvegarde quotidienne de la base (voir review-agent-backup.service et docs/deploiement.md, section 11).
+[Unit]
+Description=Sauvegarde quotidienne de la base de review-agent
+
+[Timer]
+# Chaque nuit à 3 h 30 (heure de la machine), avec un décalage aléatoire de 5 minutes au plus
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=300
+# Une sauvegarde manquée parce que la machine était éteinte est rattrapée au démarrage suivant
+Persistent=true
+
+[Install]
+WantedBy=timers.target
